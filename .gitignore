@@ -1,0 +1,9 @@
+build/
+dist/
+*.o
+*.exe
+*.dll
+*.zip
+steam_appid.txt
+scctlink.log
+__pycache__/
