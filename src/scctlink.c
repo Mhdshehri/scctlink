@@ -25,7 +25,7 @@
 #include "plat.h"
 #include "ui.h"
 
-#define VERSION "0.8.1-vpn"
+#define VERSION "0.8.2-vpn"
 #define SCCT_APPID 13570
 #define SPACEWAR_APPID 480
 #define MAX_PEERS 3
@@ -1832,6 +1832,12 @@ static bool g_vpn_wanted;
 static Tun *g_tun;
 static uint32_t g_vpn_ip;
 static u64 g_vpn_in, g_vpn_out, g_vpn_dropped;
+/* "VPN test" (Details in VPN mode): SCCTLink's own packets through the adapters */
+#define PROBE_PORT 9199
+static sock_t g_probe = BADSOCK;
+static u64 g_test_at;
+static int g_test_sent[3], g_test_got[3], g_test_fail[3];
+static double g_test_rtt;
 static void vpn_drop(const char *why, const uint8_t *d, int n)
 {
     if (++g_vpn_dropped > 40) return;
@@ -1854,6 +1860,8 @@ static bool vpn_in_net(uint32_t a) { const uint8_t *b = (const uint8_t *)&a; ret
 static void vpn_down(void)
 {
     if (!g_tun) return;
+    if (g_probe != BADSOCK) { sock_close(g_probe); g_probe = BADSOCK; }
+    g_test_at = 0;
     tun_close(g_tun);
     g_tun = 0;
     g_vpn_ip = 0;
@@ -1875,6 +1883,7 @@ static bool vpn_up(uint32_t ip)
         return false;
     }
     g_vpn_ip = ip;
+    g_probe = udp_open(0, PROBE_PORT, UDP_BROADCAST);
     char t[16];
     ip_text(ip, t);
     say("VPN mode: your PC is %s on the virtual LAN.", t);
@@ -1924,7 +1933,8 @@ static void vpn_from_adapter(const uint8_t *d, int n)
 {
     IpInfo ii;
     if (!ip_info(d, n, &ii) || ii.src != g_vpn_ip) { vpn_drop("not the game's UDP/TCP", d, n); return; }
-    if (ii.first && !game_port(ii.proto, ii.sport)) { vpn_drop("from a program that is not the game", d, n); return; } /* Windows chatter etc. */
+    bool probe = ii.proto == 17 && ii.sport == PROBE_PORT; /* SCCTLink's own VPN test */
+    if (ii.first && !probe && !game_port(ii.proto, ii.sport)) { vpn_drop("from a program that is not the game", d, n); return; } /* Windows chatter etc. */
     if (vpn_is_bcast(ii.dst)) {
         for (int i = 0; i < g_npeers; i++) vpn_send(&g_peers[i], d, n, &ii);
         return;
@@ -1953,7 +1963,8 @@ static void vpn_from_peer(Peer *p, const uint8_t *d, int n)
         }
     }
     if (!to_me && !bc) return;
-    if (ii.first && !game_port(ii.proto, ii.dport)) { vpn_drop("not for the game", d, n); return; } /* only the game is reachable */
+    bool probe = ii.proto == 17 && ii.dport == PROBE_PORT;
+    if (ii.first && !probe && !game_port(ii.proto, ii.dport)) { vpn_drop("not for the game", d, n); return; } /* only the game is reachable */
     vpn_log(p, false, d, n, &ii);
     if (!tun_write(g_tun, d, n)) vpn_drop("the adapter refused it", d, n);
     else {
@@ -1966,6 +1977,81 @@ static void vpn_from_peer(Peer *p, const uint8_t *d, int n)
     }
 }
 
+static const char *const TEST_KIND[3] = { "direct", "LAN broadcast (10.231.0.255)", "LAN broadcast (255.255.255.255)" };
+
+static void vpn_test_start(void)
+{
+    bool any = false;
+    for (int i = 0; i < g_npeers; i++) any |= g_peers[i].vpn;
+    if (!g_tun || g_probe == BADSOCK || !any) return;
+    memset(g_test_sent, 0, sizeof g_test_sent);
+    memset(g_test_got, 0, sizeof g_test_got);
+    memset(g_test_fail, 0, sizeof g_test_fail);
+    g_test_rtt = 0;
+    g_test_at = now_ms();
+    say("VPN test: sending test packets through the virtual adapter (3 seconds)...");
+    char m[64];
+    for (int k = 0; k < 3; k++) {
+        for (int j = 0; j < (k ? 5 : 20); j++) {
+            for (int i = 0; i < g_npeers; i++) {
+                Peer *p = &g_peers[i];
+                if (!p->vpn) continue;
+                uint32_t to = k == 0 ? p->vpn_ip : k == 1 ? vpn_addr(255) : 0xFFFFFFFFu;
+                sfmt(m, sizeof m, "SCCTPROBE %d %u", k, (unsigned)(now_ms() & 0x7fffffff));
+                if (udp_sendto(g_probe, m, (int)strlen(m), to, PROBE_PORT) < 0) g_test_fail[k]++;
+                else g_test_sent[k]++;
+                if (k) break; /* a broadcast reaches everyone at once */
+            }
+        }
+    }
+}
+
+static void vpn_test_poll(void)
+{
+    if (g_probe == BADSOCK) return;
+    char m[128];
+    for (int k = 0; k < 256; k++) {
+        uint32_t ip; uint16_t port;
+        int r = udp_recvfrom(g_probe, m, (int)sizeof m - 1, &ip, &port);
+        if (r < 0) break;
+        if (r <= 0 || !vpn_in_net(ip) || ip == g_vpn_ip) continue; /* only the other PCs, over the adapter */
+        m[r] = 0;
+        if (!strncmp(m, "SCCTPROBE ", 10)) {
+            int kind = m[10] - '0';
+            static u64 told[3];
+            if (kind >= 0 && kind < 3 && now_ms() - told[kind] > 10000) {
+                told[kind] = now_ms();
+                char t[16];
+                ip_text(ip, t);
+                say("VPN test: test packets from %s arrived here (%s) - this side works.", t, TEST_KIND[kind]);
+            }
+            char a[128];
+            sfmt(a, sizeof a, "SCCTPONG %s", m + 10); /* answer with the same kind and time */
+            udp_sendto(g_probe, a, (int)strlen(a), ip, port);
+        } else if (!strncmp(m, "SCCTPONG ", 9) && g_test_at) {
+            int kind = m[9] - '0';
+            if (kind >= 0 && kind < 3) {
+                g_test_got[kind]++;
+                unsigned sent = 0;
+                for (const char *c = m + 11; *c >= '0' && *c <= '9'; c++) sent = sent * 10 + (unsigned)(*c - '0');
+                g_test_rtt += (double)(((unsigned)(now_ms() & 0x7fffffff)) - sent);
+            }
+        }
+    }
+    if (g_test_at && now_ms() - g_test_at > 3000) {
+        g_test_at = 0;
+        for (int k = 0; k < 3; k++) {
+            if (g_test_fail[k] && !g_test_sent[k]) say("  %s: couldn't be sent from this PC", TEST_KIND[k]);
+            else say("  %s: %d of %d answered%s", TEST_KIND[k], g_test_got[k], g_test_sent[k],
+                     k == 0 && g_test_got[0] ? "" : "");
+        }
+        if (g_test_got[0]) say("  ping over the virtual LAN: %d ms", (int)(g_test_rtt / (g_test_got[0] + g_test_got[1] + g_test_got[2]) + 0.5));
+        if (!g_test_got[0]) say("! VPN test: nothing came back. Check that both of you run this build as administrator, then click Details again.");
+        else if (!g_test_got[1] && !g_test_got[2]) say("! VPN test: direct packets work, but LAN broadcasts don't. The game's LAN list may stay empty.");
+        else say("VPN test: OK - the virtual LAN works between you. The game should see each other in its LAN list.");
+    }
+}
+
 static void vpn_poll(void)
 {
     if (!g_tun) return;
@@ -1974,6 +2060,7 @@ static void vpn_poll(void)
         if (r <= 0) break;
         vpn_from_adapter(g_buf, r);
     }
+    vpn_test_poll();
 }
 
 /* Both sides have the adapter: stop the normal relay for this friend. */
@@ -2690,7 +2777,7 @@ static void handle_cmd(const Cmd *c)
         break;
     case CMD_KICK: kick_peer(c->arg); break;
     case CMD_STATUS: status(false); break;
-    case CMD_DETAILS: status(true); ring_dump("Details"); break;
+    case CMD_DETAILS: status(true); ring_dump("Details"); vpn_test_start(); break;
     case CMD_RECHECK:
         if (!g_steam_ok) { say("Steam isn't running, so the game's folder can't be found."); break; }
         g_nmfs = -1;

@@ -1,4 +1,4 @@
-SCCTLink 0.8.1-vpn - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
+SCCTLink 0.8.2-vpn - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
 ==============================================================================
 
 No VPN (no Hamachi, Radmin or ZeroTier), no port forwarding, no IP addresses.
@@ -13,7 +13,7 @@ Both players need:
   * each other on their Steam friends list
   * this folder unzipped somewhere (Desktop is fine). Keep SCCTLink.exe and
     steam_api.dll together.
-  * the SAME SCCTLink version (0.8.1-vpn) - older versions can't link with it.
+  * the SAME SCCTLink version (0.8.2-vpn) - older versions can't link with it.
 
 
 VPN MODE (EXPERIMENTAL BUILD)
@@ -40,6 +40,11 @@ doesn't have to change anything inside the game's packets.
     can't start), the normal SCCTLink connection is used automatically.
   * The Log says "VPN mode with <friend>: your game sees them at 10.231.0.x"
     when it's on.
+  * VPN TEST (no game needed): once linked in VPN mode, click Details.
+    SCCTLink sends its own test packets through the virtual adapters - the
+    same way the game's packets travel - and the Log shows how many came
+    back (direct and as LAN broadcasts) and the ping. "VPN test: OK" means
+    the virtual LAN works and the games should find each other.
 
 Everyone double-clicks SCCTLink.exe. A window opens (dark, with a Light
 mode switch at the top right).
@@ -180,7 +185,7 @@ TROUBLESHOOTING
     SCCTLink as administrator too (right-click SCCTLink.exe).
 
 
-VERSION 0.8.1-vpn - WHAT IS TESTED
+VERSION 0.8.2-vpn - WHAT IS TESTED
 ----------------------------
 New in 0.6: the friend could see the host's game in the LAN list but not
 join. The game hides the host's real address inside an encrypted packet, so
@@ -205,7 +210,8 @@ packets before a disconnect, with times, so a disconnect can be traced.
 0.7.1: the Mods tab and "Check again"; the check works with real game
 folders (0.7 dropped the big file list).
 0.8-vpn (experimental): VPN mode, see the top of this file.
-0.8.1-vpn: the firewall stays on (Private network + one allow rule). Tested on a
+0.8.1-vpn: the firewall stays on (Private network + one allow rule).
+0.8.2-vpn: VPN test (Details), to check the virtual LAN without the game. Tested on a
 simulated network (virtual adapters on two PCs, the game's discovery, Net-Z
 join, UDP and TCP, untouched); not yet with the real game on Windows.
 

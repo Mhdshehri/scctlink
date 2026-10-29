@@ -664,6 +664,11 @@ def main():
                                       "try:\n print('GOT', s.recvfrom(100))\nexcept OSError: print('NOTHING')"]),
                                capture_output=True, text=True, timeout=10).stdout
         check("NOTHING" in sneak, "another program on the friend's PC can't use the virtual adapter")
+        hv.p.stdin.write("D\n"); hv.p.stdin.flush()  # Details: runs the VPN test
+        check(hv.wait_for(r"direct: 20 of 20 answered", timeout=8) is not None, "VPN test: 20/20 direct test packets answered")
+        check(hv.wait_for(r"LAN broadcast \(10\.231\.0\.255\): 5 of 5 answered", timeout=3) is not None, "VPN test: LAN broadcasts reach the friend")
+        check(hv.wait_for(r"VPN test: OK", timeout=3) is not None, "VPN test: OK")
+        check(jv.wait_for(r"VPN test: test packets from 10\.231\.0\.1 arrived here", timeout=3) is not None, "the friend's side says the test packets arrived")
         hv.p.stdin.write("X\n"); hv.p.stdin.flush()  # Stop
         time.sleep(1.5)
         check("VPN mode: virtual adapter removed" in open(os.path.join(d, "log_HV.txt")).read(), "the adapter is removed when the host clicks Stop")
