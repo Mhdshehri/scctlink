@@ -1,4 +1,4 @@
-SCCTLink 0.6.4 - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
+SCCTLink 0.7 - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
 ==============================================================================
 
 No VPN (no Hamachi, Radmin or ZeroTier), no port forwarding, no IP addresses.
@@ -13,7 +13,7 @@ Both players need:
   * each other on their Steam friends list
   * this folder unzipped somewhere (Desktop is fine). Keep SCCTLink.exe and
     steam_api.dll together.
-  * the SAME SCCTLink version (0.6.4) - older versions can't link with it.
+  * the SAME SCCTLink version (0.7) - older versions can't link with it.
 
 
 HOW TO PLAY
@@ -50,6 +50,14 @@ The box at the bottom has two tabs:
   Log    = everything SCCTLink did. A dot on "Log" means a warning arrived.
            "Copy log" copies it - send it with your friend's when something
            doesn't work.
+GAME FILES CHECK: when you link, SCCTLink compares your game's files with
+your friend's (Steam copies) and shows in the Log what differs, for example
+    only on your PC: system/dinput8.dll
+    different version: system/core.u
+Co-op disconnects when the two games aren't the same: install the same mods
+(same versions) on both PCs, or remove them on both. Settings files (.ini)
+are not compared. Only file names relative to the game folder, sizes and
+checksums are sent - nothing about your PC.
 Other buttons: Details = ping, packet loss, ports (in the Log). Stop = back
 to the start. Host: pick a friend in the list and click Kick to remove them
 (they can't link again until you click Stop).
@@ -146,13 +154,13 @@ TROUBLESHOOTING
     SCCTLink as administrator too (right-click SCCTLink.exe).
 
 
-VERSION 0.6.4 - WHAT IS TESTED
+VERSION 0.7 - WHAT IS TESTED
 ----------------------------
 New in 0.6: the friend could see the host's game in the LAN list but not
 join. The game hides the host's real address inside an encrypted packet, so
 the friend's game tried to reach it directly instead of through Steam.
 SCCTLink 0.6 decrypts that packet, puts in the address that goes through
-Steam, and encrypts it again. Both players need 0.6.4.
+Steam, and encrypts it again. Both players need 0.6.4 or newer.
 0.6.1 also fixes the checksum at the end of the game's packets when
 SCCTLink swaps an address in them (otherwise the game would drop them).
 0.6.2: in 0.6.1 the game stopped listing the host, because the encrypted
@@ -164,6 +172,10 @@ hides every address, and sends them uncompressed (the game accepts both).
 0.6.4: the friend got stuck on "Joining": every game message ends in its
 own checksum byte, and the game silently dropped messages whose address
 SCCTLink had swapped, then asked again forever. SCCTLink now redoes it.
+With 0.6.4 joining works with the real game (tested: host and friend in
+different homes, into the first map).
+0.7: the game files check above, and scctlink.log now keeps the last game
+packets before a disconnect, with times, so a disconnect can be traced.
 
 Tested end to end on a simulated network: two separate "PCs", a stand-in for
 the game that finds LAN games by broadcast (including the real game's
@@ -171,9 +183,7 @@ encrypted discovery packet), embeds its address in packets and uses UDP and
 TCP, and a stand-in for Steam with 10% packet loss and 60 ms delay.
 Packets arrived byte-for-byte exact and in order; the relay added about 1.5 ms.
 Versus was tested the same way with a host and two friends on three "PCs".
-With the real game: linking, seeing the host's game and game traffic work
-(tested in 0.5); joining is what 0.6.4 fixes and is not yet confirmed. If
-something doesn't work, send both scctlink.log files.
+If something doesn't work, send both scctlink.log files.
 
 
 SCCTLink by Mhdshehri. MIT license. Not affiliated with Ubisoft or Valve.

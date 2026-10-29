@@ -1,10 +1,10 @@
-# SCCTLink 0.6.4
+# SCCTLink 0.7
 
 Play **Splinter Cell: Chaos Theory** co-op (2 players) or Spies vs. Mercenaries / Versus (up to 4) with Steam friends: no VPN (no Hamachi, Radmin or ZeroTier), no port forwarding, no IP addresses.
 
 Chaos Theory's online servers are gone, so PC multiplayer only works in **LAN** mode. SCCTLink makes your friends' PCs look like they are on your LAN, and carries the game's traffic through Steam's relay network. The host invites the friend from Steam.
 
-**Download:** `SCCTLink-0.6.4.zip` from [Releases](../../releases). Both players unzip it.
+**Download:** `SCCTLink-0.7.zip` from [Releases](../../releases). Both players unzip it.
 
 ## How to play
 
@@ -17,6 +17,10 @@ Everyone double-clicks **SCCTLink.exe**. It opens a window (the same window as C
 Co-op lobbies hold 2 players, Versus lobbies 4. The **How to** tab ticks off the steps as they happen; **Log** shows everything (Copy log for bug reports). The host can **Kick** a friend.
 
 See [package/README.txt](package/README.txt) for the full guide, FPS/lag tips and troubleshooting.
+
+## Game files check
+
+Co-op disconnects when the two games differ (a mod on one PC only, another patch). When two players link, each SCCTLink lists its game folder (Steam copy): file names relative to the game folder, sizes, and SHA-256 of the program files (`System`, `scripts`, `Versus\System`). It sends the list to the other player and both see what differs. Settings files (`.ini`), logs and saves are left out. Nothing else about the PC is sent.
 
 ## How it works
 
@@ -64,13 +68,13 @@ The build is reproducible: building the same source gives the same SHA-256.
 The tests run on Linux as root. Each player gets their own network namespace (a separate "PC" with its own LAN and broadcast domain), a stand-in for the game, and a mock Steam:
 
 ```sh
-gcc -std=c11 -fsanitize=address,undefined -o build/scctlink_mock src/scctlink.c src/ui_console.c src/lobbycode.c src/plat_posix.c test/steam_mock.c
+gcc -std=c11 -fsanitize=address,undefined -o build/scctlink_mock src/scctlink.c src/ui_console.c src/lobbycode.c src/plat_posix.c src/sha256.c test/steam_mock.c
 sudo python3 test/run_tests.py   # prints ALL OK
 ```
 
-They cover: LAN discovery by broadcast in both directions; the game's real encrypted Net-Z discovery reply and joining at the address inside it; addresses swapped in checksummed game packets on both sides; a second network adapter's address inside an LZO-compressed message; message checksums; the host's address hidden in raw and text form; 2000 mixed-size packets exact and in order; a 300-packet level-load burst; relay delay; TCP streams with a 300 KB message; strangers blocked; programs other than the game blocked; quit and reconnect; invites; joining by short lobby code; Refresh; finding a host Steam shows in the game instead of Spacewar; foreign lobbies refused; join confirmation; Versus with a host and two friends on three separate "PCs"; co-op/Versus lobbies kept apart; and 10% packet loss with 60 ms delay each way.
+They cover: the game files check (a mod on one PC only, another patch, identical games); LAN discovery by broadcast in both directions; the game's real encrypted Net-Z discovery reply and joining at the address inside it; addresses swapped in checksummed game packets on both sides; a second network adapter's address inside an LZO-compressed message; message checksums; the host's address hidden in raw and text form; 2000 mixed-size packets exact and in order; a 300-packet level-load burst; relay delay; TCP streams with a 300 KB message; strangers blocked; programs other than the game blocked; quit and reconnect; invites; joining by short lobby code; Refresh; finding a host Steam shows in the game instead of Spacewar; foreign lobbies refused; join confirmation; Versus with a host and two friends on three separate "PCs"; co-op/Versus lobbies kept apart; and 10% packet loss with 60 ms delay each way.
 
-**Tested with the real game (0.5):** two PCs in different homes linked, and the friend saw the host's game in the LAN list but could not join. The packet log showed why (the encrypted address above); 0.6.4 fixes that. Joining a real game is not yet confirmed. `scctlink.log` shows where it stops if something goes wrong.
+**Tested with the real game:** since 0.6.4, a host and a friend in different homes join each other and get into the first map. `scctlink.log` shows where it stops if something goes wrong, including the last packets before a disconnect.
 
 ## Credits
 

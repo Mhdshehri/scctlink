@@ -25,7 +25,7 @@
 #include "plat.h"
 #include "ui.h"
 
-#define VERSION "0.6.4"
+#define VERSION "0.7"
 #define SCCT_APPID 13570
 #define SPACEWAR_APPID 480
 #define MAX_PEERS 3
@@ -757,6 +757,8 @@ typedef struct {
     uint16_t tx_seq, rx_seq; bool rx_started;
     double rtt; bool have_rtt;
     Rate rate;
+    char *mf; int nmf;        /* the peer's game file list, as it arrives */
+    bool mf_sent, mf_done;
 } Peer;
 
 static Peer g_peers[MAX_PEERS];
@@ -811,17 +813,23 @@ static void stream_close(Peer *p, int i, bool tell)
 
 static void peer_sockets_close(Peer *p)
 {
+    free(p->mf);
+    p->mf = 0;
+    p->nmf = 0;
     for (int i = 0; i < p->nals; i++) sock_close(p->als[i].s);
     for (int i = 0; i < p->nlis; i++) sock_close(p->lis[i].s);
     while (p->nst) stream_close(p, 0, false);
     p->nals = p->nlis = 0;
 }
 
+static void ring_dump(const char *why);
+
 static void drop_peer(u64 id, const char *why)
 {
     for (int i = 0; i < g_npeers; i++) {
         if (g_peers[i].id != id) continue;
         say("- %s disconnected (%s).", who(id), why);
+        ring_dump("the link to a friend ended");
         peer_sockets_close(&g_peers[i]);
         close_session(id);
         g_peers[i] = g_peers[--g_npeers];
@@ -1030,17 +1038,75 @@ static bool memmem_has(const uint8_t *d, int n, const char *needle)
     return false;
 }
 
+/* The last packets each way, kept in memory and written to scctlink.log when a
+   session ends (a friend disconnects, the game closes its ports, Stop, Details),
+   so the log shows what happened right before a disconnect. */
+#define RING 160
+static struct { u64 t; uint8_t out; uint16_t src, dst; int n; uint8_t d[48]; } g_ring[RING];
+static int g_ring_at, g_ring_n;
+static u64 g_t0;
+
+static void ring_add(bool out, uint16_t src, uint16_t dst, const uint8_t *d, int n)
+{
+    int i = g_ring_at;
+    g_ring[i].t = now_ms();
+    g_ring[i].out = out;
+    g_ring[i].src = src;
+    g_ring[i].dst = dst;
+    g_ring[i].n = n;
+    memcpy(g_ring[i].d, d, (size_t)(n < 48 ? n : 48));
+    g_ring_at = (i + 1) % RING;
+    if (g_ring_n < RING) g_ring_n++;
+}
+
+static void ring_dump(const char *why)
+{
+    if (!g_ring_n) return;
+    char line[300];
+    sfmt(line, sizeof line, "---- the last %d game packets before: %s ----", g_ring_n, why);
+    log_line(line);
+    static const char hx[] = "0123456789abcdef";
+    for (int j = 0; j < g_ring_n; j++) {
+        int i = (g_ring_at - g_ring_n + j + RING) % RING;
+        unsigned ms = (unsigned)(g_ring[i].t - g_t0); /* 32-bit: no 64-bit division helper in the Windows build */
+        sfmt(line, sizeof line, "  [%u.%03us] %s %u->%u len %d:", ms / 1000, ms % 1000,
+             g_ring[i].out ? "out" : "in ", (unsigned)g_ring[i].src, (unsigned)g_ring[i].dst, g_ring[i].n);
+        int k = (int)strlen(line), m = g_ring[i].n < 48 ? g_ring[i].n : 48;
+        for (int b = 0; b < m && k < (int)sizeof line - 8; b++) {
+            if (b % 4 == 0) line[k++] = ' ';
+            line[k++] = hx[g_ring[i].d[b] >> 4];
+            line[k++] = hx[g_ring[i].d[b] & 15];
+        }
+        line[k] = 0;
+        log_line(line);
+    }
+    log_line("---- end ----");
+    g_ring_n = 0;
+}
+
 /* Packet log for finding out what the game sends (only in scctlink.log):
-   the first packets each way, after this PC's addresses were hidden. */
+   the first packets each way, the first ones on every new port pair, and
+   every PRUDP disconnect, after this PC's addresses were hidden. */
 #define CAPTURE_MAX 80
 static void capture(Peer *p, bool out, uint16_t src, uint16_t dst, const uint8_t *d, int n, const char *what)
 {
+    ring_add(out, src, dst, d, n);
+    static struct { uint16_t a, b; uint8_t out, cnt; } pairs[64];
+    static int npairs;
+    int pi;
+    for (pi = 0; pi < npairs; pi++) if (pairs[pi].a == src && pairs[pi].b == dst && pairs[pi].out == out) break;
+    if (pi == npairs && npairs < 64) { pairs[pi].a = src; pairs[pi].b = dst; pairs[pi].out = out; pairs[pi].cnt = 0; npairs++; }
+    bool new_pair = pi < 64 && pairs[pi].cnt < 20;
+    if (pi < 64 && pairs[pi].cnt < 255) pairs[pi].cnt++;
+    bool disc = n > NETZ_HDR && !netz_user(d, n) && (d[2] & 7) == 3;
     u64 *cnt = out ? &p->cap_out : &p->cap_in;
-    if (*cnt >= CAPTURE_MAX && !what) return;
+    if (*cnt >= CAPTURE_MAX && !what && !new_pair && !disc) return;
     (*cnt)++;
     char line[600];
-    sfmt(line, sizeof line, "  %s %s %u->%u len %d%s%s:", out ? "out" : "in ", out ? "to" : "from",
-         (unsigned)src, (unsigned)dst, n, what ? " " : "", what ? what : "");
+    unsigned ms = (unsigned)(now_ms() - g_t0);
+    sfmt(line, sizeof line, "  [%u.%03us] %s %s %u->%u len %d%s%s:", ms / 1000, ms % 1000,
+         out ? "out" : "in ", out ? "to" : "from",
+         (unsigned)src, (unsigned)dst, n, disc ? " (PRUDP DISCONNECT)" : what ? " " : "", what ? what : "");
     int k = (int)strlen(line);
     static const char hx[] = "0123456789abcdef";
     for (int i = 0; i < n && i < 160 && k < (int)sizeof line - 8; i++) {
@@ -1744,6 +1810,221 @@ static int scan_for_host(bool verbose)
     return n;
 }
 
+/* ---------- game files check ----------
+   Co-op drops when the two games aren't identical (a mod on one PC only, a
+   different patch). Each SCCTLink lists the game's files - name, size and
+   SHA-256 for the program files - and sends the list to the other; both
+   show what differs. Settings (.ini) and logs are left out: they differ
+   between PCs on purpose. Paths are relative to the game folder, so nothing
+   about the PC (user name, drive) is sent. */
+#define MF_MAX 2000
+#define MF_HASH_MAX (64u << 20) /* bigger files: compared by size only */
+typedef struct { char path[100]; u64 size; char hash[17]; } MFile;
+static MFile g_mfs[MF_MAX];
+static int g_nmfs = -1;           /* -1: not made yet; 0: game folder not found */
+static char *g_mf_text;
+static int g_mf_len;
+static char g_mf_dir[700];
+
+bool sha256_file(const char *path, char hex[65]);
+
+static bool mf_skip(const char *name)
+{
+    const char *dot = 0;
+    for (const char *c = name; *c; c++) if (*c == '.') dot = c;
+    if (!dot) return false;
+    static const char *const ext[] = { ".ini", ".log", ".txt", ".sav", ".bak", ".tmp", ".dmp", ".lnk", ".url",
+                                       ".pdf", ".htm", ".html", ".rtf", ".old", ".crash" };
+    for (unsigned i = 0; i < sizeof ext / sizeof *ext; i++) {
+        const char *a = dot, *b = ext[i];
+        while (*a && *b && ((*a | 32) == *b || *a == *b)) { a++; b++; }
+        if (!*a && !*b) return true;
+    }
+    return false;
+}
+
+typedef struct { const char *rel; bool hash; int depth; } MfWalk; /* rel: path as on disk */
+static void mf_walk(const char *rel, bool hash, int depth);
+
+static void mf_add(void *ctx, const char *name, bool is_dir, u64 size)
+{
+    MfWalk *w = ctx;
+    char rel[200], key[200];
+    sfmt(rel, sizeof rel, "%s%s%s", w->rel, w->rel[0] ? "/" : "", name);
+    memcpy(key, rel, sizeof key);
+    for (char *c = key; *c; c++) if (*c >= 'A' && *c <= 'Z') *c = (char)(*c + 32); /* Windows ignores case */
+    if (is_dir) {
+        if (w->depth > 0) {
+            /* program folders (System, scripts, Versus\System...) get hashed */
+            bool h = w->hash || !strcmp(key, "system") || !strcmp(key, "scripts") || !strcmp(key, "versus")
+                     || !strcmp(key, "versus/system") || strstr(key, "/scripts") || strstr(key, "/plugins");
+            mf_walk(rel, h, w->depth - 1);
+        }
+        return;
+    }
+    if (mf_skip(name) || g_nmfs >= MF_MAX || strlen(key) >= sizeof g_mfs[0].path) return;
+    MFile *f = &g_mfs[g_nmfs++];
+    memcpy(f->path, key, strlen(key) + 1);
+    f->size = size;
+    memcpy(f->hash, "-", 2);
+    if (w->hash && size <= MF_HASH_MAX) {
+        char full[1000], hex[65];
+        sfmt(full, sizeof full, "%s" PATHSEP "%s", g_mf_dir, rel);
+#ifdef _WIN32
+        for (char *c = full; *c; c++) if (*c == '/') *c = '\\';
+#endif
+        if (sha256_file(full, hex)) { memcpy(f->hash, hex, 16); f->hash[16] = 0; }
+    }
+}
+
+static void mf_walk(const char *rel, bool hash, int depth)
+{
+    char dir[1000];
+    if (rel[0]) sfmt(dir, sizeof dir, "%s" PATHSEP "%s", g_mf_dir, rel);
+    else sfmt(dir, sizeof dir, "%s", g_mf_dir);
+#ifdef _WIN32
+    for (char *c = dir; *c; c++) if (*c == '/') *c = '\\';
+#endif
+    MfWalk w = { rel, hash, depth };
+    dir_list(dir, mf_add, &w);
+}
+
+static int mf_cmp(const void *a, const void *b) { return strcmp(((const MFile *)a)->path, ((const MFile *)b)->path); }
+
+/* qsort isn't in the Windows build's import list: a small insertion sort. */
+static void mf_sort(MFile *f, int n)
+{
+    static MFile t;
+    for (int i = 1; i < n; i++) {
+        t = f[i];
+        int j = i - 1;
+        while (j >= 0 && mf_cmp(&f[j], &t) > 0) { f[j + 1] = f[j]; j--; }
+        f[j + 1] = t;
+    }
+}
+
+/* Make this PC's list once (it takes a second or two: the program files are hashed). */
+static void mf_make(void)
+{
+    if (g_nmfs >= 0) return;
+    g_nmfs = 0;
+    say("Checking the game files (takes a few seconds the first time)...");
+    g_mf_dir[0] = 0;
+    if (!(g_steam_ok && AP && S.Apps_GetAppInstallDir && S.Apps_GetAppInstallDir(AP, SCCT_APPID, g_mf_dir, sizeof g_mf_dir) > 0) || !g_mf_dir[0]) {
+        note("game files check: the game's folder wasn't found (not a Steam copy?)");
+    } else {
+        u64 t = now_ms();
+        mf_walk("", false, 3);
+        mf_sort(g_mfs, g_nmfs);
+        note("game files check: %d files listed in %d ms", g_nmfs, (int)(now_ms() - t));
+    }
+    free(g_mf_text);
+    g_mf_text = malloc((size_t)g_nmfs * 140 + 16);
+    int k = 0;
+    if (!g_mf_text) return;
+    for (int i = 0; i < g_nmfs; i++) {
+        char sz[24];
+        u64_to_str(g_mfs[i].size, sz);
+        sfmt(g_mf_text + k, 140, "%s\t%s\t%s\n", g_mfs[i].path, sz, g_mfs[i].hash);
+        k += (int)strlen(g_mf_text + k);
+    }
+    g_mf_len = k;
+}
+
+/* Send the list in pieces: 'M' PROTO index count bytes... (index from 0). */
+#define MF_CHUNK 48000
+static void mf_send(Peer *p)
+{
+    if (p->mf_sent) return;
+    p->mf_sent = true;
+    mf_make();
+    int count = g_mf_len ? (g_mf_len + MF_CHUNK - 1) / MF_CHUNK : 1;
+    static uint8_t buf[MF_CHUNK + 8];
+    for (int i = 0; i < count; i++) {
+        int off = i * MF_CHUNK, len = g_mf_len - off < MF_CHUNK ? g_mf_len - off : MF_CHUNK;
+        if (len < 0) len = 0;
+        buf[0] = 'M'; buf[1] = PROTO; buf[2] = (uint8_t)i; buf[3] = (uint8_t)count;
+        buf[4] = g_nmfs > 0 ? 1 : 0; /* 0: "I couldn't find my game folder" */
+        if (len) memcpy(buf + 5, g_mf_text + off, (size_t)len);
+        send_ctl(p->id, buf, 5 + len);
+    }
+}
+
+static bool mf_parse_line(const char *s, int n, MFile *f)
+{
+    int t1 = -1, t2 = -1;
+    for (int i = 0; i < n; i++) if (s[i] == '\t') { if (t1 < 0) t1 = i; else { t2 = i; break; } }
+    if (t1 <= 0 || t2 < 0 || t1 >= (int)sizeof f->path) return false;
+    memcpy(f->path, s, (size_t)t1); f->path[t1] = 0;
+    char num[24]; int nl = t2 - t1 - 1; if (nl <= 0 || nl > 22) return false;
+    memcpy(num, s + t1 + 1, (size_t)nl); num[nl] = 0;
+    f->size = str_to_u64(num);
+    int hl = n - t2 - 1; if (hl <= 0 || hl > 16) return false;
+    memcpy(f->hash, s + t2 + 1, (size_t)hl); f->hash[hl] = 0;
+    return true;
+}
+
+static void mf_report(Peer *p, bool they_found)
+{
+    char them[96];
+    sfmt(them, sizeof them, "%s", who(p->id));
+    if (g_nmfs <= 0 || !they_found) {
+        say("Game files check: skipped - the game's folder wasn't found on %s (only Steam copies can be checked).",
+            g_nmfs <= 0 && !they_found ? "either PC" : g_nmfs <= 0 ? "your PC" : "their PC");
+        return;
+    }
+    static MFile theirs[MF_MAX];
+    int nt = 0;
+    for (int o = 0; o < p->nmf && nt < MF_MAX;) {
+        int e = o;
+        while (e < p->nmf && p->mf[e] != '\n') e++;
+        if (mf_parse_line(p->mf + o, e - o, &theirs[nt])) nt++;
+        o = e + 1;
+    }
+    mf_sort(theirs, nt);
+    int diffs = 0, shown = 0;
+    char line[300], their_pc[120];
+    sfmt(their_pc, sizeof their_pc, "only on %s's PC", them);
+    int i = 0, j = 0;
+    while (i < g_nmfs || j < nt) {
+        int c = i >= g_nmfs ? 1 : j >= nt ? -1 : strcmp(g_mfs[i].path, theirs[j].path);
+        const char *what = 0, *path = 0;
+        if (c < 0) { what = "only on your PC"; path = g_mfs[i++].path; }
+        else if (c > 0) { what = their_pc; path = theirs[j++].path; }
+        else {
+            bool same = g_mfs[i].size == theirs[j].size && !strcmp(g_mfs[i].hash, theirs[j].hash);
+            if (!same) { what = "different version"; path = g_mfs[i].path; }
+            i++; j++;
+        }
+        if (!what) continue;
+        if (!diffs++) say("! Game files differ from %s's. Co-op can disconnect when the games aren't the same:", them);
+        if (shown < 25) { sfmt(line, sizeof line, "    %s: %s", what, path); say("%s", line); shown++; }
+    }
+    if (!diffs) { say("Game files check: same as %s's (%d files).", them, g_nmfs); return; }
+    if (diffs > shown) say("    ...and %d more (all in scctlink.log)", diffs - shown);
+    say("  Make both games the same: the same mods (same versions) on both PCs, or none.");
+    ui_alert("game files differ");
+}
+
+static void mf_recv(Peer *p, const uint8_t *m, int n)
+{
+    if (n < 5 || p->mf_done) return;
+    int idx = m[2], count = m[3];
+    if (idx == 0) { free(p->mf); p->mf = 0; p->nmf = 0; }
+    int len = n - 5;
+    if (p->nmf + len > MF_MAX * 140) return;
+    char *nb = realloc(p->mf, (size_t)(p->nmf + len + 1));
+    if (!nb) return;
+    p->mf = nb;
+    memcpy(p->mf + p->nmf, m + 5, (size_t)len);
+    p->nmf += len;
+    if (idx + 1 < count) return;
+    p->mf_done = true;
+    mf_send(p); /* make sure they get ours too */
+    mf_make();
+    mf_report(p, m[4] != 0);
+}
+
 /* ---------- control messages ---------- */
 
 static void on_ctl(u64 from, const uint8_t *m, int n)
@@ -1775,6 +2056,7 @@ static void on_ctl(u64 from, const uint8_t *m, int n)
             if (!p) { say("! %s tried to join, but the game is full.", who(from)); return; }
         }
         p->last_heard = now_ms();
+        if (c == 'M') { if (p->welcomed) mf_recv(p, m, n); return; }
         if (c == 'H') {
             if (n < 2 || m[1] != PROTO) {
                 say("! %s runs a different SCCTLink version. Both of you need the same version (" VERSION ").", who(from));
@@ -1800,12 +2082,14 @@ static void on_ctl(u64 from, const uint8_t *m, int n)
             memcpy(w + 10, VERSION, (size_t)vl);
             send_ctl(from, w, 10 + vl);
             send_ports(p);
+            mf_send(p);
             for (int i = 0; i < p->nrudp; i++) alias_get(p, p->rudp[i], true);
             listeners_update(p);
         }
     } else {
         if (from != g_host || !p) return;
         g_host_last = now_ms();
+        if (c == 'M') { if (p->welcomed) mf_recv(p, m, n); return; }
         if (c == 'Z') {
             say("! %s removed you from their game (kicked). You can't link to it again until they host again.", who(g_host));
             if (g_nrejected < 16) g_rejected[g_nrejected++] = g_lobby;
@@ -1833,8 +2117,10 @@ static void on_ctl(u64 from, const uint8_t *m, int n)
             for (int i = 0; i < p->nrudp; i++) alias_get(p, p->rudp[i], true);
             listeners_update(p);
             linked_message();
+            mf_send(p);
         } else if (c == 'B') {
             say("! %s closed SCCTLink.", who(g_host));
+            ring_dump("the host closed SCCTLink");
             lobby_gone();
             return;
         }
@@ -1963,6 +2249,7 @@ static void reset_all(void)
 static void stop_mode(bool quiet)
 {
     if (g_mode == MODE_IDLE) return;
+    ring_dump("Stop");
     for (int i = 0; i < g_npeers; i++) send_ctl1(g_peers[i].id, 'B');
     for (int i = 0; i < 20; i++) { S.MD_RunFrame(g_pipe); sleep_ms(10); } /* flush goodbyes */
     if (g_lobby) S.MM_LeaveLobby(MM, g_lobby);
@@ -2060,7 +2347,7 @@ static void handle_cmd(const Cmd *c)
         break;
     case CMD_KICK: kick_peer(c->arg); break;
     case CMD_STATUS: status(false); break;
-    case CMD_DETAILS: status(true); break;
+    case CMD_DETAILS: status(true); ring_dump("Details"); break;
     case CMD_SET_VERSUS:
         if (g_mode != MODE_IDLE) { say("Click Stop first, then switch between Co-op and Versus."); break; }
         if ((c->arg != 0) != g_versus) {
@@ -2078,6 +2365,7 @@ void engine_run(const EngineOpts *o, Cmd first)
 {
     g_no_launch = o->no_launch;
     g_verbose = o->verbose;
+    g_t0 = now_ms();
     g_max_players_opt = o->max_players;
     if (o->exe && o->exe[0]) {
         static char ex[64];
@@ -2119,6 +2407,7 @@ void engine_run(const EngineOpts *o, Cmd first)
                 }
                 catchers_update();
                 note("game ports changed: %d UDP, %d TCP listening", G.nudp, G.ntcpl);
+                if (!G.nudp) ring_dump("the game closed its network ports");
             }
             poll_catchers();
             for (int i = 0; i < g_npeers; i++) {

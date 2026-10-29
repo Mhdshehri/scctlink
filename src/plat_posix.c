@@ -347,3 +347,21 @@ void log_line(const char *text)
     fprintf(f, "%s\n", text);
     fclose(f);
 }
+
+#include <dirent.h>
+#include <sys/stat.h>
+void dir_list(const char *dir, DirFn fn, void *ctx)
+{
+    DIR *d = opendir(dir);
+    if (!d) return;
+    struct dirent *e;
+    while ((e = readdir(d))) {
+        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+        char path[1024];
+        snprintf(path, sizeof path, "%s/%s", dir, e->d_name);
+        struct stat st;
+        if (stat(path, &st) != 0) continue;
+        fn(ctx, e->d_name, S_ISDIR(st.st_mode), (u64)st.st_size);
+    }
+    closedir(d);
+}

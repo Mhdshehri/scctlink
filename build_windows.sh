@@ -21,7 +21,8 @@ mkdef kernel32 Sleep@4 GetTickCount64@0 SetConsoleCtrlHandler@8 GetModuleFileNam
     CreateToolhelp32Snapshot@8 Process32First@8 Process32Next@8 CloseHandle@4 GetCurrentProcessId@0 \
     GetFileAttributesA@4 CreateProcessA@40 \
     CreateThread@24 WaitForSingleObject@8 InitializeCriticalSection@4 EnterCriticalSection@4 \
-    LeaveCriticalSection@4 MultiByteToWideChar@24 WideCharToMultiByte@32 GetModuleHandleW@4 GlobalFree@4
+    LeaveCriticalSection@4 MultiByteToWideChar@24 WideCharToMultiByte@32 GetModuleHandleW@4 GlobalFree@4 \
+    FindFirstFileA@8 FindNextFileA@8 FindClose@4
 mkdef user32 OpenClipboard@4 EmptyClipboard@0 SetClipboardData@8 GetClipboardData@4 CloseClipboard@0 \
     RegisterClassExW@4 CreateWindowExW@48 DefWindowProcW@16 GetMessageW@16 TranslateMessage@4 \
     DispatchMessageW@4 IsDialogMessageW@8 PostQuitMessage@4 SendMessageW@16 SetWindowTextW@8 \

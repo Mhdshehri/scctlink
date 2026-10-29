@@ -59,6 +59,9 @@ int clipboard_get(char *out, int n); /* text on the clipboard, 0 if none */
 #define KEY_PASTE 22                  /* key_poll() value for Ctrl+V */
 void open_url(const char *url);
 bool file_exists(const char *path);
+/* Files and folders directly inside dir (not recursive, no "." / ".."). */
+typedef void (*DirFn)(void *ctx, const char *name, bool is_dir, u64 size);
+void dir_list(const char *dir, DirFn fn, void *ctx);
 bool run_program(const char *exe, const char *args, const char *dir); /* start it, don't wait */
 bool game_is_running(const char *exe_prefix);
 #ifdef _WIN32

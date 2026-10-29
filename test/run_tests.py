@@ -573,6 +573,50 @@ def main():
         check("[alert] friend linked" in hout, "host got the 'friend linked' alert")
         jk.stop()
 
+        print("[16] game files check: a mod on one PC only is reported on both sides")
+        gd = os.path.join(d, "games")
+
+        def game_dir(name, files):
+            root = os.path.join(gd, name)
+            for rel, data in files.items():
+                path = os.path.join(root, *rel.split("/"))
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "wb") as f:
+                    f.write(data)
+            return root
+        base = {"System/splintercell3.exe": b"MZ" + b"\1" * 5000, "System/Core.u": b"core" * 300,
+                "Maps/1_1_0Tbilisi.scl": b"map" * 900, "System/SplinterCell3.ini": b"[Engine]\nres=1920\n"}
+        modded = dict(base)
+        modded["System/dinput8.dll"] = b"MZasi-loader"
+        modded["System/scripts/SplinterCellChaosTheory.WidescreenFix.asi"] = b"MZwsfix"
+        modded["System/SplinterCell3.ini"] = b"[Engine]\nres=2560\n"  # settings differ on purpose: not reported
+        other = dict(base)
+        other["System/Core.u"] = b"core" * 299 + b"CORE"  # same size, other content (another patch)
+        ga, gb, gc = game_dir("a", modded), game_dir("b", other), game_dir("c", base)
+        hm = relay(A, "HM", 1191, "1192", ["host"], d, {"MOCK_GAME_DIR": ga})
+        procs.append(hm)
+        check(hm.wait_for(r"Lobby is ready") is not None, "host ready")
+        jm = relay(B, "JM", 1192, "1191", ["join", "--no-launch", "--yes"], d, {"MOCK_GAME_DIR": gb})
+        procs.append(jm)
+        check(jm.wait_for(r"Connected to user1191 through Steam") is not None, "friend linked")
+        check(hm.wait_for(r"Game files differ from user1192's", timeout=15) is not None, "host is told the games differ")
+        check(hm.wait_for(r"only on your PC: system/dinput8\.dll", timeout=3) is not None, "...the mod loader only on the host's PC")
+        check(hm.wait_for(r"only on your PC: system/scripts/splintercellchaostheory\.widescreenfix\.asi", timeout=3) is not None,
+              "...the widescreen fix only on the host's PC")
+        check(hm.wait_for(r"different version: system/core\.u", timeout=3) is not None, "...a game file with the same size but other content")
+        check(jm.wait_for(r"only on user1191's PC: system/dinput8\.dll", timeout=15) is not None, "the friend sees the same, from their side")
+        check("splintercell3.ini" not in hm.log + jm.log, "settings files (.ini) are not compared")
+        check(gd not in hm.log + jm.log and gd not in open(os.path.join(d, "log_HM.txt")).read(), "the game folder's path is never sent or logged")
+        hm.stop(); jm.stop()
+        hs = relay(A, "HS", 1193, "1194", ["host"], d, {"MOCK_GAME_DIR": gc})
+        procs.append(hs)
+        check(hs.wait_for(r"Lobby is ready") is not None, "host ready")
+        js = relay(B, "JS", 1194, "1193", ["join", "--no-launch", "--yes"], d, {"MOCK_GAME_DIR": game_dir("d", base)})
+        procs.append(js)
+        check(js.wait_for(r"Game files check: same as user1193's \(3 files\)", timeout=15) is not None, "identical games: 'same' on the friend's side")
+        check(hs.wait_for(r"Game files check: same as user1194's", timeout=15) is not None, "...and on the host's side")
+        hs.stop(); js.stop()
+
         print("[13] bad internet: 10% packet loss each way and 60 ms delay each way")
         h10, j10, hg10, jg10 = session("    (setup)", d, A, B, extra={"MOCK_LOSS": "10", "MOCK_DELAY_MS": "60"}, n_stream=1000)
         procs += [h10, j10, hg10, jg10]

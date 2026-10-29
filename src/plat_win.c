@@ -25,6 +25,13 @@ IMP void *WINAPI LoadLibraryExA(const char *path, void *file, DWORD flags);
 IMP void *WINAPI GetProcAddress(void *mod, const char *name);
 IMP HANDLE WINAPI CreateToolhelp32Snapshot(DWORD flags, DWORD pid);
 IMP DWORD WINAPI GetFileAttributesA(const char *path);
+typedef struct {
+    DWORD attr; DWORD t[6]; DWORD size_hi, size_lo; DWORD r0, r1;
+    char name[260]; char alt[14];
+} FindDataA;
+IMP HANDLE WINAPI FindFirstFileA(const char *pattern, FindDataA *fd);
+IMP int WINAPI FindNextFileA(HANDLE h, FindDataA *fd);
+IMP int WINAPI FindClose(HANDLE h);
 typedef struct { DWORD cb; char *reserved, *desktop, *title; DWORD x, y, w, h, cx, cy, fill, flags;
                  uint16_t show, reserved2; void *reserved3; HANDLE in, out, err; } StartupInfoA; /* 68 bytes */
 typedef struct { HANDLE process, thread; DWORD pid, tid; } ProcInfo;
@@ -568,4 +575,21 @@ void log_line(const char *text)
     fwrite(text, 1, strlen(text), f);
     fwrite("\r\n", 1, 2, f);
     fflush(f);
+}
+
+void dir_list(const char *dir, DirFn fn, void *ctx)
+{
+    char pat[1024];
+    size_t L = strlen(dir);
+    if (L > sizeof pat - 4) return;
+    memcpy(pat, dir, L);
+    memcpy(pat + L, "\\*", 3);
+    FindDataA fd;
+    HANDLE h = FindFirstFileA(pat, &fd);
+    if (h == (HANDLE)(intptr_t)-1) return;
+    do {
+        if (!strcmp(fd.name, ".") || !strcmp(fd.name, "..")) continue;
+        fn(ctx, fd.name, (fd.attr & 0x10) != 0, ((u64)fd.size_hi << 32) | fd.size_lo);
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
 }
