@@ -51,21 +51,23 @@ s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 def req(name, code, addr):
     fcntl.ioctl(s, code, struct.pack('16sH2s4s8s', name, socket.AF_INET, b'\0\0', socket.inet_aton(addr), b'\0' * 8))
 req(b'lo:1', 0x8916, sys.argv[1]); req(b'lo:1', 0x891c, '255.255.255.0'); req(b'lo:1', 0x891a, sys.argv[2])
+if len(sys.argv) > 3:  # a second network adapter (address of another length), like Wi-Fi + Ethernet
+    req(b'lo:2', 0x8916, sys.argv[3]); req(b'lo:2', 0x891c, '255.255.255.0')
 fl = struct.unpack('16sh14s', fcntl.ioctl(s, 0x8913, struct.pack('16sh14s', b'lo', 0, b'')))[1]
 fcntl.ioctl(s, 0x8914, struct.pack('16sh14s', b'lo', fl | 1, b''))
 """
 
 
 class PC:
-    def __init__(self, name, ip):
-        self.name, self.ip = name, ip
+    def __init__(self, name, ip, ip2=None):
+        self.name, self.ip, self.ip2 = name, ip, ip2
         self.bcast = ip.rsplit(".", 1)[0] + ".255"
         os.makedirs(NSDIR, exist_ok=True)
         self.path = os.path.join(NSDIR, "scct_" + name)
         self.close()
         open(self.path, "w").close()
         subprocess.check_call(["unshare", "--net=" + self.path, "true"])
-        subprocess.check_call(["nsenter", "--net=" + self.path, sys.executable, "-I", "-c", CFG, ip, self.bcast])
+        subprocess.check_call(["nsenter", "--net=" + self.path, sys.executable, "-I", "-c", CFG, ip, self.bcast] + ([ip2] if ip2 else []))
 
     def cmd(self, args):
         return ["nsenter", "--net=" + self.path] + args
@@ -128,7 +130,7 @@ def relay(pc, name, mock_id, friends, args, mockdir, extra=None, stdin=subproces
 
 def fake(pc, role, *extra, name="splintercell3"):
     return Proc("game-" + pc.name, pc.cmd([sys.executable, "-I", FAKE, role, pc.ip, pc.bcast] + [str(x) for x in extra]),
-                {"FAKE_NAME": name})
+                dict({"FAKE_NAME": name}, **({"FAKE_IP2": pc.ip2} if getattr(pc, "ip2", None) else {})))
 
 
 def is_alias(ip):
@@ -161,7 +163,7 @@ def main():
         return 1
     d = tempfile.mkdtemp(prefix="scctlink-mock-")
     os.chmod(d, 0o777)
-    A = PC("a", "10.99.0.1")   # host PC
+    A = PC("a", "10.99.0.1", "10.88.200.240")   # host PC, with a second adapter
     B = PC("b", "10.42.7.23")  # joiner PC: a different LAN, as over the internet
     procs = []
     try:
@@ -204,6 +206,15 @@ def main():
               f"Net-Z: the joiner's own address in its game packets was replaced, checksum still valid ({r.get('netz_hello')})")
         check(r.get("netz_stations") == r.get("announce_from"),
               f"Net-Z: the host's address in its game packets was replaced, checksum still valid ({r.get('netz_stations')})")
+        st2 = r.get("netz_stations2") or ["", False]
+        same = False
+        try:
+            same = socket.inet_aton(st2[0]) == socket.inet_aton(r.get("announce_from", ""))
+        except OSError:
+            pass
+        check(same and st2[1] is True,
+              f"Net-Z: the host's SECOND adapter address inside an LZO-compressed message was replaced too, and joining there works ({st2})")
+        check("10.88.200.240" not in jg.log, "the host's second address never reached the joiner's game")
         m = hg.wait_for(r"LOBBY CLIENT (\S+)", 2)
         check(m is not None and is_alias(m.group(1)), f"host's game sees the joiner at a loopback address ({m and m.group(1)})")
         check("10.42.7.23" not in hg.log, "the joiner's real address never reached the host's game")

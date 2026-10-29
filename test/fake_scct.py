@@ -91,6 +91,127 @@ def netz_data_open(p):
     return p[11:-1]
 
 
+def lzo_pack(data, ref=None):
+    """A real LZO1X stream: literals, one back-reference (ref = (start, length)
+    of a repeat inside data) and the end marker. Enough to hide text the way
+    the real game's compressed messages do."""
+    def lit_first(b):
+        assert 4 <= len(b) <= 238
+        return bytes([17 + len(b)]) + b
+
+    def lit(b):
+        n = len(b) - 3
+        assert n >= 1
+        if n <= 15:
+            return bytes([n]) + b
+        out = bytearray([0])
+        n -= 15
+        while n > 255:
+            out.append(0)
+            n -= 255
+        return bytes(out) + bytes([n]) + b
+    if not ref:
+        out = lit_first(data[:200])
+        rest = data[200:]
+        if rest:
+            out += bytes([0x20 | 1, 0, 0])  # (not used: messages stay short)
+        return out + b"\x11\x00\x00"
+    start, length = ref
+    src = data.index(data[start:start + length])  # earlier copy
+    assert src < start and 3 <= length - 2 <= 31
+    dist = start - src
+    out = lit_first(data[:start])
+    out += bytes([0x20 | (length - 2), ((dist - 1) << 2) & 0xFF, (dist - 1) >> 6])
+    out += lit(data[start + length:])
+    return out + b"\x11\x00\x00"
+
+
+def lzo_unpack(src):
+    """LZO1X decompression (the joiner's game reads the message like the real one)."""
+    out = bytearray()
+    ip = 0
+
+    def take(k):
+        nonlocal ip
+        b = src[ip:ip + k]
+        ip += k
+        return b
+    t = src[ip]
+    ip += 1
+    state = 0
+    if t > 17:
+        out += take(t - 17)
+        state = 4
+        t = src[ip]; ip += 1
+    while True:
+        if state == 0:
+            if t < 16:
+                if t == 0:
+                    while src[ip] == 0:
+                        t += 255; ip += 1
+                    t += 15 + src[ip]; ip += 1
+                out += take(t + 3)
+                state = 4
+                t = src[ip]; ip += 1
+                if t < 16:
+                    m = len(out) - 0x801 - (t >> 2) - (src[ip] << 2); ip += 1
+                    out += out[m:m + 3]
+                    state = t & 3
+                    out += take(state)
+                    t = src[ip]; ip += 1
+                    continue
+        elif t < 16:
+            m = len(out) - 1 - (t >> 2) - (src[ip] << 2); ip += 1
+            out += out[m:m + 2]
+            state = t & 3
+            out += take(state)
+            t = src[ip]; ip += 1
+            continue
+        if t >= 64:
+            ln = (t >> 5) - 1
+            m = len(out) - 1 - ((t >> 2) & 7) - (src[ip] << 3); ip += 1
+            b0 = t
+        elif t >= 32:
+            ln = t & 31
+            if ln == 0:
+                while src[ip] == 0:
+                    ln += 255; ip += 1
+                ln += 31 + src[ip]; ip += 1
+            b0, b1 = src[ip], src[ip + 1]; ip += 2
+            m = len(out) - 1 - ((b0 | b1 << 8) >> 2)
+        else:
+            m = len(out) - ((t & 8) << 11)
+            ln = t & 7
+            if ln == 0:
+                while src[ip] == 0:
+                    ln += 255; ip += 1
+                ln += 7 + src[ip]; ip += 1
+            b0, b1 = src[ip], src[ip + 1]; ip += 2
+            m -= (b0 | b1 << 8) >> 2
+            if m == len(out):
+                return bytes(out)
+            m -= 0x4000
+        for k in range(ln + 2):
+            out.append(out[m + k])
+        state = b0 & 3
+        out += take(state)
+        t = src[ip]; ip += 1
+
+
+def quazal_msg(body):  # u32 length, 1 byte, body (as the real game's messages)
+    return struct.pack("<I", len(body)) + b"\x01" + body
+
+
+def quazal_payload(m):
+    """Message from a DATA payload: ratio byte 0 = plain, else LZO."""
+    if not m:
+        return None
+    raw = m[1:] if m[0] == 0 else lzo_unpack(m[1:])
+    if len(raw) < 5 or struct.unpack_from("<I", raw)[0] + 5 != len(raw):
+        return None
+    return raw[5:]
+
+
 def netz_open(p):
     import hashlib
     if len(p) < 12 or p[2] & 7 != 5 or netz_checksum(p[:-1]) != p[-1]:
@@ -188,6 +309,20 @@ def host(ip, bcast):
             if m.startswith(b"HELLO "):  # the joiner's own station URL, as Net-Z sends it
                 said = m[6:].split(b"prudp:/address=", 1)[-1].split(b";", 1)[0].decode()
                 m = b"URLOK" if said == a[0] else b"URLBAD " + said.encode()
+            elif m == b"STATIONS2":  # both adapters' URLs, LZO-compressed like the real game
+                ip2 = os.environ.get("FAKE_IP2", ip)
+                u1 = f"prudp:/address={ip};port={NETZ_GAME}".encode() + b"\0"
+                u2 = f"prudp:/address={ip2};port={NETZ_GAME}".encode() + b"\0"
+                body = b"\x00\x10\x03" + struct.pack("<H", len(u1)) + u1 + struct.pack("<H", len(u2)) + u2 + b"\x01\x00\x00\x01"
+                msg = quazal_msg(body)
+                k = msg.index(u2)
+                common = 0
+                while u1[common] == u2[common]:
+                    common += 1
+                m = b"\x01" + lzo_pack(msg, (k, min(common, 33)))  # the shared "prudp:/address=10." becomes a back-reference
+                assert quazal_payload(m) == body
+                ng.sendto(netz_data(m), a)
+                continue
             elif m == b"STATIONS":
                 m = f"prudp:/address={ip};port={NETZ_GAME}".encode() + b"\0"
             else:
@@ -341,7 +476,7 @@ def join(ip, bcast, n_stream):
     nq.bind((ip, 0))
     nq.settimeout(0.5)
     url = None
-    end = time.time() + 15
+    end = time.time() + (0 if ANY else 15)  # the 0.0.0.0 session tests port clashes, not Net-Z
     while time.time() < end and not url:
         nq.sendto(netz_packet(struct.pack("<II", 8, 1) + os.urandom(4)), (bcast, NETZ_DISC))
         try:
@@ -372,6 +507,27 @@ def join(ip, bcast, n_stream):
             ask(b"PING%d" % i)
         replies.append(ask(f"HELLO prudp:/address={ip};port={NETZ_GAME}".encode()))
         replies.append(ask(b"STATIONS"))
+        r2 = quazal_payload(ask(b"STATIONS2") or b"")
+        urls = []
+        if r2:
+            for part in r2.split(b"prudp:/address=")[1:]:
+                urls.append(part.split(b";", 1)[0].decode())
+        ok2 = False
+        if len(urls) == 2:
+            try:
+                dest2 = (socket.inet_ntoa(socket.inet_aton(urls[1])), int(port))  # inet_aton reads "007" like inet_addr
+                for _ in range(10):
+                    nq.sendto(netz_data(b"JOIN2"), dest2)
+                    try:
+                        d, a = nq.recvfrom(2000)
+                        if netz_data_open(d) == b"NZ:JOIN2":
+                            ok2 = True
+                            break
+                    except socket.timeout:
+                        pass
+            except OSError:
+                pass
+        result("netz_stations2", [urls[1] if len(urls) == 2 else repr(urls), ok2])
     result("netz_hello", replies[0].decode(errors="replace") if replies and replies[0] else repr(replies[:1]))
     st = replies[1] if len(replies) > 1 else None
     result("netz_stations", st.split(b"prudp:/address=", 1)[-1].split(b";")[0].decode() if st else repr(st))

@@ -25,7 +25,7 @@
 #include "plat.h"
 #include "ui.h"
 
-#define VERSION "0.6.2"
+#define VERSION "0.6.3"
 #define SCCT_APPID 13570
 #define SPACEWAR_APPID 480
 #define MAX_PEERS 3
@@ -208,6 +208,35 @@ static uint32_t make_alias(int text_len, int k)
 
 static int ip_text_len(uint32_t ip) { char t[16]; ip_text(ip, t); return (int)strlen(t); }
 
+/* `ip` as dotted text of exactly `len` characters. Octets below 8 may get
+   leading zeros ("127.007.3.1"): Windows' inet_addr, which the game uses to
+   read addresses, takes "007" as octal 7, the same number. So one loopback
+   address can stand in for LAN addresses of any length (a PC with two network
+   adapters, say). False if it can't be made that long. */
+static bool ip_text_len_exact(uint32_t ip, int len, char out[16])
+{
+    ip_text(ip, out);
+    int extra = len - (int)strlen(out);
+    if (extra == 0) return true;
+    if (extra < 0 || len > 15) return false;
+    const uint8_t *b = (const uint8_t *)&ip;
+    int pad[4] = { 0, 0, 0, 0 };
+    for (int i = 3; i >= 1 && extra > 0; i--) /* never the first octet */
+        if (b[i] < 8) { pad[i] = extra < 2 ? extra : 2; extra -= pad[i]; }
+    if (extra) return false;
+    int k = 0;
+    for (int i = 0; i < 4; i++) {
+        if (i) out[k++] = '.';
+        for (int z = 0; z < pad[i]; z++) out[k++] = '0';
+        char t[4];
+        int m = 0, v = b[i];
+        do { t[m++] = (char)('0' + v % 10); v /= 10; } while (v);
+        while (m) out[k++] = t[--m];
+    }
+    out[k] = 0;
+    return true;
+}
+
 /* Replace every copy of `from` (4 raw bytes, dotted text, UTF-16 text) with `to`. */
 static int swap_ip(uint8_t *p, int n, uint32_t from, uint32_t to)
 {
@@ -223,9 +252,8 @@ static int swap_ip(uint8_t *p, int n, uint32_t from, uint32_t to)
         if (p[i] == fr[0] && !memcmp(p + i, fr, 4)) { memcpy(p + i, tr, 4); hits++; i += 3; }
     char ft[16], tt[16];
     ip_text(from, ft);
-    ip_text(to, tt);
     int L = (int)strlen(ft);
-    if ((int)strlen(tt) != L) return hits;
+    if (!ip_text_len_exact(to, L, tt)) return hits;
     for (int i = 0; i + L <= n; i++) {
         if (p[i] == (uint8_t)ft[0] && !memcmp(p + i, ft, (size_t)L)) {
             bool digit_before = i > 0 && p[i - 1] >= '0' && p[i - 1] <= '9';
@@ -391,24 +419,156 @@ static bool netz_key_known(int dir, uint16_t port, const uint8_t *d, int n, uint
     return known;
 }
 
-/* Swap in the packet as it is and inside Net-Z's encrypted discovery packets.
-   dir/port: where the packet comes from (0 = this PC's game, 1 = the peer's), for
-   fixing PRUDP checksums; port 0 = not a UDP game packet (TCP). */
-static int swap_ip_all(uint8_t *d, int n, uint32_t from, uint32_t to, int dir, uint16_t port)
+/* LZO1X decompression (the format of LZO 1.08's lzo1x_decompress, which the
+   game links: it calls lzo_init(0x1080, ...) at 0x10d9d080). Quazal compresses
+   game messages with it, so an address inside one isn't visible as text.
+   Returns the decompressed length, or -1 for anything malformed. */
+static int lzo1x_decompress(const uint8_t *in, int in_len, uint8_t *out, int out_max)
 {
+    const uint8_t *ip = in, *ip_end = in + in_len;
+    uint8_t *op = out, *op_end = out + out_max;
+    unsigned t;
+    const uint8_t *m_pos;
+#define NEED_IP(x) do { if ((size_t)(ip_end - ip) < (size_t)(x)) return -1; } while (0)
+#define NEED_OP(x) do { if ((size_t)(op_end - op) < (size_t)(x)) return -1; } while (0)
+#define LOOKBEHIND() do { if (m_pos < out || m_pos >= op) return -1; } while (0)
+    NEED_IP(1);
+    if (*ip > 17) {
+        t = (unsigned)(*ip++ - 17);
+        if (t < 4) goto match_next;
+        NEED_OP(t); NEED_IP(t + 1);
+        do *op++ = *ip++; while (--t > 0);
+        goto first_literal_run;
+    }
+    for (;;) {
+        NEED_IP(3);
+        t = *ip++;
+        if (t >= 16) goto match;
+        if (t == 0) {
+            while (*ip == 0) { t += 255; ip++; NEED_IP(1); if (t > (unsigned)in_len) return -1; }
+            t += 15u + *ip++;
+        }
+        NEED_OP(t + 3); NEED_IP(t + 4);
+        for (unsigned k = 0; k < t + 3; k++) *op++ = *ip++;
+first_literal_run:
+        t = *ip++;
+        if (t >= 16) goto match;
+        m_pos = op - (1 + 0x0800);
+        m_pos -= t >> 2;
+        m_pos -= *ip++ << 2;
+        LOOKBEHIND(); NEED_OP(3);
+        *op++ = *m_pos++; *op++ = *m_pos++; *op++ = *m_pos;
+        goto match_done;
+        for (;;) {
+match:
+            if (t >= 64) {
+                m_pos = op - 1;
+                m_pos -= (t >> 2) & 7;
+                m_pos -= *ip++ << 3;
+                t = (t >> 5) - 1;
+                LOOKBEHIND(); NEED_OP(t + 2);
+                goto copy_match;
+            } else if (t >= 32) {
+                t &= 31;
+                if (t == 0) {
+                    NEED_IP(1);
+                    while (*ip == 0) { t += 255; ip++; NEED_IP(1); if (t > (unsigned)out_max) return -1; }
+                    t += 31u + *ip++;
+                }
+                NEED_IP(2);
+                m_pos = op - 1;
+                m_pos -= (ip[0] >> 2) + (ip[1] << 6);
+                ip += 2;
+            } else if (t >= 16) {
+                m_pos = op;
+                m_pos -= (t & 8) << 11;
+                t &= 7;
+                if (t == 0) {
+                    NEED_IP(1);
+                    while (*ip == 0) { t += 255; ip++; NEED_IP(1); if (t > (unsigned)out_max) return -1; }
+                    t += 7u + *ip++;
+                }
+                NEED_IP(2);
+                m_pos -= (ip[0] >> 2) + (ip[1] << 6);
+                ip += 2;
+                if (m_pos == op) return (int)(op - out); /* end of stream */
+                m_pos -= 0x4000;
+            } else {
+                m_pos = op - 1;
+                m_pos -= t >> 2;
+                NEED_IP(1);
+                m_pos -= *ip++ << 2;
+                LOOKBEHIND(); NEED_OP(2);
+                *op++ = *m_pos++; *op++ = *m_pos;
+                goto match_done;
+            }
+            LOOKBEHIND(); NEED_OP(t + 2);
+copy_match:
+            *op++ = *m_pos++; *op++ = *m_pos++;
+            do *op++ = *m_pos++; while (--t > 0);
+match_done:
+            t = ip[-2] & 3u;
+            if (t == 0) break;
+match_next:
+            NEED_OP(t); NEED_IP(t + 1);
+            do *op++ = *ip++; while (--t > 0);
+            t = *ip++;
+        }
+    }
+#undef NEED_IP
+#undef NEED_OP
+#undef LOOKBEHIND
+}
+
+/* A PRUDP v0 DATA packet carrying an LZO-compressed message (first payload
+   byte = compression ratio, 0 = not compressed). If the address is inside,
+   the message is decompressed, swapped, and sent uncompressed (ratio byte 0,
+   which the game itself uses for small messages). The packet gets longer. */
+static int netz_data_swap(uint8_t *d, int *pn, int cap, uint32_t from, uint32_t to, uint8_t key)
+{
+    static uint8_t msg[MAX_GAME_PKT];
+    int n = *pn;
+    if (n < NETZ_HDR + 4 || (d[2] & 7) != 2 || (d[2] >> 3) & (1 | 8) || d[NETZ_HDR] != 0) return 0;
+    const uint8_t *pl = d + NETZ_HDR + 1;
+    int plen = n - NETZ_HDR - 2;
+    if (plen < 2 || pl[0] == 0) return 0;
+    int dl = lzo1x_decompress(pl + 1, plen - 1, msg, (int)sizeof msg);
+    /* a Quazal message starts with its length: u32 + 1 byte + that many */
+    if (dl < 5 || (uint32_t)msg[0] + ((uint32_t)msg[1] << 8) + ((uint32_t)msg[2] << 16) + ((uint32_t)msg[3] << 24) + 5 != (uint32_t)dl) return 0;
+    int hits = swap_ip(msg, dl, from, to);
+    if (!hits) return 0;
+    int nn = NETZ_HDR + 1 + 1 + dl + 1;
+    if (nn > cap || nn > MAX_GAME_PKT) return 0;
+    d[NETZ_HDR + 1] = 0;
+    memcpy(d + NETZ_HDR + 2, msg, (size_t)dl);
+    d[nn - 1] = (uint8_t)(key + netz_sum(d, nn - 1));
+    *pn = nn;
+    return hits;
+}
+
+/* Swap in the packet as it is, inside Net-Z's encrypted discovery packets and
+   inside its compressed game messages. dir/port: where the packet comes from
+   (0 = this PC's game, 1 = the peer's), for fixing PRUDP checksums; port 0 =
+   not a UDP game packet (TCP). *pn may grow (up to cap). */
+static int swap_ip_all(uint8_t *d, int *pn, int cap, uint32_t from, uint32_t to, int dir, uint16_t port)
+{
+    int n = *pn;
     if (netz_user(d, n)) {
         int hits = netz_swap(d, n, from, to);
         return hits + swap_ip(d, n, from, to);
     }
     bool prudp = false;
     uint8_t key = 0;
+    int hits = 0;
     if (port && n > NETZ_HDR) {
         key = (uint8_t)(d[n - 1] - netz_sum(d, n - 1));
         prudp = netz_key_known(dir, port, d, n, key);
+        hits = netz_data_swap(d, pn, cap, from, to, key); /* proves PRUDP by itself */
+        if (hits) { prudp = true; n = *pn; }
     }
-    int hits = swap_ip(d, n, from, to);
-    if (hits && prudp) d[n - 1] = (uint8_t)(key + netz_sum(d, n - 1));
-    return hits;
+    int h2 = swap_ip(d, n, from, to);
+    if (h2 && prudp) d[n - 1] = (uint8_t)(key + netz_sum(d, n - 1));
+    return hits + h2;
 }
 
 /* ---------- the game ---------- */
@@ -799,22 +959,31 @@ static void catchers_update(void)
     }
 }
 
-/* Payload from the local game, going to a peer: hide this PC's LAN addresses. */
-static int hide_my_ips(Peer *p, uint8_t *d, int n, uint16_t port)
+/* Payload from the local game, going to a peer: hide this PC's LAN addresses.
+   Returns the new length (a compressed game message can come out longer). */
+static int hide_my_ips(Peer *p, uint8_t *d, int n, int cap, uint16_t port)
 {
     int hits = 0;
     if (port && n > NETZ_HDR && !netz_user(d, n) && !g_nmy_ips) /* still learn the checksum key */
         netz_key_known(0, port, d, n, (uint8_t)(d[n - 1] - netz_sum(d, n - 1)));
-    for (int i = 0; i < g_nmy_ips; i++) hits += swap_ip_all(d, n, g_my_ips[i], p->my_alias, 0, port);
+    for (int i = 0; i < g_nmy_ips; i++) hits += swap_ip_all(d, &n, cap, g_my_ips[i], p->my_alias, 0, port);
     if (hits && !p->swapped) say("(The game put your LAN address in a packet. SCCTLink replaced it, so %s never sees it.)", who(p->id));
     p->swapped += (u64)hits;
-    return hits;
+    return n;
 }
 
 /* Payload from a peer: their idea of this PC's address becomes the real one. */
-static void unhide_my_ip(Peer *p, uint8_t *d, int n, uint16_t port)
+static int unhide_my_ip(Peer *p, uint8_t *d, int n, int cap, uint16_t port)
 {
-    if (g_nmy_ips && p->my_alias) swap_ip_all(d, n, p->my_alias, g_my_ips[0], 1, port);
+    if (g_nmy_ips && p->my_alias) swap_ip_all(d, &n, cap, p->my_alias, g_my_ips[0], 1, port);
+    return n;
+}
+
+static bool memmem_has(const uint8_t *d, int n, const char *needle)
+{
+    int k = (int)strlen(needle);
+    for (int i = 0; i + k <= n; i++) if (!memcmp(d + i, needle, (size_t)k)) return true;
+    return false;
 }
 
 /* Packet log for finding out what the game sends (only in scctlink.log):
@@ -841,7 +1010,12 @@ static void capture(Peer *p, bool out, uint16_t src, uint16_t dst, const uint8_t
     /* Net-Z discovery: also log what's inside (any address that isn't loopback is masked) */
     static uint8_t plain[MAX_GAME_PKT];
     int len = netz_open(d, n, plain);
-    if (len > 0 && (*cnt <= 12 || what)) {
+    if (len <= 0 && n > NETZ_HDR + 3 && (d[2] & 7) == 2 && d[NETZ_HDR] == 0 && d[NETZ_HDR + 1] != 0) {
+        /* a compressed game message: log what's inside */
+        len = lzo1x_decompress(d + NETZ_HDR + 2, n - NETZ_HDR - 3, plain, (int)sizeof plain);
+        if (len < 5 || (uint32_t)plain[0] + ((uint32_t)plain[1] << 8) + 5 != (uint32_t)len) len = -1;
+    }
+    if (len > 0 && (*cnt <= 12 || what || memmem_has(plain, len, "address="))) {
         char t[260];
         int m = 0;
         for (int i = 0; i < len && m < (int)sizeof t - 1; i++) t[m++] = plain[i] >= 32 && plain[i] < 127 ? (char)plain[i] : '.';
@@ -863,7 +1037,7 @@ static void send_udp_frame(Peer *p, char kind, uint16_t src, uint16_t dst, const
     put16(g_out + 3, dst);
     put16(g_out + 5, p->tx_seq++);
     memcpy(g_out + HDR, d, (size_t)n);
-    hide_my_ips(p, g_out + HDR, n, src);
+    n = hide_my_ips(p, g_out + HDR, n, (int)sizeof g_out - HDR, src);
     capture(p, true, src, dst, g_out + HDR, n, kind == 'B' ? "(LAN broadcast)" : 0);
     send_msg(p->id, g_out, n + HDR, false, CH_GAME);
     if (!p->up++) p->first_up_ms = now_ms();
@@ -893,7 +1067,7 @@ static void deliver_udp(Peer *p, const uint8_t *m, int n)
     if (!a) return;
     int len = n - HDR;
     memcpy(g_buf, m + HDR, (size_t)len);
-    unhide_my_ip(p, g_buf, len, src);
+    len = unhide_my_ip(p, g_buf, len, (int)sizeof g_buf, src);
     udp_sendto(a->s, g_buf, len, deliver_ip(b->ip), dst);
     a->pkts++;
     p->down++;
@@ -1017,7 +1191,7 @@ static void poll_tcp(Peer *p)
             if (r < 0) { stream_close(p, i--, true); goto next; }
             g_out[0] = 'D';
             put32(g_out + 1, x->sid);
-            hide_my_ips(p, g_out + 5, r, 0);
+            r = hide_my_ips(p, g_out + 5, r, r, 0);
             send_msg(p->id, g_out, r + 5, true, CH_TCP);
             p->up++;
         }
@@ -1048,7 +1222,7 @@ static void on_tcp_msg(Peer *p, const uint8_t *m, int n)
     } else if (m[0] == 'D' && x) {
         int len = n - 5;
         memcpy(g_buf, m + 5, (size_t)len);
-        unhide_my_ip(p, g_buf, len, 0);
+        len = unhide_my_ip(p, g_buf, len, len, 0);
         p->down++;
         int w = x->nout ? 0 : tcp_send(x->s, g_buf, len);
         if (w < 0) { stream_close(p, idx, true); return; }
