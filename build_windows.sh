@@ -22,7 +22,8 @@ mkdef kernel32 Sleep@4 GetTickCount64@0 SetConsoleCtrlHandler@8 GetModuleFileNam
     GetFileAttributesA@4 CreateProcessA@40 \
     CreateThread@24 WaitForSingleObject@8 InitializeCriticalSection@4 EnterCriticalSection@4 \
     LeaveCriticalSection@4 MultiByteToWideChar@24 WideCharToMultiByte@32 GetModuleHandleW@4 GlobalFree@4 \
-    FindFirstFileA@8 FindNextFileA@8 FindClose@4
+    FindFirstFileA@8 FindNextFileA@8 FindClose@4 \
+    GetLastError@0 GetExitCodeProcess@8 GetSystemDirectoryA@8
 mkdef user32 OpenClipboard@4 EmptyClipboard@0 SetClipboardData@8 GetClipboardData@4 CloseClipboard@0 \
     RegisterClassExW@4 CreateWindowExW@48 DefWindowProcW@16 GetMessageW@16 TranslateMessage@4 \
     DispatchMessageW@4 IsDialogMessageW@8 PostQuitMessage@4 SendMessageW@16 SetWindowTextW@8 \
@@ -48,7 +49,7 @@ llvm-cvtres -machine:x86 -out:"$OUT/scctlink_res.obj" "$OUT/scctlink.res" >/dev/
 CFLAGS="--target=i686-w64-windows-gnu -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter
   -ffreestanding -fno-stack-protector -mno-stack-arg-probe -fno-asynchronous-unwind-tables
   -fno-ident -fno-builtin -D_WIN32"
-SRC="src/crt0_win.c src/ui_win.c src/scctlink.c src/lobbycode.c src/plat_win.c src/steam_win.c src/sha256.c"
+SRC="src/crt0_win.c src/ui_win.c src/scctlink.c src/lobbycode.c src/plat_win.c src/steam_win.c src/sha256.c src/tun_win.c"
 
 # shellcheck disable=SC2086
 clang $CFLAGS -fuse-ld=lld -nostdlib -nostartfiles \

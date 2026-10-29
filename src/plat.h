@@ -51,6 +51,15 @@ int local_ipv4s(uint32_t *out, int max); /* this PC's own IPv4 addresses, loopba
    Windows: this PC's addresses; Linux (tests): the subnet broadcast addresses. */
 int broadcast_listen_addrs(uint32_t *out, int max);
 
+/* ---- virtual network adapter ("VPN mode", experimental) ----
+   An adapter named "SCCTLink" with address ip/24 (Windows: Wintun, needs
+   administrator; Linux tests: a TUN device). Raw IPv4 packets in and out. */
+typedef struct Tun Tun;
+Tun *tun_open(uint32_t ip, char *err, int errn);
+int tun_read(Tun *t, uint8_t *buf, int n);       /* a packet's length, 0 = none waiting */
+bool tun_write(Tun *t, const uint8_t *p, int n);
+void tun_close(Tun *t);                          /* removes the adapter and undoes the settings */
+
 /* ---- console etc. ---- */
 int key_poll(void);              /* key pressed, or -1. Never blocks. */
 bool read_line(char *buf, int n);/* blocking line read from the console */

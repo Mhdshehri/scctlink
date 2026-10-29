@@ -321,9 +321,9 @@ def host(ip, bcast):
                 u2 = f"prudp:/address={ip2};port={NETZ_GAME}".encode() + b"\0"
                 body = b"\x00\x10\x03" + struct.pack("<H", len(u1)) + u1 + struct.pack("<H", len(u2)) + u2 + b"\x01\x00\x00\x01"
                 msg = quazal_msg(body)
-                k = msg.index(u2)
+                k = msg.index(u2, msg.index(u1) + len(u1))  # the second URL (both can be the same)
                 common = 0
-                while u1[common] == u2[common]:
+                while common < len(u1) - 1 and u1[common] == u2[common]:
                     common += 1
                 m = b"\x01" + lzo_pack(msg, (k, min(common, 33)))  # the shared "prudp:/address=10." becomes a back-reference
                 assert quazal_payload(m) == body
@@ -482,7 +482,7 @@ def join(ip, bcast, n_stream):
     nq.bind((ip, 0))
     nq.settimeout(0.5)
     url = None
-    end = time.time() + (0 if ANY else 15)  # the 0.0.0.0 session tests port clashes, not Net-Z
+    end = time.time() + (0 if os.environ.get("FAKE_SKIP_NETZ") == "1" else 15)  # the port clash session skips it
     while time.time() < end and not url:
         nq.sendto(netz_packet(struct.pack("<II", 8, 1) + os.urandom(4)), (bcast, NETZ_DISC))
         try:

@@ -493,14 +493,14 @@ def main():
         hc = relay(A, "HC", 1131, "1132", ["host"], d)
         procs.append(hc)
         check(hc.wait_for(r"Lobby is ready") is not None, "host ready")
-        hgc = Proc("game-a2", A.cmd([sys.executable, "-I", FAKE, "host", A.ip, A.bcast]), {"FAKE_BIND_ANY": "1"})
+        hgc = Proc("game-a2", A.cmd([sys.executable, "-I", FAKE, "host", A.ip, A.bcast]), {"FAKE_BIND_ANY": "1", "FAKE_SKIP_NETZ": "1"})
         procs.append(hgc)
         check(hgc.wait_for("HOST READY") is not None, "host's game holds 0.0.0.0:7776 and 0.0.0.0:8888")
         jc2 = relay(B, "JC2", 1132, "1131", ["join", "--no-launch", "--yes"], d)
         procs.append(jc2)
         check(jc2.wait_for(r"user1131's Splinter Cell is running") is not None, "joiner connected and knows the host's ports")
         time.sleep(1)
-        jgc = Proc("game-b2", B.cmd([sys.executable, "-I", FAKE, "join", B.ip, B.bcast, "300"]), {"FAKE_BIND_ANY": "1"})
+        jgc = Proc("game-b2", B.cmd([sys.executable, "-I", FAKE, "join", B.ip, B.bcast, "300"]), {"FAKE_BIND_ANY": "1", "FAKE_SKIP_NETZ": "1"})
         procs.append(jgc)
         check(jgc.wait_for("JOIN DONE", timeout=90) is not None, "joiner's game (also on 7776/8888) finished")
         r = jgc.results()
@@ -531,7 +531,7 @@ def main():
         taken = [l for l in udp.splitlines() if re.search(r"\b00000000:(1E60|22B8)\b", l)]
         check(not taken, f"SCCTLink did not take 0.0.0.0:7776 or 0.0.0.0:8888 on the host's PC ({len(taken)})")
         menu.stop()
-        hgd = Proc("game-a3", A.cmd([sys.executable, "-I", FAKE, "host", A.ip, A.bcast]), {"FAKE_BIND_ANY": "1"})
+        hgd = Proc("game-a3", A.cmd([sys.executable, "-I", FAKE, "host", A.ip, A.bcast]), {"FAKE_BIND_ANY": "1", "FAKE_SKIP_NETZ": "1"})
         procs.append(hgd)
         check(hgd.wait_for("HOST READY", timeout=10) is not None and "Address already in use" not in hgd.log,
               "the host's game could still open 0.0.0.0:7776 and 8888 and create its game")
@@ -631,6 +631,43 @@ def main():
         check(js.wait_for(r"only on your PC: system/d3d9\.dll", timeout=10) is not None, "...the new mod shows up on the friend's side")
         check(hs.wait_for(r"only on user1194's PC: system/d3d9\.dll", timeout=10) is not None, "...and on the host's side, without clicking anything")
         hs.stop(); js.stop()
+
+        print("[17] VPN mode (experimental): a virtual adapter on each PC, the game's packets carried unchanged")
+        hv = relay(A, "HV", 1201, "1202", ["host", "--vpn"], d, stdin=subprocess.PIPE)
+        procs.append(hv)
+        check(hv.wait_for(r"VPN mode: your PC is 10\.231\.0\.1 on the virtual LAN") is not None, "host's virtual adapter is up at 10.231.0.1")
+        jv = relay(B, "JV", 1202, "1201", ["join", "--no-launch", "--yes", "--vpn"], d)
+        procs.append(jv)
+        check(jv.wait_for(r"VPN mode with user1201: your game sees them at 10\.231\.0\.1") is not None, "friend switched to VPN mode")
+        check(hv.wait_for(r"VPN mode with user1202: your game sees them at 10\.231\.0\.2") is not None, "host switched to VPN mode")
+        hgv = Proc("game-av", A.cmd([sys.executable, "-I", FAKE, "host", "10.231.0.1", "10.231.0.255"]), {"FAKE_BIND_ANY": "1"})
+        procs.append(hgv)
+        check(hgv.wait_for("HOST READY") is not None, "host's game is up")
+        time.sleep(1.5)
+        jgv = Proc("game-bv", B.cmd([sys.executable, "-I", FAKE, "join", "10.231.0.2", "10.231.0.255", "500"]), {"FAKE_BIND_ANY": "1"})
+        procs.append(jgv)
+        check(jgv.wait_for("JOIN DONE", timeout=90) is not None, "friend's game finished its session")
+        r = jgv.results()
+        check(r.get("found_host") is True and r.get("announce_from") == "10.231.0.1", f"found the host by LAN broadcast at 10.231.0.1 ({r.get('announce_from')})")
+        check(r.get("announce_ip") == "10.231.0.1", "the address inside the game's packet is real and needed no swapping")
+        check(r.get("pingpong_ok") == 200, f"200/200 game packets went there and back ({r.get('pingpong_ok')})")
+        st = r.get("stream") or [0, False, False]
+        check(st == [500, True, True], f"500 mixed-size packets: all back, exact, in order ({st})")
+        t = r.get("tcp") or ["", False, False]
+        check(t[1] and t[2], "TCP lobby connection works both ways, 300 KB message included")
+        check((r.get("netz_url") or "").startswith("10.231.0.1;") and r.get("netz_join") is True, f"Net-Z: encrypted discovery and join, untouched ({r.get('netz_url')})")
+        check(r.get("netz_hello") == "URLOK", "Net-Z: the friend's own address in its messages is right as it is")
+        m = hgv.wait_for(r"LOBBY CLIENT (\S+)", 2)
+        check(m is not None and m.group(1) == "10.231.0.2", f"host's game sees the friend at 10.231.0.2 ({m and m.group(1)})")
+        sneak = subprocess.run(B.cmd([sys.executable, "-I", "-c",
+                                      "import socket;s=socket.socket(2,2);s.settimeout(2);s.sendto(b'SNEAK',('10.231.0.1',7776))\n"
+                                      "try:\n print('GOT', s.recvfrom(100))\nexcept OSError: print('NOTHING')"]),
+                               capture_output=True, text=True, timeout=10).stdout
+        check("NOTHING" in sneak, "another program on the friend's PC can't use the virtual adapter")
+        hv.p.stdin.write("X\n"); hv.p.stdin.flush()  # Stop
+        time.sleep(1.5)
+        check("VPN mode: virtual adapter removed" in open(os.path.join(d, "log_HV.txt")).read(), "the adapter is removed when the host clicks Stop")
+        hv.stop(); jv.stop(); hgv.stop(); jgv.stop()
 
         print("[13] bad internet: 10% packet loss each way and 60 ms delay each way")
         h10, j10, hg10, jg10 = session("    (setup)", d, A, B, extra={"MOCK_LOSS": "10", "MOCK_DELAY_MS": "60"}, n_stream=1000)

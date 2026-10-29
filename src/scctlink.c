@@ -25,13 +25,14 @@
 #include "plat.h"
 #include "ui.h"
 
-#define VERSION "0.7.1"
+#define VERSION "0.8-vpn"
 #define SCCT_APPID 13570
 #define SPACEWAR_APPID 480
 #define MAX_PEERS 3
 #define BUF_SIZE 65536
 #define CH_GAME 0
 #define CH_CTL 1
+#define CH_VPN 3 /* VPN mode: whole IPv4 packets of the game */
 #define CH_TCP 2
 #define PROTO '3' /* relay protocol; both players need the same */
 #define KEEPALIVE_MS 1000
@@ -757,6 +758,8 @@ typedef struct {
     uint16_t tx_seq, rx_seq; bool rx_started;
     double rtt; bool have_rtt;
     Rate rate;
+    bool vpn;                /* VPN mode with this peer: the game talks over the virtual adapter */
+    uint32_t vpn_ip;         /* their address on the virtual network */
     char *mf; int nmf;        /* the peer's game file list, as it arrives */
     bool mf_sent, mf_done, mf_found;
 } Peer;
@@ -932,6 +935,7 @@ static bool g_said_admin;
 
 static Alias *alias_get(Peer *p, uint16_t port, bool create)
 {
+    if (p->vpn) return 0; /* VPN mode: the game reaches them directly */
     for (int i = 0; i < p->nals; i++) if (p->als[i].port == port) return &p->als[i];
     if (!create || p->nals >= MAX_ALIAS || !p->alias) return 0;
     /* Open the other game's port on its private address early: Windows still
@@ -1010,7 +1014,7 @@ static void catchers_update(void)
     if (!G.running) return;
     for (int i = 0; i < g_npeers; i++) {
         Peer *p = &g_peers[i];
-        if (!p->welcomed) continue;
+        if (!p->welcomed || p->vpn) continue;
         for (int k = 0; k < p->nrudp; k++) catcher_ensure(p->rudp[k]);
     }
 }
@@ -1227,7 +1231,7 @@ static void poll_catchers(void)
                 if (!ct->pkts++) note("caught the game's LAN broadcast to port %u", (unsigned)ct->port);
                 for (int i = 0; i < g_npeers; i++) {
                     Peer *p = &g_peers[i];
-                    if (!p->welcomed) continue;
+                    if (!p->welcomed || p->vpn) continue;
                     send_udp_frame(p, 'B', port, ct->port, g_buf, r); /* copies, so g_buf stays intact */
                 }
             }
@@ -1255,6 +1259,7 @@ static Stream *stream_add(Peer *p, uint32_t sid, sock_t s)
 
 static void listeners_update(Peer *p)
 {
+    if (p->vpn) return;
     for (int k = 0; k < p->nrtcp; k++) {
         uint16_t port = p->rtcp[k];
         bool have = false;
@@ -1814,6 +1819,183 @@ static int scan_for_host(bool verbose)
     return n;
 }
 
+/* ---------- VPN mode (experimental) ----------
+   Like Radmin VPN, but over Steam: each player gets a virtual network adapter
+   "SCCTLink" with an address on 10.231.0.0/24 (host .1, friends .2 and up),
+   and SCCTLink carries the game's IPv4 packets between the adapters through
+   Steam, unchanged. The game sees a normal LAN, so nothing inside its packets
+   has to be rewritten. Only the game's own UDP/TCP packets go through, both
+   ways: other programs can't use the adapter, and friends can't reach
+   anything on this PC but the game. Both players need it, or the normal
+   SCCTLink connection is used. */
+static bool g_vpn_wanted;
+static Tun *g_tun;
+static uint32_t g_vpn_ip;
+static u64 g_vpn_in, g_vpn_out, g_vpn_dropped;
+static void vpn_drop(const char *why, const uint8_t *d, int n)
+{
+    if (++g_vpn_dropped > 40) return;
+    char a[16] = "?", b[16] = "?";
+    uint32_t x, y;
+    int sp = 0, dp = 0;
+    if (n >= 20) {
+        memcpy(&x, d + 12, 4); memcpy(&y, d + 16, 4);
+        ip_text(x, a); ip_text(y, b);
+        int hl = (d[0] & 15) * 4;
+        if (n >= hl + 4) { sp = d[hl] << 8 | d[hl + 1]; dp = d[hl + 2] << 8 | d[hl + 3]; }
+    }
+    note("VPN: dropped a packet (%s): proto %d %s:%d -> %s:%d len %d", why, n >= 10 ? d[9] : -1, a, sp, b, dp, n);
+}
+
+static uint32_t vpn_addr(int last) { return ip4(10, 231, 0, last); }
+static bool vpn_is_bcast(uint32_t d) { return d == 0xFFFFFFFFu || d == vpn_addr(255); }
+static bool vpn_in_net(uint32_t a) { const uint8_t *b = (const uint8_t *)&a; return b[0] == 10 && b[1] == 231 && b[2] == 0; }
+
+static void vpn_down(void)
+{
+    if (!g_tun) return;
+    tun_close(g_tun);
+    g_tun = 0;
+    g_vpn_ip = 0;
+    note("VPN mode: virtual adapter removed");
+}
+
+static bool vpn_up(uint32_t ip)
+{
+    if (!g_vpn_wanted) return false;
+    if (g_tun && g_vpn_ip == ip) return true;
+    vpn_down();
+    char err[400];
+    say("VPN mode: setting up the virtual adapter \"SCCTLink\" (a few seconds)...");
+    g_tun = tun_open(ip, err, sizeof err);
+    if (!g_tun) {
+        say("! VPN mode didn't start: %s", err);
+        say("  Using the normal SCCTLink connection instead.");
+        g_vpn_wanted = false; /* don't retry and wait again on every link */
+        return false;
+    }
+    g_vpn_ip = ip;
+    char t[16];
+    ip_text(ip, t);
+    say("VPN mode: your PC is %s on the virtual LAN.", t);
+    return true;
+}
+
+typedef struct { uint32_t src, dst; int proto; bool first; uint16_t sport, dport; int hl; } IpInfo;
+
+static bool ip_info(const uint8_t *d, int n, IpInfo *o)
+{
+    if (n < 20 || (d[0] >> 4) != 4) return false;
+    int hl = (d[0] & 15) * 4, total = d[2] << 8 | d[3];
+    if (hl < 20 || total < hl || total > n) return false;
+    memcpy(&o->src, d + 12, 4);
+    memcpy(&o->dst, d + 16, 4);
+    o->proto = d[9];
+    o->hl = hl;
+    o->first = ((d[6] & 0x1f) << 8 | d[7]) == 0;
+    o->sport = o->dport = 0;
+    if (o->first && total >= hl + 4) { o->sport = (uint16_t)(d[hl] << 8 | d[hl + 1]); o->dport = (uint16_t)(d[hl + 2] << 8 | d[hl + 3]); }
+    return o->proto == 17 || o->proto == 6;
+}
+
+static bool game_port(int proto, uint16_t port)
+{
+    if (!port) return false;
+    return proto == 17 ? game_owns_udp(port, true) : game_owns_tcp(port);
+}
+
+static void vpn_log(Peer *p, bool out, const uint8_t *d, int n, const IpInfo *ii)
+{
+    if (ii->proto == 17 && ii->first && n >= ii->hl + 8) capture(p, out, ii->sport, ii->dport, d + ii->hl + 8, n - ii->hl - 8, 0);
+    else ring_add(out, ii->sport, ii->dport, d, n);
+}
+
+static void vpn_send(Peer *p, const uint8_t *d, int n, const IpInfo *ii)
+{
+    if (!p->welcomed || !p->vpn) return;
+    vpn_log(p, true, d, n, ii);
+    send_msg(p->id, d, n, false, CH_VPN);
+    if (!p->up++) p->first_up_ms = now_ms();
+    g_vpn_out++;
+}
+
+/* The game sent a packet on the virtual adapter. */
+static void vpn_from_adapter(const uint8_t *d, int n)
+{
+    IpInfo ii;
+    if (!ip_info(d, n, &ii) || ii.src != g_vpn_ip) { vpn_drop("not the game's UDP/TCP", d, n); return; }
+    if (ii.first && !game_port(ii.proto, ii.sport)) { vpn_drop("from a program that is not the game", d, n); return; } /* Windows chatter etc. */
+    if (vpn_is_bcast(ii.dst)) {
+        for (int i = 0; i < g_npeers; i++) vpn_send(&g_peers[i], d, n, &ii);
+        return;
+    }
+    for (int i = 0; i < g_npeers; i++) {
+        Peer *p = &g_peers[i];
+        /* a friend reaches the other friends through the host */
+        if (p->vpn && (p->vpn_ip == ii.dst || (!g_is_host && vpn_in_net(ii.dst)))) { vpn_send(p, d, n, &ii); return; }
+    }
+    vpn_drop("no friend at that address", d, n);
+}
+
+/* A packet from a friend, for this PC's game (or, on the host, for another friend). */
+static void vpn_from_peer(Peer *p, const uint8_t *d, int n)
+{
+    IpInfo ii;
+    if (!p->vpn || !g_tun || !ip_info(d, n, &ii)) { vpn_drop("not UDP/TCP", d, n); return; }
+    /* the host checks who sent it; a friend gets the other friends' packets via the host */
+    bool src_ok = g_is_host ? ii.src == p->vpn_ip : (vpn_in_net(ii.src) && ii.src != g_vpn_ip);
+    if (!src_ok) { vpn_drop("wrong sender address", d, n); return; }
+    bool to_me = ii.dst == g_vpn_ip, bc = vpn_is_bcast(ii.dst);
+    if (g_is_host && !to_me) { /* pass it on to the friend it's for (or all, for a broadcast) */
+        for (int i = 0; i < g_npeers; i++) {
+            Peer *q = &g_peers[i];
+            if (q != p && q->vpn && (bc || q->vpn_ip == ii.dst)) vpn_send(q, d, n, &ii);
+        }
+    }
+    if (!to_me && !bc) return;
+    if (ii.first && !game_port(ii.proto, ii.dport)) { vpn_drop("not for the game", d, n); return; } /* only the game is reachable */
+    vpn_log(p, false, d, n, &ii);
+    if (!tun_write(g_tun, d, n)) vpn_drop("the adapter refused it", d, n);
+    else {
+        g_vpn_in++;
+        p->down++;
+        if (!p->said_flow) {
+            p->said_flow = true;
+            say("Game traffic is flowing between you and %s (VPN mode).", who(p->id));
+        }
+    }
+}
+
+static void vpn_poll(void)
+{
+    if (!g_tun) return;
+    for (int k = 0; k < 512; k++) {
+        int r = tun_read(g_tun, g_buf, BUF_SIZE);
+        if (r <= 0) break;
+        vpn_from_adapter(g_buf, r);
+    }
+}
+
+/* Both sides have the adapter: stop the normal relay for this friend. */
+static void vpn_switch(Peer *p, uint32_t their_ip)
+{
+    p->vpn = true;
+    p->vpn_ip = their_ip;
+    for (int i = 0; i < p->nals; i++) sock_close(p->als[i].s);
+    for (int i = 0; i < p->nlis; i++) sock_close(p->lis[i].s);
+    p->nals = p->nlis = 0;
+    bool classic = false; /* anyone still on the normal connection? */
+    for (int i = 0; i < g_npeers; i++) classic |= g_peers[i].welcomed && !g_peers[i].vpn;
+    if (!classic) { /* then nothing needs the broadcast catchers on the game's ports */
+        for (int i = 0; i < g_ncatch; i++)
+            for (int j = 0; j < g_catch[i].ns; j++) sock_close(g_catch[i].s[j]);
+        g_ncatch = 0;
+    }
+    char t[16];
+    ip_text(their_ip, t);
+    say("VPN mode with %s: your game sees them at %s, a normal LAN address.", who(p->id), t);
+}
+
 /* ---------- game files check ----------
    Co-op drops when the two games aren't identical (a mod on one PC only, a
    different patch). Each SCCTLink lists the game's files - name, size and
@@ -2175,6 +2357,10 @@ static void on_ctl(u64 from, const uint8_t *m, int n)
         }
         p->last_heard = now_ms();
         if (c == 'M') { if (p->welcomed) mf_recv(p, m, n); return; }
+        if (c == 'n') { /* the friend's answer to VPN mode */
+            if (p->welcomed && g_tun && !p->vpn && n >= 3 && m[2] == 1) vpn_switch(p, vpn_addr(p->slot + 2));
+            return;
+        }
         if (c == 'H') {
             if (n < 2 || m[1] != PROTO) {
                 say("! %s runs a different SCCTLink version. Both of you need the same version (" VERSION ").", who(from));
@@ -2200,6 +2386,13 @@ static void on_ctl(u64 from, const uint8_t *m, int n)
             memcpy(w + 10, VERSION, (size_t)vl);
             send_ctl(from, w, 10 + vl);
             send_ports(p);
+            if (g_tun && !p->vpn) { /* offer VPN mode: 'N' 1 host's address, their address */
+                uint8_t nm[11] = { 'N', PROTO, 1 };
+                uint32_t me = g_vpn_ip, them = vpn_addr(p->slot + 2);
+                memcpy(nm + 3, &me, 4);
+                memcpy(nm + 7, &them, 4);
+                send_ctl(from, nm, 11);
+            }
             mf_send(p);
             for (int i = 0; i < p->nrudp; i++) alias_get(p, p->rudp[i], true);
             listeners_update(p);
@@ -2208,6 +2401,16 @@ static void on_ctl(u64 from, const uint8_t *m, int n)
         if (from != g_host || !p) return;
         g_host_last = now_ms();
         if (c == 'M') { if (p->welcomed) mf_recv(p, m, n); return; }
+        if (c == 'N' && n >= 11) { /* the host offers VPN mode */
+            uint32_t host_ip, my_ip;
+            memcpy(&host_ip, m + 3, 4);
+            memcpy(&my_ip, m + 7, 4);
+            bool ok = m[2] == 1 && vpn_in_net(host_ip) && vpn_in_net(my_ip) && host_ip != my_ip && vpn_up(my_ip);
+            uint8_t a[3] = { 'n', PROTO, (uint8_t)ok };
+            send_ctl(from, a, 3);
+            if (ok) vpn_switch(p, host_ip);
+            return;
+        }
         if (c == 'Z') {
             say("! %s removed you from their game (kicked). You can't link to it again until they host again.", who(g_host));
             if (g_nrejected < 16) g_rejected[g_nrejected++] = g_lobby;
@@ -2267,6 +2470,22 @@ static void drain_steam(void)
             const uint8_t *md = msg_data(msgs[i]);
             /* control messages are small, except the game file list ('M', sent in pieces) */
             if (sz > 0 && (sz < 1024 || (md[0] == 'M' && sz <= MF_CHUNK + 8))) on_ctl(msg_sender(msgs[i]), md, sz);
+            S.Msg_Release(msgs[i]);
+        }
+    }
+    while ((n = S.NM_ReceiveMessagesOnChannel(NM, CH_VPN, msgs, 64)) > 0) {
+        for (int i = 0; i < n; i++) {
+            u64 from = msg_sender(msgs[i]);
+            int sz = msg_size(msgs[i]);
+            Peer *p = find_peer(from);
+            if (p && p->welcomed && sz > 0 && sz <= 65535) {
+                if (!rate_ok(&p->rate, now_ms())) vpn_drop("too many packets", msg_data(msgs[i]), sz);
+                else {
+                    p->last_heard = now_ms();
+                    if (!g_is_host) g_host_last = now_ms();
+                    vpn_from_peer(p, msg_data(msgs[i]), sz);
+                }
+            }
             S.Msg_Release(msgs[i]);
         }
     }
@@ -2370,6 +2589,7 @@ static void stop_mode(bool quiet)
 {
     if (g_mode == MODE_IDLE) return;
     ring_dump("Stop");
+    vpn_down();
     g_ncmp = 0;
     if (g_nmfs >= 0) mods_publish();
     for (int i = 0; i < g_npeers; i++) send_ctl1(g_peers[i].id, 'B');
@@ -2392,6 +2612,7 @@ static void start_mode(int mode)
     if (!g_steam_ok && !(g_steam_ok = steam_start())) return;
     g_mode = mode;
     g_is_host = mode == MODE_HOST;
+    if (g_is_host) vpn_up(vpn_addr(1));
     scan_game(2);
     say("");
     if (g_is_host) {
@@ -2500,6 +2721,7 @@ void engine_run(const EngineOpts *o, Cmd first)
 {
     g_no_launch = o->no_launch;
     g_verbose = o->verbose;
+    g_vpn_wanted = o->vpn;
     g_t0 = now_ms();
     g_max_players_opt = o->max_players;
     if (o->exe && o->exe[0]) {
@@ -2546,6 +2768,7 @@ void engine_run(const EngineOpts *o, Cmd first)
                 if (!G.nudp) ring_dump("the game closed its network ports");
             }
             poll_catchers();
+            vpn_poll();
             for (int i = 0; i < g_npeers; i++) {
                 Peer *p = &g_peers[i];
                 peer_tick(p, t);
@@ -2605,6 +2828,7 @@ void engine_run(const EngineOpts *o, Cmd first)
     }
     if (g_steam_ok) {
         stop_mode(true);
+        vpn_down();
         S.Shutdown();
     }
     say("SCCTLink closed.");

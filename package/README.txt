@@ -1,4 +1,4 @@
-SCCTLink 0.7.1 - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
+SCCTLink 0.8-vpn - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
 ==============================================================================
 
 No VPN (no Hamachi, Radmin or ZeroTier), no port forwarding, no IP addresses.
@@ -13,11 +13,30 @@ Both players need:
   * each other on their Steam friends list
   * this folder unzipped somewhere (Desktop is fine). Keep SCCTLink.exe and
     steam_api.dll together.
-  * the SAME SCCTLink version (0.7.1) - older versions can't link with it.
+  * the SAME SCCTLink version (0.8-vpn) - older versions can't link with it.
 
 
-HOW TO PLAY
------------
+VPN MODE (EXPERIMENTAL BUILD)
+-----------------------------
+This build makes a virtual network adapter called "SCCTLink" on each PC,
+like Radmin VPN, but the game's packets travel through Steam. The game sees a
+normal LAN (the host is 10.231.0.1, friends 10.231.0.2 and up), so SCCTLink
+doesn't have to change anything inside the game's packets.
+  * SCCTLink asks for administrator rights when it starts (Windows needs them
+    to create the adapter). The first time, Windows installs the Wintun
+    driver (by the WireGuard project, signed by Microsoft). wintun.dll must
+    stay next to SCCTLink.exe; SCCTLink checks its SHA-256 before loading it.
+  * Only Splinter Cell's own packets go through the adapter, both ways. No
+    other program can use it, and your friends can't reach anything on your
+    PC except the game. No router ports are opened.
+  * Windows Firewall is told to leave this one adapter alone while SCCTLink
+    runs; that is undone and the adapter is removed when you click Stop or
+    close SCCTLink.
+  * Both players need this build. If one of you doesn't have it (or VPN mode
+    can't start), the normal SCCTLink connection is used automatically.
+  * The Log says "VPN mode with <friend>: your game sees them at 10.231.0.x"
+    when it's on.
+
 Everyone double-clicks SCCTLink.exe. A window opens (dark, with a Light
 mode switch at the top right).
 
@@ -157,7 +176,7 @@ TROUBLESHOOTING
     SCCTLink as administrator too (right-click SCCTLink.exe).
 
 
-VERSION 0.7.1 - WHAT IS TESTED
+VERSION 0.8-vpn - WHAT IS TESTED
 ----------------------------
 New in 0.6: the friend could see the host's game in the LAN list but not
 join. The game hides the host's real address inside an encrypted packet, so
@@ -181,6 +200,9 @@ different homes, into the first map).
 packets before a disconnect, with times, so a disconnect can be traced.
 0.7.1: the Mods tab and "Check again"; the check works with real game
 folders (0.7 dropped the big file list).
+0.8-vpn (experimental): VPN mode, see the top of this file. Tested on a
+simulated network (virtual adapters on two PCs, the game's discovery, Net-Z
+join, UDP and TCP, untouched); not yet with the real game on Windows.
 
 Tested end to end on a simulated network: two separate "PCs", a stand-in for
 the game that finds LAN games by broadcast (including the real game's

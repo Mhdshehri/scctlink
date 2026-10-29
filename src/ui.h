@@ -61,6 +61,7 @@ typedef struct {
     bool no_launch;       /* tests: never start the game */
     bool versus;
     bool verbose;         /* show network details in the log */
+    bool vpn;             /* VPN mode (experimental): a virtual network adapter */
     const char *exe;      /* game file name if it isn't the usual one */
 } EngineOpts;
 void engine_run(const EngineOpts *o, Cmd first);

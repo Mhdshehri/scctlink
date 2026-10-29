@@ -120,6 +120,7 @@ int main(int argc, char **argv)
         else if (!strcmp(a, "--exe") && i + 1 < argc) o.exe = argv[++i];
         else if (!strcmp(a, "--no-launch")) o.no_launch = true;
         else if (!strcmp(a, "--verbose")) o.verbose = true;
+        else if (!strcmp(a, "--vpn")) o.vpn = true;
         else if (!strcmp(a, "--yes")) g_yes = true;
         else if (lobby_parse(a)) lobby = lobby_parse(a); /* a lobby code or full id */
     }

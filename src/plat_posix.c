@@ -365,3 +365,43 @@ void dir_list(const char *dir, DirFn fn, void *ctx)
     }
     closedir(d);
 }
+
+/* ---- TUN device (tests: one per network namespace) ---- */
+#include <linux/if.h>
+#include <linux/if_tun.h>
+#include <sys/ioctl.h>
+#include <fcntl.h>
+struct Tun { int fd; };
+Tun *tun_open(uint32_t ip, char *err, int errn)
+{
+    int fd = open("/dev/net/tun", O_RDWR | O_NONBLOCK);
+    if (fd < 0) { snprintf(err, (size_t)errn, "no /dev/net/tun"); return 0; }
+    struct ifreq ifr;
+    memset(&ifr, 0, sizeof ifr);
+    ifr.ifr_flags = IFF_TUN | IFF_NO_PI;
+    snprintf(ifr.ifr_name, IFNAMSIZ, "scct0");
+    if (ioctl(fd, TUNSETIFF, &ifr) < 0) { snprintf(err, (size_t)errn, "TUNSETIFF failed"); close(fd); return 0; }
+    int s = socket(AF_INET, SOCK_DGRAM, 0);
+    struct sockaddr_in *a = (struct sockaddr_in *)&ifr.ifr_addr;
+    a->sin_family = AF_INET;
+    a->sin_addr.s_addr = ip;
+    ioctl(s, SIOCSIFADDR, &ifr);
+    a->sin_addr.s_addr = htonl(0xFFFFFF00u);
+    ioctl(s, SIOCSIFNETMASK, &ifr);
+    a->sin_addr.s_addr = (ip & htonl(0xFFFFFF00u)) | htonl(0xFF);
+    ioctl(s, SIOCSIFBRDADDR, &ifr);
+    ioctl(s, SIOCGIFFLAGS, &ifr);
+    ifr.ifr_flags |= IFF_UP | IFF_RUNNING | IFF_BROADCAST;
+    ioctl(s, SIOCSIFFLAGS, &ifr);
+    close(s);
+    Tun *t = calloc(1, sizeof *t);
+    t->fd = fd;
+    return t;
+}
+int tun_read(Tun *t, uint8_t *buf, int n)
+{
+    ssize_t r = read(t->fd, buf, (size_t)n);
+    return r > 0 ? (int)r : 0;
+}
+bool tun_write(Tun *t, const uint8_t *p, int n) { return write(t->fd, p, (size_t)n) == n; }
+void tun_close(Tun *t) { if (t) { close(t->fd); free(t); } }

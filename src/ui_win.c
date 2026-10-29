@@ -931,6 +931,7 @@ static DWORD WINAPI engine_thread(void *arg)
     (void)arg;
     EngineOpts o;
     memset(&o, 0, sizeof o);
+    o.vpn = true; /* experimental branch: VPN mode when SCCTLink runs as administrator */
     Cmd none = { CMD_NONE, 0 };
     engine_run(&o, none);
     return 0;
@@ -972,7 +973,7 @@ int main(int argc, char **argv)
     AdjustWindowRectEx(&r, style, 0, 0);
     int ww = r.right - r.left, wh = r.bottom - r.top;
     int x = (GetSystemMetrics(0) - ww) / 2, y = (GetSystemMetrics(1) - wh) / 2;
-    g_wnd = CreateWindowExW(0, wc.className, WTEXT("SCCTLink 0.7.1 - Splinter Cell: Chaos Theory"), style, x < 0 ? 0 : x,
+    g_wnd = CreateWindowExW(0, wc.className, WTEXT("SCCTLink 0.8-vpn - Splinter Cell: Chaos Theory"), style, x < 0 ? 0 : x,
                             y < 0 ? 0 : y, ww, wh, 0, 0, inst, 0);
     if (!g_wnd) return 1;
     build();
