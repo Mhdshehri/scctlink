@@ -71,6 +71,8 @@ def netz_checksum(data):
 
 
 def netz_packet(plain):
+    import hashlib
+    plain = plain + hashlib.md5(plain).digest()  # Quazal's MD5Checksum, as the real game
     p = bytes([0x61, 0x61, 0x05, 0x00]) + bytes(6) + rc4(NETZ_KEY, plain)
     return p + bytes([netz_checksum(p)])
 
@@ -90,9 +92,13 @@ def netz_data_open(p):
 
 
 def netz_open(p):
+    import hashlib
     if len(p) < 12 or p[2] & 7 != 5 or netz_checksum(p[:-1]) != p[-1]:
         return None
-    return rc4(NETZ_KEY, p[10:-1])
+    m = rc4(NETZ_KEY, p[10:-1])
+    if len(m) < 16 or hashlib.md5(m[:-16]).digest() != m[-16:]:
+        return None  # the real game drops a reply whose MD5 doesn't match
+    return m[:-16]
 
 
 ANY = os.environ.get("FAKE_BIND_ANY") == "1"  # bind ports on all addresses, like most games
@@ -337,7 +343,7 @@ def join(ip, bcast, n_stream):
     url = None
     end = time.time() + 15
     while time.time() < end and not url:
-        nq.sendto(netz_packet(struct.pack("<II", 8, 1) + os.urandom(4) + os.urandom(17)), (bcast, NETZ_DISC))
+        nq.sendto(netz_packet(struct.pack("<II", 8, 1) + os.urandom(4)), (bcast, NETZ_DISC))
         try:
             d, a = nq.recvfrom(2000)
             r = netz_open(d)

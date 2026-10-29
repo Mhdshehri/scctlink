@@ -25,7 +25,7 @@
 #include "plat.h"
 #include "ui.h"
 
-#define VERSION "0.6.1"
+#define VERSION "0.6.2"
 #define SCCT_APPID 13570
 #define SPACEWAR_APPID 480
 #define MAX_PEERS 3
@@ -297,13 +297,64 @@ static int netz_open(const uint8_t *d, int n, uint8_t *out)
     return len;
 }
 
+/* MD5 (RFC 1321): the discovery payload ends in the MD5 of the rest of it
+   (Quazal's MD5Checksum), so it must be redone after a swap. */
+static void md5(const uint8_t *msg, int len, uint8_t out[16])
+{
+    static const uint32_t K[64] = {
+        0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee, 0xf57c0faf, 0x4787c62a, 0xa8304613, 0xfd469501,
+        0x698098d8, 0x8b44f7af, 0xffff5bb1, 0x895cd7be, 0x6b901122, 0xfd987193, 0xa679438e, 0x49b40821,
+        0xf61e2562, 0xc040b340, 0x265e5a51, 0xe9b6c7aa, 0xd62f105d, 0x02441453, 0xd8a1e681, 0xe7d3fbc8,
+        0x21e1cde6, 0xc33707d6, 0xf4d50d87, 0x455a14ed, 0xa9e3e905, 0xfcefa3f8, 0x676f02d9, 0x8d2a4c8a,
+        0xfffa3942, 0x8771f681, 0x6d9d6122, 0xfde5380c, 0xa4beea44, 0x4bdecfa9, 0xf6bb4b60, 0xbebfbc70,
+        0x289b7ec6, 0xeaa127fa, 0xd4ef3085, 0x04881d05, 0xd9d4d039, 0xe6db99e5, 0x1fa27cf8, 0xc4ac5665,
+        0xf4292244, 0x432aff97, 0xab9423a7, 0xfc93a039, 0x655b59c3, 0x8f0ccc92, 0xffeff47d, 0x85845dd1,
+        0x6fa87e4f, 0xfe2ce6e0, 0xa3014314, 0x4e0811a1, 0xf7537e82, 0xbd3af235, 0x2ad7d2bb, 0xeb86d391 };
+    static const uint8_t R[64] = { 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
+        5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 4, 11, 16, 23, 4, 11, 16, 23,
+        4, 11, 16, 23, 4, 11, 16, 23, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21 };
+    uint32_t h0 = 0x67452301, h1 = 0xefcdab89, h2 = 0x98badcfe, h3 = 0x10325476;
+    uint64_t bits = (uint64_t)len * 8;
+    int total = ((len + 8) / 64 + 1) * 64;
+    for (int off = 0; off < total; off += 64) {
+        uint8_t blk[64];
+        for (int i = 0; i < 64; i++) {
+            int k = off + i;
+            blk[i] = k < len ? msg[k] : k == len ? 0x80 : k >= total - 8 ? (uint8_t)(bits >> (8 * (k - (total - 8)))) : 0;
+        }
+        uint32_t M[16], a = h0, b = h1, c = h2, dd = h3;
+        for (int i = 0; i < 16; i++) M[i] = (uint32_t)blk[4 * i] | (uint32_t)blk[4 * i + 1] << 8 | (uint32_t)blk[4 * i + 2] << 16 | (uint32_t)blk[4 * i + 3] << 24;
+        for (int i = 0; i < 64; i++) {
+            uint32_t f;
+            int g;
+            if (i < 16) { f = (b & c) | (~b & dd); g = i; }
+            else if (i < 32) { f = (dd & b) | (~dd & c); g = (5 * i + 1) % 16; }
+            else if (i < 48) { f = b ^ c ^ dd; g = (3 * i + 5) % 16; }
+            else { f = c ^ (b | ~dd); g = (7 * i) % 16; }
+            uint32_t t = dd;
+            dd = c;
+            c = b;
+            uint32_t x = a + f + K[i] + M[g];
+            b = b + (x << R[i] | x >> (32 - R[i]));
+            a = t;
+        }
+        h0 += a; h1 += b; h2 += c; h3 += dd;
+    }
+    uint32_t h[4] = { h0, h1, h2, h3 };
+    for (int i = 0; i < 16; i++) out[i] = (uint8_t)(h[i / 4] >> (8 * (i % 4)));
+}
+
 static int netz_swap(uint8_t *d, int n, uint32_t from, uint32_t to)
 {
     static uint8_t plain[MAX_GAME_PKT];
     int len = netz_open(d, n, plain);
     if (len <= 0) return 0;
-    int hits = swap_ip(plain, len, from, to);
+    uint8_t sum[16];
+    bool has_md5 = false;
+    if (len > 16) { md5(plain, len - 16, sum); has_md5 = !memcmp(sum, plain + len - 16, 16); }
+    int hits = swap_ip(plain, has_md5 ? len - 16 : len, from, to);
     if (!hits) return 0; /* finding the exact address text proves it really was Net-Z */
+    if (has_md5) md5(plain, len - 16, plain + len - 16);
     uint8_t key_part = (uint8_t)(d[n - 1] - netz_sum(d, n - 1));
     rc4_crypt(NETZ_LAN_KEY, 16, plain, len);
     memcpy(d + NETZ_HDR, plain, (size_t)len);
