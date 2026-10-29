@@ -16,6 +16,7 @@
 #include <unistd.h>
 
 volatile int g_quit;
+static int g_sock_err;
 
 static void on_sig(int s) { (void)s; g_quit = 1; }
 
@@ -56,7 +57,7 @@ sock_t udp_open(uint32_t ip, uint16_t port, int flags)
     if (flags & UDP_REUSE) setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &on, sizeof on);
     int big = 4 << 20;
     setsockopt(s, SOL_SOCKET, SO_RCVBUF, &big, sizeof big);
-    if (!bind4(s, ip, port)) { close(s); return BADSOCK; }
+    if (!bind4(s, ip, port)) { g_sock_err = errno; close(s); return BADSOCK; }
     fcntl(s, F_SETFL, O_NONBLOCK);
     return s;
 }
@@ -95,6 +96,8 @@ uint16_t sock_local_port(sock_t s)
 }
 
 void sock_close(sock_t s) { if (s != BADSOCK) close((int)s); }
+int sock_last_error(void) { return g_sock_err; }
+bool sock_err_denied(int err) { return err == EACCES; }
 
 sock_t tcp_listen(uint32_t ip, uint16_t port)
 {
@@ -268,6 +271,22 @@ int local_ipv4s(uint32_t *out, int max)
     return n;
 }
 
+int broadcast_listen_addrs(uint32_t *out, int max)
+{
+    struct ifaddrs *ifa, *i;
+    int n = 0;
+    if (getifaddrs(&ifa) != 0) return 0;
+    for (i = ifa; i && n < max; i = i->ifa_next) {
+        if (!i->ifa_addr || i->ifa_addr->sa_family != AF_INET || !i->ifa_netmask) continue;
+        uint32_t ip = ((struct sockaddr_in *)i->ifa_addr)->sin_addr.s_addr;
+        uint32_t mask = ((struct sockaddr_in *)i->ifa_netmask)->sin_addr.s_addr;
+        if (is_loop(ip)) continue;
+        out[n++] = ip | ~mask; /* the subnet's broadcast address */
+    }
+    freeifaddrs(ifa);
+    return n;
+}
+
 /* Tests drive keys through stdin: one key per line. */
 int key_poll(void)
 {
@@ -277,6 +296,7 @@ int key_poll(void)
     if (poll(&p, 1, 0) <= 0) return -1;
     int c = getchar();
     if (c == EOF) { eof = true; return -1; }
+    if (c == '^') { int d; while ((d = getchar()) != EOF && d != '\n') {} return KEY_PASTE; }
     int d;
     while ((d = getchar()) != EOF && d != '\n') {}
     return c;
@@ -291,7 +311,20 @@ bool read_line(char *buf, int n)
 }
 
 void clipboard_set(const char *t) { (void)t; }
-void open_url(const char *u) { printf("[mock] would open %s\n", u); }
+int clipboard_get(char *out, int n)
+{   /* tests: the "clipboard" is the env var MOCK_CLIPBOARD */
+    const char *c = getenv("MOCK_CLIPBOARD");
+    snprintf(out, (size_t)n, "%s", c ? c : "");
+    return (int)strlen(out);
+}
+void open_url(const char *u) { log_line(u); printf("[mock] would open %s\n", u); }
+bool file_exists(const char *path) { return access(path, F_OK) == 0; }
+bool run_program(const char *exe, const char *args, const char *dir)
+{
+    printf("[mock] would run %s %s (in %s)\n", exe, args, dir);
+    return true;
+}
+bool game_is_running(const char *prefix) { GameNet g; game_scan(prefix, &g); return g.running; }
 void set_title(const char *t) { (void)t; }
 void u64_to_str(u64 v, char out[24]) { snprintf(out, 24, "%llu", (unsigned long long)v); }
 u64 str_to_u64(const char *s) { return strtoull(s, 0, 10); }

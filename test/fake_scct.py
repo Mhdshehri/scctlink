@@ -25,21 +25,29 @@ import sys
 import threading
 import time
 
-ctypes.CDLL(None).prctl(15, b"splintercell3", 0, 0, 0)  # PR_SET_NAME
+import os
+ctypes.CDLL(None).prctl(15, os.environ.get("FAKE_NAME", "splintercell3").encode(), 0, 0, 0)  # PR_SET_NAME
 
 GAME, BEACON, LOBBY, PUSH = 7776, 8888, 7777, 9999
 
 
+ANY = os.environ.get("FAKE_BIND_ANY") == "1"  # bind ports on all addresses, like most games
+
+
 def host(ip, bcast):
+    bind_ip = "0.0.0.0" if ANY else ip
     g = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     g.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 8 << 20)
-    g.bind((ip, GAME))
+    if ANY:  # Windows lets a game bind 0.0.0.0:port next to SCCTLink's specific addresses; Linux needs this
+        for x in (g,):
+            x.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    g.bind((bind_ip, GAME))
     b = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     b.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    b.bind((ip, BEACON))
+    b.bind((bind_ip, BEACON))
     t = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     t.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    t.bind((ip, LOBBY))
+    t.bind((bind_ip, LOBBY))
     t.listen(4)
     print("HOST READY", flush=True)
 
@@ -48,7 +56,8 @@ def host(ip, bcast):
             d, a = b.recvfrom(2000)
             if d.startswith(b"QUERY"):
                 txt = f"{ip}:{LOBBY}".encode()
-                b.sendto(b"ANNOUNCE" + socket.inet_aton(ip) + struct.pack(">H", GAME) + bytes([len(txt)]) + txt, a)
+                b.sendto(b"ANNOUNCE" + socket.inet_aton(ip) + struct.pack(">H", GAME) + bytes([len(txt)]) + txt
+                         + socket.inet_aton(ip)[::-1], a)  # also as a little-endian number
 
     def push():
         while True:
@@ -94,6 +103,17 @@ def result(k, v):
 
 
 def join(ip, bcast, n_stream):
+    held = []
+    if ANY:  # the joiner's game holds the same port numbers as the host's
+        # (not BEACON: on Linux SCCTLink's per-address broadcast catcher can't hear
+        # broadcasts, which Windows delivers to it; the clash that matters is GAME)
+        for port in (GAME,):
+            x = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            # Windows lets a game bind 0.0.0.0:port next to SCCTLink's 127.x:port
+            # (MS "SO_REUSEADDR and SO_EXCLUSIVEADDRUSE" table); Linux needs this flag
+            x.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            x.bind(("0.0.0.0", port))
+            held.append(x)
     q = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     q.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
     q.bind((ip, 0))
@@ -119,6 +139,8 @@ def join(ip, bcast, n_stream):
     hip = socket.inet_ntoa(d[8:12])
     gport = struct.unpack(">H", d[12:14])[0]
     txt = d[15:15 + d[14]].decode()
+    le = d[15 + d[14]:19 + d[14]]
+    result("announce_ip_le", socket.inet_ntoa(le[::-1]) if len(le) == 4 else None)
     result("found_host", True)
     result("announce_from", a[0])
     result("announce_ip", hip)
@@ -137,11 +159,15 @@ def join(ip, bcast, n_stream):
             pass
     result("push", list(got_push) if got_push else None)
 
-    g = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    if ANY:  # like the real game: game traffic leaves from its own fixed port
+        g = held[0]
+    else:
+        g = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        g.bind((ip, 0))
     g.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 8 << 20)
-    g.bind((ip, 0))
     g.settimeout(1.0)
     dest = (hip, gport)
+
 
     # ping-pong
     ok = 0

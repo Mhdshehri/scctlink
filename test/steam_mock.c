@@ -19,6 +19,7 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <sys/file.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -33,6 +34,7 @@ static int naccepted;
 static u64 requested[64];
 static int nrequested;
 static u64 my_lobby;
+static int ice_off = -1; /* SetGlobalConfigValueInt32(P2P_Transport_ICE_Enable) */
 static u64 next_call = 1000;
 
 typedef struct Msg { void *data; int size; u64 sender; int ch; u64 due; struct Msg *next; } Msg;
@@ -68,6 +70,19 @@ static void push_result(int id, const void *p, int size, u64 call)
 /* ---- lobby files: "owner <id>", "member <id>", "data <k> <v>" lines ---- */
 
 typedef struct { u64 owner; u64 mem[16]; int nmem; char k[8][32], v[8][64]; int nd; bool exists; } Lobby;
+
+/* Lobby files are shared by several test processes: every read-modify-write
+   happens under a lock, as it would on Steam's servers (from CoFLink 0.3). */
+static int lock_fd = -1;
+static void lobby_lock(void)
+{
+    if (lock_fd < 0) {
+        char p[600]; snprintf(p, sizeof p, "%s/lobby.lock", dir);
+        lock_fd = open(p, O_CREAT | O_RDWR, 0600);
+    }
+    if (lock_fd >= 0) flock(lock_fd, LOCK_EX);
+}
+static void lobby_unlock(void) { if (lock_fd >= 0) flock(lock_fd, LOCK_UN); }
 
 static void lobby_path(u64 l, char *out) { snprintf(out, 600, "%s/lobby_%llu", dir, (unsigned long long)l); }
 
@@ -233,7 +248,7 @@ static int m_InitFlat(char *err)
     return 0;
 }
 static bool m_IsSteamRunning(void) { return true; }
-static void m_Shutdown(void) { playing_write(0); struct sockaddr_un a; addr_of(me, &a); unlink(a.sun_path); }
+static void m_Shutdown(void) { if (ice_off == 1) printf("[mock] direct connections were off\n"); playing_write(0); struct sockaddr_un a; addr_of(me, &a); unlink(a.sun_path); }
 static int32_t m_GetHSteamPipe(void) { return 1; }
 static void m_MD_Init(void) {}
 static void m_MD_RunFrame(int32_t p) { (void)p; poll_net(); watch_lobby(); check_invites(); }
@@ -280,7 +295,7 @@ static void load_friends(void)
 }
 static int m_GetFriendCount(void *s, int fl) { (void)s; (void)fl; load_friends(); return nfriends; }
 static u64 m_GetFriendByIndex(void *s, int i, int fl) { (void)s; (void)fl; return friends[i]; }
-static int m_GetFriendPersonaState(void *s, u64 id) { (void)s; (void)id; return 1; }
+static int m_GetFriendPersonaState(void *s, u64 id) { (void)s; (void)id; return getenv("MOCK_FRIENDS_LOOK_OFFLINE") ? 0 : 1; }
 static const char *m_GetFriendPersonaName(void *s, u64 id)
 {
     (void)s; static char n[4][32]; static int k; char *o = n[k++ & 3];
@@ -289,6 +304,7 @@ static const char *m_GetFriendPersonaName(void *s, u64 id)
 static bool m_GetFriendGamePlayed(void *s, u64 id, void *info)
 {
     (void)s;
+    if (getenv("MOCK_NO_GAMEINFO")) return false; /* friend's game details are private */
     char p[600]; snprintf(p, sizeof p, "%s/playing_%llu", dir, (unsigned long long)id);
     FILE *f = fopen(p, "r");
     if (!f) return false;
@@ -297,6 +313,7 @@ static bool m_GetFriendGamePlayed(void *s, u64 id, void *info)
     fclose(f);
     if (ok != 1) return false;
     u64 game = 480, L = getenv("MOCK_HIDE_LOBBY") ? 0 : l;
+    if (getenv("MOCK_FRIEND_APP")) { game = strtoull(getenv("MOCK_FRIEND_APP"), 0, 10); L = 0; } /* in another game */
     memset(info, 0, 24);
     memcpy(info, &game, 8);
     memcpy((char *)info + 16, &L, 8);
@@ -306,8 +323,8 @@ static bool m_HasFriend(void *s, u64 id, int fl) { (void)s; (void)fl; load_frien
 static bool m_SetRichPresence(void *s, const char *k, const char *v)
 {
     (void)s;
-    if (strcmp(k, "connect") != 0) return true;
-    char p[600]; snprintf(p, sizeof p, "%s/rp_%llu", dir, (unsigned long long)me);
+    if (strcmp(k, "connect") && strcmp(k, "scctlink_lobby")) return true;
+    char p[600]; snprintf(p, sizeof p, "%s/rp_%s_%llu", dir, k, (unsigned long long)me);
     FILE *f = fopen(p, "w"); fputs(v, f); fclose(f);
     return true;
 }
@@ -316,8 +333,8 @@ static const char *m_GetFriendRichPresence(void *s, u64 id, const char *k)
     (void)s;
     static char v[256];
     v[0] = 0;
-    if (strcmp(k, "connect") != 0) return v;
-    char p[600]; snprintf(p, sizeof p, "%s/rp_%llu", dir, (unsigned long long)id);
+    if ((strcmp(k, "connect") && strcmp(k, "scctlink_lobby")) || getenv("MOCK_HIDE_RP")) return v;
+    char p[600]; snprintf(p, sizeof p, "%s/rp_%s_%llu", dir, k, (unsigned long long)id);
     FILE *f = fopen(p, "r");
     if (f) { if (!fgets(v, sizeof v, f)) v[0] = 0; fclose(f); }
     return v;
@@ -326,14 +343,16 @@ static void m_RequestFriendRichPresence(void *s, u64 id) { (void)s; (void)id; }
 static void m_ClearRichPresence(void *s)
 {
     (void)s;
-    char p[600]; snprintf(p, sizeof p, "%s/rp_%llu", dir, (unsigned long long)me);
+    char p[600]; snprintf(p, sizeof p, "%s/rp_connect_%llu", dir, (unsigned long long)me);
+    unlink(p);
+    snprintf(p, sizeof p, "%s/rp_scctlink_lobby_%llu", dir, (unsigned long long)me);
     unlink(p);
 }
 
 static u64 m_CreateLobby(void *s, int type, int max)
 {
     (void)s; (void)type; (void)max;
-    u64 l = 109775240000000000ULL + me * 10 + (u64)(rand() % 10);
+    u64 l = 0x0186000000000000ULL + me * 10 + (u64)(rand() % 10); /* like real lobby ids */
     Lobby L = { 0 };
     L.owner = me; L.mem[L.nmem++] = me; L.exists = true;
     lobby_write(l, &L);
@@ -353,6 +372,7 @@ static u64 m_JoinLobby(void *s, u64 l)
 {
     (void)s;
     u64 call = next_call++;
+    lobby_lock();
     Lobby L = lobby_read(l);
     uint32_t resp = 2;
     if (L.exists && L.nmem < 16) {
@@ -362,6 +382,7 @@ static u64 m_JoinLobby(void *s, u64 l)
         playing_write(l);
         resp = 1;
     }
+    lobby_unlock();
     uint8_t e[24] = { 0 };
     memcpy(e, &l, 8); memcpy(e + 16, &resp, 4);
     push_result(504, e, 24, call);
@@ -370,6 +391,7 @@ static u64 m_JoinLobby(void *s, u64 l)
 static void m_LeaveLobby(void *s, u64 l)
 {
     (void)s;
+    lobby_lock();
     Lobby L = lobby_read(l);
     if (L.exists) {
         if (L.owner == me) { char p[600]; lobby_path(l, p); unlink(p); }
@@ -378,19 +400,22 @@ static void m_LeaveLobby(void *s, u64 l)
             lobby_write(l, &L);
         }
     }
+    lobby_unlock();
     if (my_lobby == l) { my_lobby = 0; memset(&last_seen, 0, sizeof last_seen); }
     playing_write(0);
 }
 static bool m_SetLobbyData(void *s, u64 l, const char *k, const char *v)
 {
     (void)s;
+    lobby_lock();
     Lobby L = lobby_read(l);
-    if (!L.exists || L.nd >= 8) return false;
+    if (!L.exists || L.nd >= 8) { lobby_unlock(); return false; }
     snprintf(L.k[L.nd], 32, "%s", k);
     snprintf(L.v[L.nd], 64, "%s", *v ? v : "-");
     for (char *c = L.v[L.nd]; *c; c++) if (*c == ' ') *c = '_';
     L.nd++;
     lobby_write(l, &L);
+    lobby_unlock();
     return true;
 }
 static const char *m_GetLobbyData(void *s, u64 l, const char *k)
@@ -407,6 +432,7 @@ static u64 m_GetLobbyMemberByIndex(void *s, u64 l, int i) { (void)s; Lobby L = l
 static bool m_InviteUserToLobby(void *s, u64 l, u64 user)
 {
     (void)s;
+    if (getenv("MOCK_INVITES_LOST")) return true; /* Steam says sent, the friend can't use it */
     char p[600]; snprintf(p, sizeof p, "%s/invite_%llu", dir, (unsigned long long)user);
     FILE *f = fopen(p, "w"); fprintf(f, "%llu %llu\n", (unsigned long long)l, (unsigned long long)me); fclose(f);
     return true;
@@ -457,6 +483,15 @@ static void m_SetSteamID64(void *id, u64 v) { int32_t t = 16, sz = 8; memcpy(id,
 static u64 m_GetSteamID64(void *id) { int32_t t; memcpy(&t, id, 4); if (t != 16) return 0; u64 v; memcpy(&v, (char *)id + 8, 8); return v; }
 static void m_Release(void *m) { Msg *x = m; free(x->data); free(x); }
 static int m_InitRelay(void *s) { (void)s; return 1; }
+static bool m_SetGlobalConfigInt32(void *s, int value, int32_t v) { (void)s; if (value == 104) ice_off = v == 0; return true; }
+static uint32_t m_GetAppInstallDir(void *s, uint32_t app, char *buf, uint32_t n)
+{
+    (void)s; (void)app;
+    const char *d = getenv("MOCK_GAME_DIR");
+    if (!d || !n) return 0;
+    snprintf(buf, n, "%s", d);
+    return (uint32_t)strlen(buf) + 1;
+}
 
 const char *steam_load(void)
 {
@@ -464,7 +499,8 @@ const char *steam_load(void)
     S.GetHSteamPipe = m_GetHSteamPipe; S.MD_Init = m_MD_Init; S.MD_RunFrame = m_MD_RunFrame;
     S.MD_GetNextCallback = m_MD_GetNextCallback; S.MD_FreeLastCallback = m_MD_FreeLastCallback;
     S.MD_GetAPICallResult = m_MD_GetAPICallResult;
-    S.SteamUser = S.SteamFriends = S.SteamMatchmaking = S.SteamNetMsgs = S.SteamNetUtils = m_iface;
+    S.SteamUser = S.SteamFriends = S.SteamMatchmaking = S.SteamNetMsgs = S.SteamNetUtils = S.SteamApps = m_iface;
+    S.Apps_GetAppInstallDir = m_GetAppInstallDir;
     S.User_GetSteamID = m_GetSteamID; S.User_BLoggedOn = m_BLoggedOn;
     S.Friends_GetPersonaName = m_GetPersonaName; S.Friends_GetFriendCount = m_GetFriendCount;
     S.Friends_GetFriendByIndex = m_GetFriendByIndex; S.Friends_GetFriendPersonaState = m_GetFriendPersonaState;
@@ -477,7 +513,7 @@ const char *steam_load(void)
     S.NM_SendMessageToUser = m_SendMessageToUser; S.NM_ReceiveMessagesOnChannel = m_ReceiveMessagesOnChannel;
     S.NM_AcceptSessionWithUser = m_AcceptSessionWithUser; S.NM_CloseSessionWithUser = m_CloseSessionWithUser;
     S.Ident_SetSteamID64 = m_SetSteamID64; S.Ident_GetSteamID64 = m_GetSteamID64;
-    S.Msg_Release = m_Release; S.NU_InitRelayNetworkAccess = m_InitRelay;
+    S.Msg_Release = m_Release; S.NU_InitRelayNetworkAccess = m_InitRelay; S.NU_SetGlobalConfigInt32 = m_SetGlobalConfigInt32;
     return 0;
 }
 

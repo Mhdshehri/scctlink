@@ -29,6 +29,8 @@ typedef struct {
     void *(*SteamMatchmaking)(void);
     void *(*SteamNetMsgs)(void);
     void *(*SteamNetUtils)(void);
+    void *(*SteamApps)(void);
+    uint32_t (*Apps_GetAppInstallDir)(void *self, uint32_t app, char *buf, uint32_t n);
 
     u64 (*User_GetSteamID)(void *self);
     bool (*User_BLoggedOn)(void *self);
@@ -64,6 +66,7 @@ typedef struct {
     u64 (*Ident_GetSteamID64)(void *ident);
     void (*Msg_Release)(void *msg);
     int (*NU_InitRelayNetworkAccess)(void *self);
+    bool (*NU_SetGlobalConfigInt32)(void *self, int value, int32_t v);
 } SteamApi;
 
 extern SteamApi S;
@@ -80,6 +83,7 @@ u64 msg_sender(void *m);
 enum {
     CB_GameLobbyJoinRequested = 333,
     CB_GameRichPresenceJoinRequested = 337,
+    CB_LobbyInvite = 503,
     CB_LobbyEnter = 504,
     CB_LobbyChatUpdate = 506,
     CB_LobbyCreated = 513,

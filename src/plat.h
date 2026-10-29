@@ -21,6 +21,8 @@ int udp_recvfrom(sock_t s, void *p, int n, uint32_t *ip, uint16_t *port); /* >0 
 int udp_sendto(sock_t s, const void *p, int n, uint32_t ip, uint16_t port);
 uint16_t sock_local_port(sock_t s);
 void sock_close(sock_t s);
+int sock_last_error(void);      /* error code of the last failed socket call */
+bool sock_err_denied(int err);  /* \"access denied\" (another user / administrator holds the port) */
 
 /* ---- TCP (non-blocking after setup) ---- */
 sock_t tcp_listen(uint32_t ip, uint16_t port);
@@ -45,12 +47,25 @@ typedef struct {
 /* Fill *g for the process whose file name starts with exe_prefix (case-insensitive). */
 void game_scan(const char *exe_prefix, GameNet *g);
 int local_ipv4s(uint32_t *out, int max); /* this PC's own IPv4 addresses, loopback excluded */
+/* Addresses to listen on for LAN broadcasts without taking 0.0.0.0:
+   Windows: this PC's addresses; Linux (tests): the subnet broadcast addresses. */
+int broadcast_listen_addrs(uint32_t *out, int max);
 
 /* ---- console etc. ---- */
 int key_poll(void);              /* key pressed, or -1. Never blocks. */
 bool read_line(char *buf, int n);/* blocking line read from the console */
 void clipboard_set(const char *text);
+int clipboard_get(char *out, int n); /* text on the clipboard, 0 if none */
+#define KEY_PASTE 22                  /* key_poll() value for Ctrl+V */
 void open_url(const char *url);
+bool file_exists(const char *path);
+bool run_program(const char *exe, const char *args, const char *dir); /* start it, don't wait */
+bool game_is_running(const char *exe_prefix);
+#ifdef _WIN32
+#define PATHSEP "\\"
+#else
+#define PATHSEP "/"
+#endif
 void set_title(const char *t);
 
 void u64_to_str(u64 v, char out[24]);

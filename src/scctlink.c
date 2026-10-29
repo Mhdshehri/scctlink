@@ -23,8 +23,9 @@
  * playbook/networking-steam-spacewar.md, and the author's CoFLink. MIT license. */
 #include "steam.h"
 #include "plat.h"
+#include "ui.h"
 
-#define VERSION "0.1"
+#define VERSION "0.5"
 #define SCCT_APPID 13570
 #define SPACEWAR_APPID 480
 #define MAX_PEERS 3
@@ -32,7 +33,7 @@
 #define CH_GAME 0
 #define CH_CTL 1
 #define CH_TCP 2
-#define PROTO '1'
+#define PROTO '2' /* relay protocol; both players need the same */
 #define KEEPALIVE_MS 1000
 #define PEER_TIMEOUT_MS 30000
 #define HOST_QUIET_MS 15000
@@ -45,13 +46,21 @@
 #define TCP_OUTBUF_MAX (8 << 20)
 #define HDR 7 /* kind, src port, dst port, seq */
 
-static void *U, *F, *MM, *NM, *NU;
+static void *U, *F, *MM, *NM, *NU, *AP;
 static int32_t g_pipe;
 static u64 g_me, g_lobby, g_host, g_joining;
-static bool g_is_host;
-static int g_max_players = 2;
-static bool g_no_launch, g_auto_yes, g_verbose;
+static int g_mode;      /* MODE_IDLE / MODE_HOST / MODE_JOIN */
+static bool g_is_host;  /* g_mode == MODE_HOST */
+static bool g_steam_ok;
+static int g_max_players = 2, g_max_players_opt;
+static bool g_no_launch, g_verbose;
 static const char *g_exe = "splintercell3";
+static const char *g_exe_opt;
+static bool g_versus; /* Spies vs. Mercenaries (SCCT_Versus.exe), up to 4 players */
+/* What the player does in the game menus, per mode. */
+#define HOST_MENU (g_versus ? "In Versus: create a LAN game" : "Co-op -> LAN -> Create game")
+#define JOIN_MENU (g_versus ? "In Versus: open the LAN game list and join the host" : "Co-op -> LAN -> Join game")
+#define MODE_NAME (g_versus ? "Versus" : "Co-op")
 static uint8_t g_buf[BUF_SIZE];
 static uint8_t g_out[BUF_SIZE + 64];
 
@@ -69,8 +78,7 @@ static void say(const char *fmt, ...)
 #endif
     va_end(ap);
     b[sizeof b - 1] = 0;
-    printf("%s\n", b);
-    fflush(0);
+    ui_log(b);
     log_line(b);
 }
 
@@ -87,9 +95,9 @@ static void note(const char *fmt, ...)
 #endif
     va_end(ap);
     b[sizeof b - 1] = 0;
-    if (g_verbose) { printf("  . %s\n", b); fflush(0); }
     char l[1220];
     sfmt(l, sizeof l, "  . %s", b);
+    if (g_verbose) ui_log(l);
     log_line(l);
 }
 
@@ -114,6 +122,15 @@ static const char *clean(const char *n)
         unsigned char c = (unsigned char)n[i];
         o[i] = (c < 0x20 || c == 0x7f) ? '?' : (char)c;
     }
+    if (n && n[i]) { /* cut short: don't leave half of a UTF-8 character (e.g. Arabic) */
+        int j = i;
+        while (j > 0 && ((unsigned char)o[j - 1] & 0xC0) == 0x80) j--;
+        if (j > 0) {
+            unsigned char lead = (unsigned char)o[j - 1];
+            int need = lead >= 0xF0 ? 4 : lead >= 0xE0 ? 3 : lead >= 0xC0 ? 2 : 1;
+            if (j - 1 + need > i) i = j - 1; /* incomplete: drop it */
+        }
+    }
     o[i] = 0;
     return o;
 }
@@ -125,14 +142,13 @@ static const char *who(u64 id)
     return (n && *n && strcmp(n, "[unknown]") != 0) ? clean(n) : idstr(id);
 }
 
-static bool ask_yes(const char *question)
+static const char *codestr(u64 lobby)
 {
-    if (g_auto_yes) return true;
-    printf("%s (Y/N): ", question);
-    fflush(0);
-    char line[16];
-    if (!read_line(line, sizeof line)) return false;
-    return line[0] == 'y' || line[0] == 'Y';
+    static char ring[4][16];
+    static int k;
+    char *o = ring[k++ & 3];
+    lobby_code(lobby, o);
+    return o;
 }
 
 /* ---------- addresses ---------- */
@@ -201,6 +217,10 @@ static int swap_ip(uint8_t *p, int n, uint32_t from, uint32_t to)
     memcpy(t, &to, 4);
     for (int i = 0; i + 4 <= n; i++)
         if (p[i] == f[0] && !memcmp(p + i, f, 4)) { memcpy(p + i, t, 4); hits++; i += 3; }
+    /* the same address in the other byte order (a number in memory order) */
+    uint8_t fr[4] = { f[3], f[2], f[1], f[0] }, tr[4] = { t[3], t[2], t[1], t[0] };
+    for (int i = 0; i + 4 <= n; i++)
+        if (p[i] == fr[0] && !memcmp(p + i, fr, 4)) { memcpy(p + i, tr, 4); hits++; i += 3; }
     char ft[16], tt[16];
     ip_text(from, ft);
     ip_text(to, tt);
@@ -239,6 +259,11 @@ static void scan_game(int force)
     g_scan_at = t;
     game_scan(g_exe, &G);
     refresh_my_ips();
+    /* Only call the game closed after it has been gone for 5 s, so a short
+       glitch never makes the two sides flap between running / not running. */
+    static u64 seen_at;
+    if (G.running) seen_at = t;
+    else if (g_was_running && t - seen_at < 5000) G.running = true;
     if (G.running != g_was_running) {
         g_was_running = G.running;
         say(G.running ? "Splinter Cell is running." : "Splinter Cell is not running (or was closed).");
@@ -302,6 +327,7 @@ static void send_msg(u64 to, const void *p, int n, bool reliable, int ch)
 
 static void send_ctl(u64 to, const void *p, int n) { send_msg(to, p, n, true, CH_CTL); }
 static void send_ctl1(u64 to, char c) { char m[2] = { c, PROTO }; send_ctl(to, m, 2); }
+static bool kicked(u64 id);
 
 static void close_session(u64 with)
 {
@@ -356,7 +382,7 @@ typedef struct {
     Alias als[MAX_ALIAS]; int nals;
     Listener lis[MAX_GPORTS]; int nlis;
     Stream st[MAX_STREAMS]; int nst;
-    u64 up, down, lost, reordered, swapped, dropped_noport;
+    u64 up, down, lost, reordered, swapped, dropped_noport, cap_in, cap_out;
     uint16_t tx_seq, rx_seq; bool rx_started;
     double rtt; bool have_rtt;
     Rate rate;
@@ -432,15 +458,48 @@ static void drop_peer(u64 id, const char *why)
     }
 }
 
+/* Friends the host kicked: blocked until the host stops hosting (from CoFLink 0.9). */
+static u64 g_kicked[32], g_kick_told[32];
+static int g_nkicked;
+
+static int kicked_index(u64 id)
+{
+    for (int i = 0; i < g_nkicked; i++)
+        if (g_kicked[i] == id) return i;
+    return -1;
+}
+static bool kicked(u64 id) { return kicked_index(id) >= 0; }
+
 /* Who may reach the host's game: only people in the lobby who are also on the
-   host's own Steam friends list. Everyone else is dropped. */
+   host's own Steam friends list (and not kicked). Everyone else is dropped. */
 static bool allowed_peer(u64 id)
 {
-    return id && id != g_me && in_lobby(id) && S.Friends_HasFriend(F, id, FRIEND_IMMEDIATE);
+    return id && id != g_me && !kicked(id) && in_lobby(id) && S.Friends_HasFriend(F, id, FRIEND_IMMEDIATE);
+}
+
+/* tell a kicked friend, at most every 2 s */
+static void tell_kicked(u64 id)
+{
+    int k = kicked_index(id);
+    if (k >= 0 && now_ms() - g_kick_told[k] > 2000) { send_ctl1(id, 'Z'); g_kick_told[k] = now_ms(); }
 }
 
 static void note_ignored(u64 id)
 {
+    if (kicked(id)) { tell_kicked(id); return; }
+    /* Right after someone joins, Steam may not have filled in the friends list
+       or the lobby yet: only report a block that still holds 3 s later. */
+    static u64 first_id[16], first_at[16];
+    int slot = -1;
+    for (int i = 0; i < 16; i++) if (first_id[i] == id) slot = i;
+    if (slot < 0) {
+        for (int i = 0; i < 16 && slot < 0; i++) if (!first_id[i]) slot = i;
+        if (slot < 0) slot = (int)(now_ms() % 16);
+        first_id[slot] = id;
+        first_at[slot] = now_ms();
+        return;
+    }
+    if (now_ms() - first_at[slot] < 3000) return;
     for (int i = 0; i < g_nignored; i++)
         if (g_ignored[i] == id) return;
     if (g_nignored < 16) g_ignored[g_nignored++] = id;
@@ -450,26 +509,76 @@ static void note_ignored(u64 id)
         say("! Blocked traffic from %s: they are not in your lobby.", who(id));
 }
 
+/* Host: "Kick" button. The friend is cut off and can't link again until the
+   host clicks Stop (from CoFLink 0.9). */
+static void kick_peer(u64 id)
+{
+    if (!g_is_host || !id) return;
+    bool linked = find_peer(id) != 0;
+    if (!kicked(id) && g_nkicked < 32) { g_kick_told[g_nkicked] = 0; g_kicked[g_nkicked++] = id; }
+    tell_kicked(id);
+    if (linked) drop_peer(id, "kicked by you");
+    say("%s is kicked. They can't link to this game again until you click Stop.", who(id));
+}
+
+/* "1.2.3" -> comparable number */
+static uint32_t ver_num(const char *v)
+{
+    uint32_t r = 0;
+    for (int part = 0; part < 3; part++) {
+        uint32_t x = 0;
+        while (*v >= '0' && *v <= '9') { if (x < 999) x = x * 10 + (uint32_t)(*v - '0'); v++; }
+        r = r * 1000 + x;
+        if (*v == '.') v++;
+    }
+    return r;
+}
+
+static void version_notice(u64 who_id, const char *theirs)
+{
+    if (!theirs[0] || !strcmp(theirs, VERSION)) return;
+    if (ver_num(theirs) > ver_num(VERSION))
+        say("! %s has a newer SCCTLink (%s, you have " VERSION "). Update yours: github.com/Mhdshehri/scctlink", who(who_id), clean(theirs));
+    else
+        say("! %s has an older SCCTLink (%s, you have " VERSION "). Ask them to update.", who(who_id), clean(theirs));
+}
+
 /* ---------- UDP: alias sockets and broadcast catchers ---------- */
+
+static bool g_said_admin;
 
 static Alias *alias_get(Peer *p, uint16_t port, bool create)
 {
     for (int i = 0; i < p->nals; i++) if (p->als[i].port == port) return &p->als[i];
     if (!create || p->nals >= MAX_ALIAS || !p->alias) return 0;
+    /* Open the other game's port on its private address early: Windows still
+       lets our own game open the same port number on all addresses later. */
     sock_t s = udp_open(p->alias, port, UDP_REUSE);
+    uint16_t local = port;
     if (s == BADSOCK) {
+        /* Usually our own game holds this port number. Use another port on the
+           same private address: the game answers to wherever a packet came from. */
+        int err = sock_last_error();
+        s = udp_open(p->alias, 0, 0);
+        if (s == BADSOCK) { note("could not open any UDP port on %s (error %d)", ip_kind(p->alias), err); return 0; }
+        local = sock_local_port(s);
         static uint16_t warned[64]; static int nw;
         bool seen = false;
         for (int i = 0; i < nw; i++) seen |= warned[i] == port;
         if (!seen && nw < 64) {
             warned[nw++] = port;
-            say("! Could not open UDP port %u on %s (another program uses it).", (unsigned)port, ip_kind(p->alias));
+            say("(UDP port %u is busy on this PC - error %d. %s's port %u goes through port %u here instead.)",
+                (unsigned)port, err, who(p->id), (unsigned)port, (unsigned)local);
+            if (sock_err_denied(err) && !g_said_admin) {
+                g_said_admin = true;
+                say("! Windows refused a port that Splinter Cell uses. If the game runs as administrator,");
+                say("  close SCCTLink and start it as administrator too (right-click SCCTLink.exe).");
+            }
         }
-        return 0;
     }
     Alias *a = &p->als[p->nals++];
     a->port = port; a->s = s; a->pkts = 0;
-    note("UDP %s:%u stands for %s's game port %u", ip_kind(p->alias), (unsigned)port, who(p->id), (unsigned)port);
+    note("UDP %s:%u stands for %s's game port %u", ip_kind(p->alias), (unsigned)local, who(p->id), (unsigned)port);
     return a;
 }
 
@@ -495,21 +604,19 @@ static void catcher_ensure(uint16_t port)
         memset(c, 0, sizeof *c);
         c->port = port;
     }
-    if (!udp_busy(port)) {
-        sock_t s = udp_open(0, port, UDP_BROADCAST | UDP_REUSE);
-        if (s != BADSOCK) { c->s[c->ns++] = s; note("listening for LAN broadcasts on port %u", (unsigned)port); return; }
+    /* Never take the port on all addresses (0.0.0.0): both PCs run the same
+       game, so this is a port our own game opens too, and it could then fail
+       to create its game (seen in testing). Listen on this PC's own network
+       addresses only - Windows lets the game have 0.0.0.0 next to them. */
+    uint32_t at[8];
+    int nat = broadcast_listen_addrs(at, 8);
+    for (int i = 0; i < nat && c->ns < 8; i++) {
+        sock_t s = udp_open(at[i], port, UDP_BROADCAST | UDP_REUSE);
+        if (s != BADSOCK) c->s[c->ns++] = s;
     }
+    if (c->ns) { note("listening for LAN broadcasts on port %u (on this PC's network addresses)", (unsigned)port); return; }
     const Bound *b = game_udp(port);
-    if (b && b->ip == 0) {
-        /* Our own game uses the port on all addresses: listen on each LAN
-           address only (Windows allows a specific address next to "all"). */
-        for (int i = 0; i < g_nmy_ips && c->ns < 8; i++) {
-            sock_t s = udp_open(g_my_ips[i], port, UDP_BROADCAST | UDP_REUSE);
-            if (s != BADSOCK) c->s[c->ns++] = s;
-        }
-        if (c->ns) { note("listening for LAN broadcasts on port %u (per LAN address)", (unsigned)port); return; }
-    }
-    if (b || udp_busy(port)) {
+    if (b || udp_busy(port) || nat) {
         c->given_up = true;
         note("not catching broadcasts on port %u: it is in use", (unsigned)port);
     }
@@ -541,6 +648,29 @@ static void unhide_my_ip(Peer *p, uint8_t *d, int n)
     if (g_nmy_ips && p->my_alias) swap_ip(d, n, p->my_alias, g_my_ips[0]);
 }
 
+/* Packet log for finding out what the game sends (only in scctlink.log):
+   the first packets each way, after this PC's addresses were hidden. */
+#define CAPTURE_MAX 80
+static void capture(Peer *p, bool out, uint16_t src, uint16_t dst, const uint8_t *d, int n, const char *what)
+{
+    u64 *cnt = out ? &p->cap_out : &p->cap_in;
+    if (*cnt >= CAPTURE_MAX && !what) return;
+    (*cnt)++;
+    char line[600];
+    sfmt(line, sizeof line, "  %s %s %u->%u len %d%s%s:", out ? "out" : "in ", out ? "to" : "from",
+         (unsigned)src, (unsigned)dst, n, what ? " " : "", what ? what : "");
+    int k = (int)strlen(line);
+    static const char hx[] = "0123456789abcdef";
+    for (int i = 0; i < n && i < 160 && k < (int)sizeof line - 8; i++) {
+        if (i % 4 == 0) line[k++] = ' ';
+        line[k++] = hx[d[i] >> 4];
+        line[k++] = hx[d[i] & 15];
+    }
+    if (n > 160) { memcpy(line + k, " ...", 4); k += 4; }
+    line[k] = 0;
+    log_line(line);
+}
+
 static void send_udp_frame(Peer *p, char kind, uint16_t src, uint16_t dst, const uint8_t *d, int n)
 {
     if (n <= 0 || n > MAX_GAME_PKT) return;
@@ -550,6 +680,7 @@ static void send_udp_frame(Peer *p, char kind, uint16_t src, uint16_t dst, const
     put16(g_out + 5, p->tx_seq++);
     memcpy(g_out + HDR, d, (size_t)n);
     hide_my_ips(p, g_out + HDR, n);
+    capture(p, true, src, dst, g_out + HDR, n, kind == 'B' ? "(LAN broadcast)" : 0);
     send_msg(p->id, g_out, n + HDR, false, CH_GAME);
     if (!p->up++) p->first_up_ms = now_ms();
 }
@@ -570,8 +701,10 @@ static void deliver_udp(Peer *p, const uint8_t *m, int n)
     if (!b) { scan_game(true); b = game_udp(dst); }
     if (!b) {
         if (!p->dropped_noport++) note("nothing in the game listens on UDP %u yet (from %s)", (unsigned)dst, who(p->id));
+        if (p->dropped_noport <= 20) capture(p, false, src, dst, m + HDR, n - HDR, "(DROPPED: your game has no such port open)");
         return;
     }
+    capture(p, false, src, dst, m + HDR, n - HDR, 0);
     Alias *a = alias_get(p, src, true);
     if (!a) return;
     int len = n - HDR;
@@ -794,8 +927,10 @@ static void on_ports(Peer *p, const uint8_t *m, int n)
     for (int i = 0; i < nu; i++) p->rudp[i] = get16(m + 4 + 2 * i);
     for (int i = 0; i < nt; i++) p->rtcp[i] = get16(m + 4 + 2 * nu + 2 * i);
     if (!p->ports_known || p->rrunning != was) {
-        if (p->rrunning)
+        if (p->rrunning) {
             say("%s's Splinter Cell is running (%d UDP / %d TCP ports).", who(p->id), nu, nt);
+            if (!g_is_host) ui_alert("host's game is up");
+        }
         else
             say("%s has not started Splinter Cell yet.", who(p->id));
     }
@@ -807,18 +942,25 @@ static void on_ports(Peer *p, const uint8_t *m, int n)
 
 /* ---------- join side state ---------- */
 
-static u64 g_host_last, g_last_hello, g_launch_ms;
-static bool g_host_warned, g_reminded;
+static u64 g_host_last, g_last_hello;
+static bool g_host_warned;
 static u64 g_rejected[16];
 static int g_nrejected;
 
-static Peer *host_peer(void) { return g_npeers ? &g_peers[0] : 0; }
+static Peer *host_peer(void) { return !g_is_host && g_npeers ? &g_peers[0] : 0; }
 
 static void reset_join_state(void)
 {
-    if (g_npeers) { peer_sockets_close(&g_peers[0]); g_npeers = 0; }
+    if (!g_is_host && g_npeers) { peer_sockets_close(&g_peers[0]); g_npeers = 0; }
     g_lobby = g_host = 0;
     g_host_warned = false;
+}
+
+static void lobby_gone(void)
+{
+    S.MM_LeaveLobby(MM, g_lobby);
+    reset_join_state();
+    S.Friends_ClearRichPresence(F);
 }
 
 static void request_join(u64 lobby)
@@ -830,33 +972,28 @@ static void request_join(u64 lobby)
         reset_join_state();
     }
     g_joining = lobby;
-    say("Joining lobby %s ...", idstr(lobby));
+    say("Joining lobby %s ...", codestr(lobby));
     S.MM_JoinLobby(MM, lobby);
 }
 
 static void send_hello(void)
 {
-    uint8_t m[3] = { 'H', PROTO, (uint8_t)g_my_text_len };
-    send_ctl(g_host, m, 3);
+    uint8_t m[3 + 16] = { 'H', PROTO, (uint8_t)g_my_text_len };
+    int vl = (int)strlen(VERSION);
+    memcpy(m + 3, VERSION, (size_t)vl);   /* older hosts ignore the extra bytes */
+    send_ctl(g_host, m, 3 + vl);
     g_last_hello = now_ms();
 }
 
-static void launch_game(void)
+static void linked_message(void)
 {
     say("");
-    say("=== Now start Splinter Cell: Chaos Theory ===");
-    if (!g_no_launch) {
-        char url[80];
-        sfmt(url, sizeof url, "steam://run/%d", SCCT_APPID);
-        open_url(url);
-        say("Starting it through Steam. (Ubisoft Connect / other copies: start it yourself.)");
-    }
-    say("In the game: Co-op -> LAN -> Join game. The host's game shows up in the LAN list.");
+    say("=== Linked to %s. Now join from the game: ===", who(g_host));
+    say("1. Click \"Start %s\" (or start it yourself).", g_versus ? "Versus" : "Splinter Cell");
+    say("2. %s. The host's game is in the LAN list.", JOIN_MENU);
     say("If Windows Firewall asks about Splinter Cell or SCCTLink, you can press Cancel:");
     say("SCCTLink only uses this PC's own loopback addresses, nothing is opened to the internet.");
-    say("Keys:  S = status   D = details   Q = quit");
     say("");
-    g_launch_ms = now_ms();
 }
 
 static void on_lobby_entered(u64 lobby, uint32_t response)
@@ -872,7 +1009,26 @@ static void on_lobby_entered(u64 lobby, uint32_t response)
     }
     const char *tag = S.MM_GetLobbyData(MM, lobby, "scctlink");
     if (!tag || strcmp(tag, "1") != 0) {
-        say("! That lobby is not a Splinter Cell co-op game (SCCTLink). Leaving it.");
+        say("! That lobby is not a Splinter Cell game (SCCTLink). Leaving it.");
+        S.MM_LeaveLobby(MM, lobby);
+        if (g_nrejected < 16) g_rejected[g_nrejected++] = lobby;
+        return;
+    }
+    const char *proto = S.MM_GetLobbyData(MM, lobby, "scctlink_proto");
+    if (!proto || proto[0] != PROTO || proto[1]) {
+        const char *ver = S.MM_GetLobbyData(MM, lobby, "scctlink_ver");
+        say("! %s uses a different SCCTLink version (%s). You both need SCCTLink " VERSION ".",
+            who(S.MM_GetLobbyOwner(MM, lobby)), ver && *ver ? clean(ver) : "older");
+        S.MM_LeaveLobby(MM, lobby);
+        if (g_nrejected < 16) g_rejected[g_nrejected++] = lobby;
+        return;
+    }
+    const char *mode = S.MM_GetLobbyData(MM, lobby, "scctlink_mode");
+    bool their_versus = mode && !strcmp(mode, "versus");
+    if (their_versus != g_versus) {
+        say("! %s is hosting %s, but you picked %s. Click Stop, switch to %s, then join again.",
+            who(S.MM_GetLobbyOwner(MM, lobby)), their_versus ? "Versus" : "Co-op", MODE_NAME,
+            their_versus ? "Versus" : "Co-op");
         S.MM_LeaveLobby(MM, lobby);
         if (g_nrejected < 16) g_rejected[g_nrejected++] = lobby;
         return;
@@ -883,18 +1039,20 @@ static void on_lobby_entered(u64 lobby, uint32_t response)
     Peer *p = add_peer(g_host);
     if (!p) return;
     say("Joined %s's Splinter Cell lobby. Connecting to them through Steam...", who(g_host));
-    S.Friends_SetRichPresence(F, "status", "Playing Splinter Cell Chaos Theory co-op (SCCTLink)");
+    S.Friends_SetRichPresence(F, "status", g_versus ? "Playing Splinter Cell Versus (SCCTLink)"
+                                                    : "Playing Splinter Cell co-op (SCCTLink)");
     send_hello();
 }
 
-/* ---------- host: lobby + invites ---------- */
+/* ---------- host: lobby ---------- */
 
 static void on_lobby_created(int32_t result, u64 lobby)
 {
     if (!g_is_host || g_lobby) return; /* arrives twice on real Steam */
     if (result != 1) {
-        say("! Steam could not create a lobby (error %d). Check your internet and restart SCCTLink.", result);
-        g_quit = 1;
+        say("! Steam could not create a lobby (error %d). Check your internet and try again.", result);
+        g_mode = MODE_IDLE;
+        g_is_host = false;
         return;
     }
     g_lobby = lobby;
@@ -902,48 +1060,45 @@ static void on_lobby_created(int32_t result, u64 lobby)
     sfmt(conn, sizeof conn, "+connect_lobby %s", idstr(lobby));
     S.MM_SetLobbyData(MM, lobby, "scctlink", "1");
     S.MM_SetLobbyData(MM, lobby, "scctlink_ver", VERSION);
+    S.MM_SetLobbyData(MM, lobby, "scctlink_mode", g_versus ? "versus" : "coop");
+    { char pr[2] = { PROTO, 0 }; S.MM_SetLobbyData(MM, lobby, "scctlink_proto", pr); }
     S.MM_SetLobbyJoinable(MM, lobby, true);
-    S.Friends_SetRichPresence(F, "status", "Hosting Splinter Cell Chaos Theory co-op (SCCTLink)");
-    S.Friends_SetRichPresence(F, "connect", conn);
-    clipboard_set(idstr(lobby));
+    S.Friends_SetRichPresence(F, "status", g_versus ? "Hosting Splinter Cell Versus (SCCTLink)"
+                                                    : "Hosting Splinter Cell co-op (SCCTLink)");
+    /* Not "connect": with that key Steam shows friends a "Join Game" button,
+       which only starts Spacewar (from CoFLink 0.9.4). */
+    S.Friends_SetRichPresence(F, "scctlink_lobby", idstr(lobby));
+    (void)conn;
+    clipboard_set(codestr(lobby));
     say("");
-    say("=== Lobby is ready (id %s, copied to clipboard) ===", idstr(lobby));
-    say("1. Start Splinter Cell: Chaos Theory (press G here to start it through Steam).");
-    say("   Co-op -> LAN -> Create game, as if your friend sat on your home network.");
-    say("2. Tell your friend to run Join-SCCT.bat. It finds you on its own.");
-    say("   If it doesn't: press I here to send them a Steam invite, or send them");
-    say("   this lobby id, which they paste after pressing L in their window: %s", idstr(lobby));
+    say("=== Lobby is ready (code %s, copied to clipboard) ===", codestr(lobby));
+    say("1. Click \"Start %s\", then %s.", g_versus ? "Versus" : "Splinter Cell", HOST_MENU);
+    if (g_versus)
+        say("   Up to %d players. Keep \"listed\" off so the game isn't on a public list.", g_max_players);
+    say("2. Your friend opens SCCTLink, picks %s and clicks \"Join a friend\" (if you don't", MODE_NAME);
+    say("   show up, send them the lobby code above to paste into their SCCTLink).");
     say("If Windows Firewall asks about Splinter Cell or SCCTLink, you can press Cancel.");
-    say("Keys:  I = invite   G = start game   S = status   D = details   Q = quit");
     say("");
 }
 
-static void invite_menu(void)
+/* Host: the friends linked through SCCTLink right now (shown in the window). */
+static void publish_connected(void)
 {
-    u64 ids[200];
-    int n = 0, total = S.Friends_GetFriendCount(F, FRIEND_IMMEDIATE);
-    say("Friends online:");
-    for (int i = 0; i < total && n < 200; i++) {
-        u64 id = S.Friends_GetFriendByIndex(F, i, FRIEND_IMMEDIATE);
-        if (S.Friends_GetFriendPersonaState(F, id) == 0) continue;
-        ids[n++] = id;
-        say("  %2d. %s", n, who(id));
+    static UiPerson list[MAX_PEERS];
+    int n = 0;
+    for (int i = 0; i < g_npeers; i++) {
+        list[n].id = g_peers[i].id;
+        list[n].lobby = 0;
+        sfmt(list[n].name, UI_NAME, "%s%s", who(g_peers[i].id),
+             g_peers[i].down && g_peers[i].up ? "  (in game)" : "  (linked)");
+        n++;
     }
-    if (!n) { say("  (nobody is online)"); return; }
-    printf("Number to invite (Enter = cancel): ");
-    fflush(0);
-    char line[32];
-    if (!read_line(line, sizeof line) || !line[0]) { say("Cancelled."); return; }
-    int k = atoi(line);
-    if (k < 1 || k > n) { say("No friend with that number."); return; }
-    if (S.MM_InviteUserToLobby(MM, g_lobby, ids[k - 1]))
-        say("Invite sent to %s. They must run Join-SCCT.bat, then accept it.", who(ids[k - 1]));
-    else
-        say("! Steam would not send the invite.");
+    ui_list(LIST_FRIENDS_ONLINE, n, list);
 }
 
 static void status(bool details)
 {
+    if (g_mode == MODE_IDLE) { say("Status: stopped (%s).", MODE_NAME); return; }
     if (!g_npeers) {
         say("Status: %s. Splinter Cell %s.", g_is_host ? "lobby open, nobody connected yet" : "looking for the host",
             G.running ? "is running" : "is not running");
@@ -963,9 +1118,12 @@ static void status(bool details)
     for (int i = 0; i < g_npeers; i++) {
         Peer *p = &g_peers[i];
         say("%s's game (at %s on this PC):", who(p->id), ip_kind(p->alias));
-        for (int k = 0; k < p->nals; k++) say("  UDP %u  (%s packets in)", (unsigned)p->als[k].port, idstr(p->als[k].pkts));
+        for (int k = 0; k < p->nals; k++)
+            say("  UDP %u -> here %u  (%s packets in)", (unsigned)p->als[k].port, (unsigned)sock_local_port(p->als[k].s),
+                idstr(p->als[k].pkts));
         for (int k = 0; k < p->nlis; k++) say("  TCP %u", (unsigned)p->lis[k].port);
-        say("  open TCP streams: %d. Addresses hidden: %s.", p->nst, idstr(p->swapped));
+        say("  open TCP streams: %d. Addresses hidden: %s. Packets for ports your game hasn't open: %s.",
+            p->nst, idstr(p->swapped), idstr(p->dropped_noport));
     }
     for (int i = 0; i < g_ncatch; i++)
         say("LAN broadcast port %u: %s (%s caught)", (unsigned)g_catch[i].port,
@@ -973,6 +1131,15 @@ static void status(bool details)
 }
 
 /* ---------- callbacks ---------- */
+
+static void start_mode(int mode);
+
+static void accept_lobby(u64 lobby)
+{
+    if (!lobby) return;
+    if (g_mode != MODE_JOIN) start_mode(MODE_JOIN);
+    if (g_mode == MODE_JOIN) { g_joining = 0; request_join(lobby); }
+}
 
 static void handle_cb(int cb, uint8_t *p, int size)
 {
@@ -995,36 +1162,54 @@ static void handle_cb(int cb, uint8_t *p, int size)
                 else say("%s left your lobby.", who(changed));
             } else if (changed == g_host) {
                 say("! %s stopped hosting. Waiting for them to host again...", who(g_host));
-                S.MM_LeaveLobby(MM, g_lobby);
-                reset_join_state();
+                lobby_gone();
             }
         }
         break;
     }
     case CB_GameLobbyJoinRequested:
+        /* The player accepted a Steam invite (or clicked Join Game): that is
+           their yes. Joins from the start screen too - unless they are hosting. */
         if (size >= 16) {
+            if (g_is_host) { say("Got a Steam invite, but you are hosting. Click Stop first, then accept it again."); break; }
             say("Accepted invite from %s.", who(rd64(p + 8)));
-            request_join(rd64(p));
+            accept_lobby(rd64(p));
         }
         break;
     case CB_GameRichPresenceJoinRequested: {
-        if (size < 9) break;
+        if (size < 9 || g_is_host) break;
         char conn[257] = { 0 };
         memcpy(conn, p + 8, (size_t)(size - 8 < 256 ? size - 8 : 256));
         const char *c = strstr(conn, "+connect_lobby ");
-        if (c) request_join(str_to_u64(c + 15));
+        if (c) accept_lobby(str_to_u64(c + 15));
         break;
     }
     case CB_NetMsgSessionRequest: {
         u64 from = S.Ident_GetSteamID64(p);
         /* host: accept, every message is checked against the lobby + friends list */
-        bool ok = g_is_host ? true : from == g_host;
+        bool ok = g_is_host ? S.Friends_HasFriend(F, from, FRIEND_IMMEDIATE) && !kicked(from)
+                  : (g_host && from == g_host) ||
+                    (g_mode == MODE_JOIN && !g_lobby && S.Friends_HasFriend(F, from, FRIEND_IMMEDIATE));
         if (ok) S.NM_AcceptSessionWithUser(NM, p);
+        else if (g_is_host && kicked(from)) tell_kicked(from);
+        else if (g_is_host) {
+            static u64 told[16];
+            bool seen = false;
+            for (int i = 0; i < 16; i++) seen |= told[i] == from;
+            if (!seen) {
+                for (int i = 0; i < 16; i++) if (!told[i]) { told[i] = from; break; }
+                say("! Blocked %s: they are not on your Steam friends list.", who(from));
+            }
+        }
         break;
     }
-    case CB_NetMsgSessionFailed:
-        say("(Steam: a connection attempt failed; it will retry.)");
+    case CB_NetMsgSessionFailed: {
+        /* only worth a line for the player we are actually playing with
+           (asking a friend who doesn't run SCCTLink fails quietly) */
+        u64 who_ = size >= 16 ? S.Ident_GetSteamID64(p) : 0;
+        if (who_ && find_peer(who_)) say("(Steam: the connection to %s dropped for a moment; it retries.)", who(who_));
         break;
+    }
     default:
         break;
     }
@@ -1064,24 +1249,70 @@ static bool rejected(u64 lobby)
     return false;
 }
 
-static void scan_for_host(bool verbose)
+/* Direct discovery (from CoFLink 0.3 and 0.8.1): ask friends' SCCTLink "are
+   you hosting?" ('Q'). A host answers 'L' + lobby id, only to people on its
+   own friends list. */
+typedef struct { u64 friend_, lobby, at, asked; } Answer;
+#define NANS 256
+static Answer g_ans[NANS];
+
+static Answer *answer_for(u64 friend_, bool make)
 {
+    int free_ = -1, oldest = 0;
+    for (int i = 0; i < NANS; i++) {
+        if (g_ans[i].friend_ == friend_) return &g_ans[i];
+        if (!g_ans[i].friend_ && free_ < 0) free_ = i;
+        if (g_ans[i].asked < g_ans[oldest].asked) oldest = i;
+    }
+    if (!make) return 0;
+    if (free_ < 0) free_ = oldest; /* full: reuse the one asked longest ago */
+    memset(&g_ans[free_], 0, sizeof g_ans[free_]);
+    g_ans[free_].friend_ = friend_;
+    return &g_ans[free_];
+}
+
+static int g_last_found_n = -1;
+static int g_refresh;      /* Refresh button: 1 = scan now, 2 = scan again shortly and report */
+static u64 g_refresh_at;
+
+static int scan_for_host(bool verbose)
+{
+    /* Ways to see a hosting friend: (1) the lobby in their "game played" info,
+       (2) the "+connect_lobby <id>" in their rich presence - both only while
+       Steam shows them in SCCTLink ("Spacewar"). Once the host starts the game,
+       Steam shows "playing Splinter Cell" instead and both go blank, so (3)
+       SCCTLink asks friends' SCCTLink directly: every few seconds for friends in
+       Spacewar or Splinter Cell, every 30 s for other online friends (game
+       details can be private), and everyone at once on Refresh. */
     static u64 noted[32];
     static int nnoted;
-    u64 lobs[32], ids[32];
+    static UiPerson found[32];
     int n = 0, total = S.Friends_GetFriendCount(F, FRIEND_IMMEDIATE);
     for (int i = 0; i < total && n < 32; i++) {
         u64 id = S.Friends_GetFriendByIndex(F, i, FRIEND_IMMEDIATE);
         uint8_t info[32] = { 0 };
-        if (!S.Friends_GetFriendGamePlayed(F, id, info)) continue;
-        u64 game = rd64(info), lob = rd64(info + 16);
-        if ((game & 0xFFFFFF) != SPACEWAR_APPID) continue;
-        if (!lob) {
+        bool playing = S.Friends_GetFriendGamePlayed(F, id, info);
+        uint32_t app = playing ? (uint32_t)(rd64(info) & 0xFFFFFF) : 0;
+        bool in_link = app == SPACEWAR_APPID, in_game = app == SCCT_APPID;
+        u64 lob = in_link ? rd64(info + 16) : 0;
+        u64 t = now_ms();
+        if (!lob && in_link) {
             S.Friends_RequestFriendRichPresence(F, id);
-            const char *rp = S.Friends_GetFriendRichPresence(F, id, "connect");
-            const char *c = rp ? strstr(rp, "+connect_lobby ") : 0;
-            if (c) lob = str_to_u64(c + 15);
+            const char *rp = S.Friends_GetFriendRichPresence(F, id, "scctlink_lobby");
+            if (rp && *rp) lob = str_to_u64(rp);
         }
+        if (!lob) {
+            Answer *a = answer_for(id, false);
+            if (a && a->lobby && t - a->at < 15000) {
+                lob = a->lobby;
+            } else if (S.Friends_GetFriendPersonaState(F, id) != 0) { /* online */
+                u64 every = (in_link || in_game) ? 4000 : 30000;
+                if (g_refresh == 1) every = 0;
+                if (!a) a = answer_for(id, true);
+                if (!a->asked || t - a->asked > every) { send_ctl1(id, 'Q'); a->asked = t; }
+            }
+        }
+        if (!lob && !in_link) continue;
         if (!lob) {
             bool seen = false;
             for (int k = 0; k < nnoted; k++) seen |= noted[k] == id;
@@ -1092,26 +1323,23 @@ static void scan_for_host(bool verbose)
             continue;
         }
         if (rejected(lob)) continue;
-        ids[n] = id;
-        lobs[n++] = lob;
+        found[n].id = id;
+        found[n].lobby = lob;
+        sfmt(found[n].name, UI_NAME, "%s", who(id));
+        n++;
     }
-    if (n == 1) {
-        char q[160];
-        sfmt(q, sizeof q, "%s is hosting. Join their game?", who(ids[0]));
-        if (ask_yes(q)) request_join(lobs[0]);
-        else if (g_nrejected < 16) { g_rejected[g_nrejected++] = lobs[0]; say("OK, not joining. Still looking..."); }
-    } else if (n > 1) {
-        say("Several friends are hosting:");
-        for (int i = 0; i < n; i++) say("  %d. %s", i + 1, who(ids[i]));
-        printf("Number to join: ");
-        fflush(0);
-        char line[32];
-        int k = read_line(line, sizeof line) ? atoi(line) : 0;
-        if (k >= 1 && k <= n) request_join(lobs[k - 1]);
-    } else if (verbose) {
+    if (n != g_last_found_n && n > 0)
+        say(n == 1 ? "Found %s hosting." : "Found %s friends hosting.", n == 1 ? found[0].name : idstr((u64)n));
+    g_last_found_n = n;
+    u64 reject = 0;
+    u64 pick = ui_offer_hosts(n, found, &reject);
+    if (reject && g_nrejected < 16) g_rejected[g_nrejected++] = reject;
+    if (pick) request_join(pick);
+    else if (!n && verbose) {
         say("No friend is hosting yet. Waiting...");
-        say("  Or: accept the host's Steam invite, or press L and paste their lobby id.");
+        say("  Or: paste the host's lobby code.");
     }
+    return n;
 }
 
 /* ---------- control messages ---------- */
@@ -1120,6 +1348,22 @@ static void on_ctl(u64 from, const uint8_t *m, int n)
 {
     if (n < 1) return;
     char c = (char)m[0];
+    if (c == 'Q') { /* a friend's SCCTLink asks "are you hosting?" */
+        if (g_is_host && g_lobby && from != g_me && !kicked(from) && S.Friends_HasFriend(F, from, FRIEND_IMMEDIATE)) {
+            uint8_t a[10] = { 'L', PROTO };
+            memcpy(a + 2, &g_lobby, 8);
+            send_ctl(from, a, 10);
+        }
+        return;
+    }
+    if (c == 'L') { /* the answer: that friend hosts this lobby */
+        if (g_mode == MODE_JOIN && !g_lobby && n >= 10 && S.Friends_HasFriend(F, from, FRIEND_IMMEDIATE)) {
+            Answer *a = answer_for(from, true);
+            a->lobby = rd64(m + 2);
+            a->at = now_ms();
+        }
+        return;
+    }
     Peer *p = find_peer(from);
     if (g_is_host) {
         if (c == 'B') { if (p) drop_peer(from, "quit SCCTLink"); return; }
@@ -1132,19 +1376,27 @@ static void on_ctl(u64 from, const uint8_t *m, int n)
         if (c == 'H') {
             if (n < 2 || m[1] != PROTO) {
                 say("! %s runs a different SCCTLink version. Both of you need the same version (" VERSION ").", who(from));
+                static const char x[] = "X" VERSION;
+                send_ctl(from, x, (int)sizeof x - 1); /* tell them too */
                 return;
             }
             int their_len = n >= 3 ? m[2] : 12;
             if (!p->welcomed) {
+                char tv[16] = { 0 };
+                if (n > 3) memcpy(tv, m + 3, (size_t)(n - 3 < 15 ? n - 3 : 15));
+                version_notice(from, tv);
                 p->alias = make_alias(their_len, p->slot + 1);
                 p->my_alias = make_alias(g_my_text_len, 0);
                 p->welcomed = true;
                 say("+ %s connected through Steam. Their game shows up on your PC at %s.", who(from), ip_kind(p->alias));
+                ui_alert("friend linked");
             }
-            uint8_t w[10] = { 'W', PROTO };
+            uint8_t w[10 + 16] = { 'W', PROTO };
             memcpy(w + 2, &p->alias, 4);    /* the joiner's address on the host's PC */
             memcpy(w + 6, &p->my_alias, 4); /* the host's address on the joiner's PC */
-            send_ctl(from, w, 10);
+            int vl = (int)strlen(VERSION);
+            memcpy(w + 10, VERSION, (size_t)vl);
+            send_ctl(from, w, 10 + vl);
             send_ports(p);
             for (int i = 0; i < p->nrudp; i++) alias_get(p, p->rudp[i], true);
             listeners_update(p);
@@ -1152,20 +1404,36 @@ static void on_ctl(u64 from, const uint8_t *m, int n)
     } else {
         if (from != g_host || !p) return;
         g_host_last = now_ms();
+        if (c == 'Z') {
+            say("! %s removed you from their game (kicked). You can't link to it again until they host again.", who(g_host));
+            if (g_nrejected < 16) g_rejected[g_nrejected++] = g_lobby;
+            lobby_gone();
+            return;
+        }
+        if (c == 'X') {
+            char v[16] = { 0 };
+            memcpy(v, m + 1, (size_t)(n - 1 < 15 ? n - 1 : 15));
+            say("! %s uses a different SCCTLink version (%s). You both need SCCTLink " VERSION ".", who(g_host), clean(v));
+            return;
+        }
         if (c == 'W' && n >= 10 && !p->welcomed) {
             memcpy(&p->my_alias, m + 2, 4);
             memcpy(&p->alias, m + 6, 4);
             if (!is_loop(p->alias) || !is_loop(p->my_alias)) { say("! The host sent a bad address. Ignoring."); return; }
             p->welcomed = true;
             say("Connected to %s through Steam. Their game shows up on your PC at %s.", who(g_host), ip_kind(p->alias));
+            {
+                char tv[16] = { 0 };
+                if (n > 10) memcpy(tv, m + 10, (size_t)(n - 10 < 15 ? n - 10 : 15));
+                version_notice(g_host, tv);
+            }
             send_ports(p);
             for (int i = 0; i < p->nrudp; i++) alias_get(p, p->rudp[i], true);
             listeners_update(p);
-            launch_game();
+            linked_message();
         } else if (c == 'B') {
             say("! %s closed SCCTLink.", who(g_host));
-            S.MM_LeaveLobby(MM, g_lobby);
-            reset_join_state();
+            lobby_gone();
             return;
         }
     }
@@ -1231,36 +1499,237 @@ static void peer_tick(Peer *p, u64 t)
     if (G.running && p->rrunning && !p->down && !p->warned_silent && p->first_up_ms && t - p->first_up_ms > 20000) {
         p->warned_silent = true;
         say("! Your game is sending to %s's game, but nothing comes back yet.", who(p->id));
-        say("  %s", g_is_host ? "Make sure you created the co-op game: Co-op -> LAN -> Create game."
-                              : "Ask the host to create the co-op game (Co-op -> LAN -> Create game).");
-        say("  Press D for details. The file scctlink.log has more.");
+        say("  %s the LAN game first: %s.", g_is_host ? "Make sure you created" : "Ask the host to create", HOST_MENU);
+        say("  Click \"Details\" for more. The file scctlink.log has more.");
     }
 }
 
-static void relay_loop(void)
+/* ---------- starting the game ---------- */
+
+static void start_game(void)
 {
-    u64 last_scan = 0;
-    while (!g_quit) {
-        pump_callbacks();
-        drain_steam();
-        scan_game(false);
-        u64 sig = ports_signature();
-        if (sig != g_ports_sig) {
-            g_ports_sig = sig;
-            for (int i = 0; i < g_npeers; i++) if (g_peers[i].welcomed) send_ports(&g_peers[i]);
-            catchers_update();
-            note("game ports changed: %d UDP, %d TCP listening", G.nudp, G.ntcpl);
-        }
-        poll_catchers();
-        u64 t = now_ms();
+    if (game_is_running(g_exe)) { say("Splinter Cell is already running."); return; }
+    if (!g_versus) {
+        open_url("steam://run/13570");
+        say("Starting Splinter Cell: Chaos Theory through Steam...");
+        say("(Ubisoft Connect / other copies: start it yourself.)");
+        return;
+    }
+    /* Versus is its own program: <game folder>\Versus\System\SCCT_Versus.exe */
+    char dir[600] = "", sys[700], exe[760];
+    if (g_steam_ok && AP && S.Apps_GetAppInstallDir && S.Apps_GetAppInstallDir(AP, SCCT_APPID, dir, sizeof dir) > 0) {
+        sfmt(sys, sizeof sys, "%s" PATHSEP "Versus" PATHSEP "System", dir);
+        sfmt(exe, sizeof exe, "%s" PATHSEP "SCCT_Versus.exe", sys);
+        if (file_exists(exe) && run_program(exe, "", sys)) { say("Starting Versus (SCCT_Versus.exe)..."); return; }
+    }
+    say("Couldn't find Versus. Start SCCT_Versus.exe yourself (in the game's Versus\\System folder).");
+}
+
+/* ---------- modes ---------- */
+
+static bool steam_start(void);
+
+static void set_versus(bool v)
+{
+    g_versus = v;
+    g_exe = g_exe_opt ? g_exe_opt : v ? "SCCT_Versus" : "splintercell3";
+    g_max_players = g_max_players_opt ? g_max_players_opt : v ? 4 : 2;
+    if (g_max_players > MAX_PEERS + 1) g_max_players = MAX_PEERS + 1;
+    g_scan_at = 0;
+    g_was_running = false;
+}
+
+static void reset_all(void)
+{
+    for (int i = 0; i < g_npeers; i++) peer_sockets_close(&g_peers[i]);
+    g_npeers = 0;
+    for (int i = 0; i < g_ncatch; i++)
+        for (int j = 0; j < g_catch[i].ns; j++) sock_close(g_catch[i].s[j]);
+    g_ncatch = 0;
+    g_nignored = 0;
+    g_joining = 0;
+    g_nrejected = 0;
+    g_last_found_n = -1;
+    g_refresh = 0;
+    memset(g_ans, 0, sizeof g_ans);
+    g_lobby = g_host = 0;
+    g_host_warned = false;
+    g_ports_sig = 0;
+    g_nkicked = 0;
+}
+
+static void stop_mode(bool quiet)
+{
+    if (g_mode == MODE_IDLE) return;
+    for (int i = 0; i < g_npeers; i++) send_ctl1(g_peers[i].id, 'B');
+    for (int i = 0; i < 20; i++) { S.MD_RunFrame(g_pipe); sleep_ms(10); } /* flush goodbyes */
+    if (g_lobby) S.MM_LeaveLobby(MM, g_lobby);
+    if (g_joining) S.MM_LeaveLobby(MM, g_joining);
+    S.Friends_ClearRichPresence(F);
+    reset_all();
+    g_mode = MODE_IDLE;
+    g_is_host = false;
+    ui_list(LIST_FRIENDS_ONLINE, 0, 0);
+    ui_list(LIST_HOSTING, 0, 0);
+    if (!quiet) say("Stopped.");
+}
+
+static void start_mode(int mode)
+{
+    if (g_mode == mode) return;
+    stop_mode(true);
+    if (!g_steam_ok && !(g_steam_ok = steam_start())) return;
+    g_mode = mode;
+    g_is_host = mode == MODE_HOST;
+    scan_game(2);
+    say("");
+    if (g_is_host) {
+        say("Creating a friends-only %s lobby for %d players...", MODE_NAME, g_max_players);
+        S.MM_CreateLobby(MM, LOBBY_FRIENDS_ONLY, g_max_players);
+    } else {
+        say("Looking for a friend who is hosting %s...", MODE_NAME);
+    }
+}
+
+static void make_status(UiState *st)
+{
+    memset(st, 0, sizeof *st);
+    st->mode = g_mode;
+    st->steam_ok = g_steam_ok;
+    st->versus = g_versus;
+    st->lobby = g_lobby;
+    st->friends_connected = g_npeers;
+    /* "How to" steps, one bit each */
+    if (g_is_host) {
+        bool linked = false, playing = false;
         for (int i = 0; i < g_npeers; i++) {
-            Peer *p = &g_peers[i];
-            peer_tick(p, t);
-            if (g_is_host && t - p->last_heard > PEER_TIMEOUT_MS) { drop_peer(p->id, "timed out"); i--; }
+            linked |= g_peers[i].welcomed;
+            playing |= g_peers[i].down > 50 && g_peers[i].up > 50;
         }
-        if (!g_is_host) {
-            if (g_lobby && host_peer()) {
-                Peer *h = host_peer();
+        st->done = (uint8_t)((g_lobby ? 1 : 0) | (G.running && G.nudp ? 2 : 0) | (linked ? 4 : 0) | (playing ? 8 : 0));
+    } else if (g_mode == MODE_JOIN) {
+        Peer *h = host_peer();
+        bool linked = h && h->welcomed, up = linked && h->rrunning && h->nrudp, playing = h && h->down > 50 && h->up > 50;
+        st->done = (uint8_t)((linked ? 1 : 0) | (up ? 2 : 0) | (G.running && linked ? 4 : 0) | (playing ? 8 : 0));
+    }
+    if (g_mode == MODE_IDLE) {
+        sfmt(st->status, sizeof st->status, "Ready (%s). Host a game, or join a friend.", MODE_NAME);
+    } else if (g_is_host) {
+        int playing = 0;
+        for (int i = 0; i < g_npeers; i++) playing += g_peers[i].down > 0 && g_peers[i].up > 0;
+        if (!g_lobby) sfmt(st->status, sizeof st->status, "Creating lobby...");
+        else if (!g_npeers) sfmt(st->status, sizeof st->status, "Hosting %s - waiting for friends to join", MODE_NAME);
+        else sfmt(st->status, sizeof st->status, "Hosting %s - %d friend(s) linked, %d in game", MODE_NAME, g_npeers, playing);
+    } else {
+        Peer *h = host_peer();
+        if (g_joining) sfmt(st->status, sizeof st->status, "Joining lobby...");
+        else if (!g_lobby) sfmt(st->status, sizeof st->status, "Looking for a friend who is hosting %s...", MODE_NAME);
+        else if (!h || !h->welcomed) sfmt(st->status, sizeof st->status, "Reaching %s through Steam...", who(g_host));
+        else if (h->down > 50 && h->up > 50) sfmt(st->status, sizeof st->status, "Playing with %s", who(g_host));
+        else if (!h->rrunning) sfmt(st->status, sizeof st->status, "Linked - waiting for %s to start the game", who(g_host));
+        else if (!G.running) sfmt(st->status, sizeof st->status, "Linked to %s - start the game now", who(g_host));
+        else sfmt(st->status, sizeof st->status, "Linked to %s - join from the game's LAN list", who(g_host));
+    }
+}
+
+static void handle_cmd(const Cmd *c)
+{
+    switch (c->kind) {
+    case CMD_HOST: start_mode(MODE_HOST); break;
+    case CMD_JOIN: start_mode(MODE_JOIN); break;
+    case CMD_JOIN_LOBBY:
+        if (!c->arg) { say("! That isn't a lobby code."); break; }
+        if (g_mode != MODE_JOIN) start_mode(MODE_JOIN);
+        if (g_mode == MODE_JOIN) { g_joining = 0; request_join(c->arg); }
+        break;
+    case CMD_LAUNCH:
+        if (!g_no_launch) start_game();
+        break;
+    case CMD_REFRESH:
+        if (g_is_host) { say("You are hosting. Refresh is for finding a friend who hosts."); break; }
+        if (g_mode != MODE_JOIN) start_mode(MODE_JOIN);
+        if (g_mode != MODE_JOIN) break;
+        if (g_lobby || g_joining) { say("Already linked. Click Stop first to look for someone else."); break; }
+        say("Refreshing...");
+        g_nrejected = 0;
+        g_last_found_n = -1;
+        for (int i = 0; i < NANS; i++) g_ans[i].asked = 0;
+        g_refresh = 1;
+        break;
+    case CMD_KICK: kick_peer(c->arg); break;
+    case CMD_STATUS: status(false); break;
+    case CMD_DETAILS: status(true); break;
+    case CMD_SET_VERSUS:
+        if (g_mode != MODE_IDLE) { say("Click Stop first, then switch between Co-op and Versus."); break; }
+        if ((c->arg != 0) != g_versus) {
+            set_versus(c->arg != 0);
+            say("Mode: %s (%s, up to %d players).", MODE_NAME, g_versus ? "SCCT_Versus.exe" : "the co-op campaign", g_max_players);
+        }
+        break;
+    case CMD_STOP: stop_mode(false); break;
+    case CMD_QUIT: g_quit = 1; break;
+    default: break;
+    }
+}
+
+void engine_run(const EngineOpts *o, Cmd first)
+{
+    g_no_launch = o->no_launch;
+    g_verbose = o->verbose;
+    g_max_players_opt = o->max_players;
+    if (o->exe && o->exe[0]) {
+        static char ex[64];
+        sfmt(ex, sizeof ex, "%s", o->exe);
+        char *dot = strstr(ex, ".exe");
+        if (dot) *dot = 0;
+        if (ex[0]) g_exe_opt = ex;
+    }
+    set_versus(o->versus);
+    log_line("----");
+    say("SCCTLink " VERSION " - Splinter Cell: Chaos Theory co-op and Versus over Steam (no VPN, no port forwarding)");
+    g_my_text_len = primary_text_len();
+    /* Connect to Steam right away, so an invite accepted on the start screen
+       reaches SCCTLink. If Steam isn't running yet, Host/Join retries. */
+    g_steam_ok = steam_start();
+    if (first.kind != CMD_NONE) handle_cmd(&first);
+
+    u64 last_scan = 0, last_friends = 0, last_state = 0;
+    UiState prev;
+    memset(&prev, 0xff, sizeof prev);
+    int prev_mode = -1;
+    while (!g_quit) {
+        if (g_steam_ok) {
+            pump_callbacks();
+            drain_steam();
+        }
+        u64 t = now_ms();
+        if (g_mode != prev_mode) { last_scan = 0; last_friends = 0; prev_mode = g_mode; }
+        if (g_mode != MODE_IDLE) {
+            scan_game(0);
+            u64 sig = ports_signature();
+            if (sig != g_ports_sig) {
+                g_ports_sig = sig;
+                for (int i = 0; i < g_npeers; i++) {
+                    Peer *p = &g_peers[i];
+                    if (!p->welcomed) continue;
+                    send_ports(p);
+                    for (int k = 0; k < p->nrudp; k++) alias_get(p, p->rudp[k], true);
+                }
+                catchers_update();
+                note("game ports changed: %d UDP, %d TCP listening", G.nudp, G.ntcpl);
+            }
+            poll_catchers();
+            for (int i = 0; i < g_npeers; i++) {
+                Peer *p = &g_peers[i];
+                peer_tick(p, t);
+                if (g_is_host && t - p->last_heard > PEER_TIMEOUT_MS) { drop_peer(p->id, "timed out"); i--; }
+            }
+        }
+        if (g_mode == MODE_HOST) {
+            if (g_lobby && (!last_friends || t - last_friends > 1000)) { publish_connected(); last_friends = t; }
+        } else if (g_mode == MODE_JOIN) {
+            Peer *h = host_peer();
+            if (g_lobby && h) {
                 if (!h->welcomed && t - g_last_hello > 2000) send_hello();
                 if (t - g_host_last > HOST_QUIET_MS && !g_host_warned) {
                     g_host_warned = true;
@@ -1269,34 +1738,30 @@ static void relay_loop(void)
                     g_host_warned = false;
                     say("%s is back.", who(g_host));
                 }
-                if (g_launch_ms && !G.running && !g_reminded && t - g_launch_ms > 90000) {
-                    g_reminded = true;
-                    say("Splinter Cell isn't running yet. Start it, then Co-op -> LAN -> Join game.");
-                }
             }
-            if (!g_lobby && !g_joining && t - last_scan > 3000) {
+            if (!g_lobby && !g_joining && g_refresh == 1) {
+                scan_for_host(false);
+                g_refresh = 2;                 /* answers to direct questions take a moment */
+                g_refresh_at = last_scan = now_ms();
+            } else if (!g_lobby && !g_joining && g_refresh == 2 && t - g_refresh_at > 1500) {
+                if (scan_for_host(false) == 0)
+                    say("Nobody is hosting right now. When your friend clicks \"Host a game\", click Refresh again.");
+                g_refresh = 0;
+                last_scan = now_ms();
+            } else if (!g_lobby && !g_joining && (!last_scan || t - last_scan > 3000)) {
                 scan_for_host(last_scan == 0);
                 last_scan = now_ms();
             }
+            if (g_lobby || g_joining) g_refresh = 0;
         }
-        int key = key_poll();
-        if (key == 'q' || key == 'Q') g_quit = 1;
-        if (g_is_host && g_lobby && (key == 'i' || key == 'I')) invite_menu();
-        if (key == 's' || key == 'S') status(false);
-        if (key == 'd' || key == 'D') status(true);
-        if (g_is_host && (key == 'g' || key == 'G')) {
-            char url[80];
-            sfmt(url, sizeof url, "steam://run/%d", SCCT_APPID);
-            open_url(url);
-            say("Starting Splinter Cell through Steam...");
-        }
-        if (!g_is_host && !g_lobby && (key == 'l' || key == 'L')) {
-            printf("Paste the host's lobby id (right-click or Ctrl+V), then Enter: ");
-            fflush(0);
-            char line[64];
-            u64 id = read_line(line, sizeof line) ? str_to_u64(line) : 0;
-            if (id) { g_joining = 0; request_join(id); }
-            else say("That isn't a lobby id. Press L to try again.");
+        Cmd c;
+        while (ui_poll(&c)) handle_cmd(&c);
+
+        if (t - last_state > 200) {
+            UiState st;
+            make_status(&st);
+            if (memcmp(&st, &prev, sizeof st) != 0) { ui_state(&st); prev = st; }
+            last_state = t;
         }
 
         sock_t socks[256];
@@ -1309,18 +1774,23 @@ static void relay_loop(void)
         }
         for (int i = 0; i < g_ncatch; i++)
             for (int j = 0; j < g_catch[i].ns && ns < 256; j++) socks[ns++] = g_catch[i].s[j];
-        wait_socks(socks, ns, 1);
+        wait_socks(socks, ns, g_mode == MODE_IDLE ? 20 : 1);
     }
+    if (g_steam_ok) {
+        stop_mode(true);
+        S.Shutdown();
+    }
+    say("SCCTLink closed.");
 }
 
-/* ---------- start-up and shut-down ---------- */
+/* ---------- start-up ---------- */
 
 static bool steam_start(void)
 {
     file_write_text("steam_appid.txt", "480");
     const char *e = steam_load();
     if (e) { say("! %s", e); return false; }
-    if (!S.IsSteamRunning()) { say("! Steam is not running. Start Steam, log in, then run this again."); return false; }
+    if (!S.IsSteamRunning()) { say("! Steam is not running. Start Steam, log in, then try again."); return false; }
     char err[1024] = { 0 };
     int r = S.InitFlat(err);
     if (r != 0) {
@@ -1335,86 +1805,15 @@ static bool steam_start(void)
     MM = S.SteamMatchmaking();
     NM = S.SteamNetMsgs();
     NU = S.SteamNetUtils();
+    AP = S.SteamApps ? S.SteamApps() : 0;
     if (!U || !F || !MM || !NM || !NU) { say("! Steam interfaces unavailable."); return false; }
-    if (!S.User_BLoggedOn(U)) { say("! Steam is in offline mode. Go online and try again."); return false; }
+    if (!S.User_BLoggedOn(U)) { say("! Steam is in offline mode. Go online and try again."); S.Shutdown(); return false; }
     g_me = S.User_GetSteamID(U);
     S.NU_InitRelayNetworkAccess(NU);
-    say("Signed in to Steam as %s.", S.Friends_GetPersonaName(F));
+    /* Always through Valve's relay: never share either player's IP address
+       for a direct connection, whatever Steam's own "IP sharing" setting is. */
+    if (!S.NU_SetGlobalConfigInt32 || !S.NU_SetGlobalConfigInt32(NU, 104 /* P2P_Transport_ICE_Enable */, 0 /* off */))
+        say("! Steam would not turn off direct connections; your IP may be shared with the other player.");
+    say("Signed in to Steam as %s.", who(g_me));
     return true;
-}
-
-static void shutdown_all(void)
-{
-    for (int i = 0; i < g_npeers; i++) send_ctl1(g_peers[i].id, 'B');
-    for (int i = 0; i < 20; i++) { S.MD_RunFrame(g_pipe); sleep_ms(10); } /* flush goodbyes */
-    if (g_lobby) S.MM_LeaveLobby(MM, g_lobby);
-    S.Friends_ClearRichPresence(F);
-    for (int i = 0; i < g_npeers; i++) peer_sockets_close(&g_peers[i]);
-    for (int i = 0; i < g_ncatch; i++) for (int j = 0; j < g_catch[i].ns; j++) sock_close(g_catch[i].s[j]);
-    S.Shutdown();
-    say("SCCTLink closed.");
-}
-
-static void usage(void)
-{
-    say("SCCTLink " VERSION " - Splinter Cell: Chaos Theory co-op over Steam (no VPN, no port forwarding)");
-    say("  SCCTLink host [--players 2]          host a game for a friend");
-    say("  SCCTLink join [lobby id] [--no-launch] join a friend");
-    say("  options: --exe <name>  game file name if it isn't splintercell3.exe");
-    say("           --verbose     show network details in this window");
-}
-
-int main(int argc, char **argv)
-{
-    plat_init();
-    int mode = 0; /* 1 host, 2 join */
-    u64 join_lobby = 0;
-    for (int i = 1; i < argc; i++) {
-        const char *a = argv[i];
-        if (!strcmp(a, "host")) mode = 1;
-        else if (!strcmp(a, "join")) mode = 2;
-        else if (!strcmp(a, "--players") && i + 1 < argc) {
-            g_max_players = atoi(argv[++i]);
-            if (g_max_players < 2 || g_max_players > MAX_PEERS + 1) g_max_players = 2;
-        } else if (!strcmp(a, "--exe") && i + 1 < argc) {
-            static char ex[64];
-            sfmt(ex, sizeof ex, "%s", argv[++i]);
-            char *dot = strstr(ex, ".exe");
-            if (dot) *dot = 0;
-            if (ex[0]) g_exe = ex;
-        } else if (!strcmp(a, "--no-launch")) g_no_launch = true;
-        else if (!strcmp(a, "--yes")) g_auto_yes = true;
-        else if (!strcmp(a, "--verbose")) g_verbose = true;
-        else if (!strcmp(a, "+connect_lobby") && i + 1 < argc) { mode = 2; join_lobby = str_to_u64(argv[++i]); }
-        else if (a[0] >= '0' && a[0] <= '9') join_lobby = str_to_u64(a);
-        else if (!strcmp(a, "-h") || !strcmp(a, "--help") || !strcmp(a, "/?")) { usage(); return 0; }
-    }
-    if (!mode) {
-        usage();
-        printf("\n1 = host a game, 2 = join a friend: ");
-        fflush(0);
-        char line[16];
-        if (!read_line(line, sizeof line)) return 1;
-        mode = line[0] == '1' ? 1 : line[0] == '2' ? 2 : 0;
-        if (!mode) return 1;
-    }
-    g_is_host = mode == 1;
-    set_title(g_is_host ? "SCCTLink " VERSION " - hosting Splinter Cell co-op" : "SCCTLink " VERSION " - joining Splinter Cell co-op");
-    log_line("----");
-    say("SCCTLink " VERSION " (%s)", g_is_host ? "host" : "join");
-    g_my_text_len = primary_text_len();
-    if (!steam_start()) return 1;
-    scan_game(true);
-
-    if (g_is_host) {
-        say("Creating a friends-only lobby for %d players...", g_max_players);
-        S.MM_CreateLobby(MM, LOBBY_FRIENDS_ONLY, g_max_players);
-    } else if (join_lobby) {
-        request_join(join_lobby);
-    } else {
-        say("Looking for a friend who is hosting...");
-    }
-    relay_loop();
-    shutdown_all();
-    return 0;
 }

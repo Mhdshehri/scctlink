@@ -1,22 +1,20 @@
-# SCCTLink 0.1
+# SCCTLink 0.5
 
-Play **Splinter Cell: Chaos Theory** co-op with a Steam friend: no VPN (no Hamachi, Radmin or ZeroTier), no port forwarding, no IP addresses.
+Play **Splinter Cell: Chaos Theory** co-op (2 players) or Spies vs. Mercenaries / Versus (up to 4) with Steam friends: no VPN (no Hamachi, Radmin or ZeroTier), no port forwarding, no IP addresses.
 
-Chaos Theory's online servers are gone, so PC co-op only works in **LAN** mode. SCCTLink makes your friend's PC look like it is on your LAN, and carries the game's traffic through Steam's relay network. The host invites the friend from Steam.
+Chaos Theory's online servers are gone, so PC multiplayer only works in **LAN** mode. SCCTLink makes your friends' PCs look like they are on your LAN, and carries the game's traffic through Steam's relay network. The host invites the friend from Steam.
 
-**Download:** `SCCTLink-0.1.zip` from [Releases](../../releases). Both players unzip it.
+**Download:** `SCCTLink-0.5.zip` from [Releases](../../releases). Both players unzip it.
 
 ## How to play
 
-**Host**
-1. Run `Host-SCCT.bat` and wait for "Lobby is ready".
-2. Start the game: Co-op → LAN → Create game.
-3. Keep the SCCTLink window open while you play.
+Everyone double-clicks **SCCTLink.exe**. It opens a window (the same window as CoFLink, in green):
 
-**Friend**
-1. Run `Join-SCCT.bat`. It finds the host and asks "Join their game?". Type `Y`.
-   If it doesn't find them, press `L` and paste the lobby id from the host's window, or accept the host's Steam invite.
-2. The game starts. Co-op → LAN → Join game: the host's game is in the list.
+- The button next to **Join a friend** switches between **Co-op** and **Versus**. Everyone picks the same.
+- **Host:** click **Host a game**, then **Start Splinter Cell**, and create a LAN game. The short lobby code (like `1MCE-2B2`) is copied for you.
+- **Friend:** click **Join a friend**, pick the host in the list and click **Join** (or **Refresh**, or paste the lobby code and click **Join this code**). When linked, start the game and join the host from its LAN list.
+
+Co-op lobbies hold 2 players, Versus lobbies 4. The **How to** tab ticks off the steps as they happen; **Log** shows everything (Copy log for bug reports). The host can **Kick** a friend.
 
 See [package/README.txt](package/README.txt) for the full guide, FPS/lag tips and troubleshooting.
 
@@ -30,7 +28,7 @@ Host's game  <──UDP/TCP── 127.d.e.f (stands for the friend) <─┘ (ISt
 
 The game's LAN protocol is not documented, so SCCTLink doesn't hard-code it:
 
-- It reads which UDP/TCP ports `splintercell3.exe` has open (the tables `netstat -ano` shows) and tells the other side.
+- It reads which UDP/TCP ports the game (`splintercell3.exe`, or `SCCT_Versus.exe` with `--versus`) has open (the tables `netstat -ano` shows) and tells the other side.
 - For every port of the other player's game it opens the **same port** on a private loopback address that stands for that player. Packets come out of the same port numbers on the other PC, so the game sees a normal LAN peer.
 - LAN discovery broadcasts (the "Join game" list) are caught on those ports and passed on.
 - TCP connections are carried as reliable streams; UDP is sent unreliable/no-Nagle (the game has its own reliability), unchanged and in order.
@@ -39,7 +37,7 @@ The game's LAN protocol is not documented, so SCCTLink doesn't hard-code it:
 
 ## Safety
 
-- No IPs are exchanged and no ports are opened; Windows Firewall prompts can be cancelled.
+- No IPs are exchanged and no ports are opened; Windows Firewall prompts can be cancelled. Steam's direct (ICE) connections are turned off, so traffic always goes through Valve's relay.
 - The host only lets in players who are in the lobby **and** on the host's Steam friends list; the joiner only accepts the host it chose.
 - Only the game process can use the relay: packets from other programs, or from other PCs on your network, are dropped.
 - Oversized packets and floods are dropped.
@@ -49,7 +47,7 @@ The game's LAN protocol is not documented, so SCCTLink doesn't hard-code it:
 
 ## Building
 
-You need clang and lld; no Windows SDK is required.
+You need clang, lld, llvm-rc and llvm-cvtres; no Windows SDK is required.
 
 ```sh
 sh build_windows.sh      # -> build/win/SCCTLink.exe (32-bit)
@@ -62,16 +60,16 @@ The build is reproducible: building the same source gives the same SHA-256.
 The tests run on Linux as root. Each player gets their own network namespace (a separate "PC" with its own LAN and broadcast domain), a stand-in for the game, and a mock Steam:
 
 ```sh
-gcc -std=c11 -fsanitize=address,undefined -o build/scctlink_mock src/scctlink.c src/plat_posix.c test/steam_mock.c
+gcc -std=c11 -fsanitize=address,undefined -o build/scctlink_mock src/scctlink.c src/ui_console.c src/lobbycode.c src/plat_posix.c test/steam_mock.c
 sudo python3 test/run_tests.py   # prints ALL OK
 ```
 
-They cover: LAN discovery by broadcast in both directions; the host's address hidden in raw and text form; 2000 mixed-size packets exact and in order; a 300-packet level-load burst; relay delay; TCP streams with a 300 KB message; strangers blocked; programs other than the game blocked; quit and reconnect; invites; joining by lobby id; foreign lobbies refused; join confirmation; and 10% packet loss with 60 ms delay each way.
+They cover: LAN discovery by broadcast in both directions; the host's address hidden in raw and text form; 2000 mixed-size packets exact and in order; a 300-packet level-load burst; relay delay; TCP streams with a 300 KB message; strangers blocked; programs other than the game blocked; quit and reconnect; invites; joining by short lobby code; Refresh; finding a host Steam shows in the game instead of Spacewar; foreign lobbies refused; join confirmation; Versus with a host and two friends on three separate "PCs"; co-op/Versus lobbies kept apart; and 10% packet loss with 60 ms delay each way.
 
-**Not yet tested:** the real game on two real Windows PCs. Version 0.1 is the first try; the `D` key and `scctlink.log` show where it stops if something goes wrong.
+**Not yet tested:** the real game (co-op or Versus) on real Windows PCs; the `D` key and `scctlink.log` show where it stops if something goes wrong.
 
 ## Credits
 
 By KaZ. The relay pattern comes from the [Co-op Anything](https://github.com/cranebeaker/coop-anything) playbook (Steam Spacewar networking) and CoFLink. Splinter Cell: Chaos Theory is by Ubisoft. This project is not affiliated with Ubisoft or Valve.
 
-MIT license.
+SCCTLink's own code is released under the [MIT license](LICENSE). `steam_api.dll`, which ships in the release zip, is Valve Corporation's Steamworks redistributable (from Steamworks.NET 2025.164.1). It is not covered by the MIT license; it is distributed under the Steamworks SDK terms.

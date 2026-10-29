@@ -1,9 +1,9 @@
 #!/bin/sh
-# Build SCCTLink.exe (32-bit Windows) with the system's clang + lld only.
+# Build SCCTLink.exe (32-bit Windows, windowed app) with the system's clang + lld only.
 # No Windows SDK and no downloaded toolchain: the few Windows functions used are
 # listed below and turned into import libraries with llvm-dlltool.
-# Every DLL imported is a core Windows "KnownDLL" (loaded from System32 only);
-# winmm.dll and iphlpapi.dll are loaded at run time from System32 only.
+# Every DLL imported is a core Windows system DLL; winmm, iphlpapi, dwmapi and
+# uxtheme are loaded at run time from System32 only.
 set -eu
 cd "$(dirname "$0")"
 OUT=build/win
@@ -16,9 +16,22 @@ mkdef() { # name, then exports
 }
 mkdef kernel32 Sleep@4 GetTickCount64@0 SetConsoleCtrlHandler@8 GetModuleFileNameA@12 \
     SetCurrentDirectoryA@4 GlobalAlloc@8 GlobalLock@4 GlobalUnlock@4 SetConsoleTitleA@4 \
-    SetConsoleOutputCP@4 LoadLibraryExA@12 GetProcAddress@8 OpenProcess@12 \
-    QueryFullProcessImageNameA@16 CloseHandle@4 GetCurrentProcessId@0
-mkdef user32 OpenClipboard@4 EmptyClipboard@0 SetClipboardData@8 CloseClipboard@0
+    SetConsoleOutputCP@4 GetStdHandle@4 GetConsoleMode@8 SetConsoleMode@8 \
+    GetNumberOfConsoleInputEvents@8 ReadConsoleInputW@16 LoadLibraryExA@12 GetProcAddress@8 \
+    CreateToolhelp32Snapshot@8 Process32First@8 Process32Next@8 CloseHandle@4 GetCurrentProcessId@0 \
+    GetFileAttributesA@4 CreateProcessA@40 \
+    CreateThread@24 WaitForSingleObject@8 InitializeCriticalSection@4 EnterCriticalSection@4 \
+    LeaveCriticalSection@4 MultiByteToWideChar@24 WideCharToMultiByte@32 GetModuleHandleW@4 GlobalFree@4
+mkdef user32 OpenClipboard@4 EmptyClipboard@0 SetClipboardData@8 GetClipboardData@4 CloseClipboard@0 \
+    RegisterClassExW@4 CreateWindowExW@48 DefWindowProcW@16 GetMessageW@16 TranslateMessage@4 \
+    DispatchMessageW@4 IsDialogMessageW@8 PostQuitMessage@4 SendMessageW@16 SetWindowTextW@8 \
+    GetWindowTextW@12 SetTimer@16 MessageBoxW@16 LoadCursorW@8 LoadIconW@8 ShowWindow@8 \
+    UpdateWindow@4 EnableWindow@8 DestroyWindow@4 GetDC@4 ReleaseDC@8 AdjustWindowRectEx@16 \
+    GetSystemMetrics@4 FillRect@12 DrawTextW@20 GetClientRect@8 RedrawWindow@16 \
+    FlashWindowEx@4 GetForegroundWindow@0 MessageBeep@4
+mkdef gdi32 CreateFontW@56 GetDeviceCaps@8 CreateSolidBrush@4 CreatePen@12 SelectObject@8 DeleteObject@4 \
+    GetStockObject@4 SetTextColor@8 SetBkColor@8 SetBkMode@8 RoundRect@28
+mkdef comctl32 InitCommonControls@0
 mkdef shell32 ShellExecuteA@24
 mkdef ws2_32 WSAStartup@8 socket@12 bind@12 connect@12 listen@8 accept@12 send@16 recv@16 \
     sendto@24 recvfrom@24 select@20 closesocket@4 ioctlsocket@12 getsockname@12 setsockopt@20 \
@@ -27,16 +40,20 @@ mkdef msvcrt printf _vsnprintf strlen strcmp strncmp strchr strstr memcpy memmov
     atoi malloc calloc realloc free fopen fread fwrite fclose fgets fflush exit __iob_func \
     _kbhit _getch _ui64toa _strtoui64 __getmainargs
 
+# icon, manifest (modern look, sharp text on high-DPI screens) and version info
+llvm-rc -no-preprocess -C 65001 -FO "$OUT/scctlink.res" res/scctlink.rc
+llvm-cvtres -machine:x86 -out:"$OUT/scctlink_res.obj" "$OUT/scctlink.res" >/dev/null
+
 CFLAGS="--target=i686-w64-windows-gnu -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter
   -ffreestanding -fno-stack-protector -mno-stack-arg-probe -fno-asynchronous-unwind-tables
   -fno-ident -fno-builtin -D_WIN32"
-SRC="src/crt0_win.c src/scctlink.c src/plat_win.c src/steam_win.c src/sha256.c"
+SRC="src/crt0_win.c src/ui_win.c src/scctlink.c src/lobbycode.c src/plat_win.c src/steam_win.c src/sha256.c"
 
 # shellcheck disable=SC2086
 clang $CFLAGS -fuse-ld=lld -nostdlib -nostartfiles \
-    -Wl,-e,mainCRTStartup -Wl,--subsystem,console:6.0 -Wl,--dynamicbase -Wl,--nxcompat \
+    -Wl,-e,mainCRTStartup -Wl,--subsystem,windows:6.0 -Wl,--dynamicbase -Wl,--nxcompat \
     -Wl,--no-insert-timestamp -Wl,--build-id=none \
-    -o "$OUT/SCCTLink.exe" $SRC \
-    -L"$OUT/lib" -lkernel32 -luser32 -lshell32 -lws2_32 -lmsvcrt
+    -o "$OUT/SCCTLink.exe" $SRC "$OUT/scctlink_res.obj" \
+    -L"$OUT/lib" -lkernel32 -luser32 -lgdi32 -lcomctl32 -lshell32 -lws2_32 -lmsvcrt
 echo "built $OUT/SCCTLink.exe"
 sha256sum "$OUT/SCCTLink.exe"

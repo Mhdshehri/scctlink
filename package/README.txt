@@ -1,44 +1,75 @@
-SCCTLink 0.1 - Splinter Cell: Chaos Theory co-op with a Steam friend
-=====================================================================
+SCCTLink 0.5 - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
+==============================================================================
 
 No VPN (no Hamachi, Radmin or ZeroTier), no port forwarding, no IP addresses.
-The game's own LAN co-op mode is used; SCCTLink carries it through Steam.
+The game's own LAN mode is used; SCCTLink carries it through Steam.
+Works for the co-op campaign (2 players) and for Spies vs. Mercenaries /
+Versus (up to 4 players).
 
 Both players need:
   * Splinter Cell: Chaos Theory, the SAME version and the SAME mods
     (see "Before you play" - a mismatch is the #1 cause of co-op disconnects)
   * Steam running and logged in (online, not offline mode)
   * each other on their Steam friends list
-  * this folder unzipped somewhere (Desktop is fine). Keep all files together.
+  * this folder unzipped somewhere (Desktop is fine). Keep SCCTLink.exe and
+    steam_api.dll together.
+  * the SAME SCCTLink version (0.5) - older versions can't link with it.
 
 
 HOW TO PLAY
 -----------
+Everyone double-clicks SCCTLink.exe. A window opens (dark, with a Light
+mode switch at the top right).
 
-HOST (the one whose game the mission runs on)
-  1. Double-click Host-SCCT.bat. Wait for "Lobby is ready".
-  2. Start Splinter Cell: Chaos Theory (or press G in the SCCTLink window).
-  3. In the game: Co-op -> LAN -> Create game.
-  4. Leave the SCCTLink window open while you play.
+  * The button next to "Join a friend" says Co-op or Versus. Click it to
+    switch. Everyone picks the same one.
 
-FRIEND
-  1. Double-click Join-SCCT.bat. It finds the host by itself and asks
-     "Join their game?" - type Y and press Enter.
-     Not found? Press L and paste the lobby id from the host's window,
-     or accept the host's Steam invite (the host presses I to send one).
-  2. When it says "Connected", Splinter Cell starts through Steam
-     (Ubisoft Connect / Epic copy: start it yourself).
-  3. In the game: Co-op -> LAN -> Join game. The host's game is in the list.
-  4. Leave the SCCTLink window open while you play.
+HOST (the one whose game runs the mission/match)
+  1. Click "Host a game". The lobby code (like 1MCE-2B2) shows up and is
+     already copied. Send it to your friend in Steam chat if they need it
+     ("Copy code" copies it again).
+  2. Click "Start Splinter Cell" (or "Start Versus"), then in the game:
+       Co-op:  Co-op -> LAN -> Create game.
+       Versus: create a LAN game.
+  3. The list shows the friends linked to you. Leave SCCTLink open.
+
+FRIEND(S)
+  1. Click "Join a friend". The host shows up in the list: pick them and
+     click Join (or double-click). Not there? Click Refresh - it asks your
+     friends' SCCTLink directly, even when Steam shows the host as playing
+     Splinter Cell. Or paste the host's lobby code in the box and click
+     "Join this code".
+  2. When the log says "Linked", click "Start Splinter Cell" (or
+     "Start Versus") and join the host from the game's LAN list:
+       Co-op:  Co-op -> LAN -> Join game.    Versus: the LAN game list.
+  3. Leave SCCTLink open while you play.
+
+The box at the bottom has two tabs:
+  How to = the steps for the host or the friend, ticked as they happen
+           ([x] done, [>] do this now), and what to watch out for.
+  Log    = everything SCCTLink did. A dot on "Log" means a warning arrived.
+           "Copy log" copies it - send it with your friend's when something
+           doesn't work.
+Other buttons: Details = ping, packet loss, ports (in the Log). Stop = back
+to the start. Host: pick a friend in the list and click Kick to remove them
+(they can't link again until you click Stop).
+SCCTLink flashes in the taskbar with a short sound when a friend links (host)
+or the host's game is up (friend).
+If a friend picked the other mode, SCCTLink says so: click Stop, switch the
+mode, join again. If your SCCTLink versions differ, it says who has the newer one.
 
 Windows Firewall may ask about Splinter Cell or SCCTLink. You can press
 Cancel: the game traffic only goes over this PC's own loopback addresses
 (127.x.x.x), so nothing has to be opened to your network or the internet.
 
-Keys in the SCCTLink window:
-  S = status (ping, packets, packet loss)   D = details   Q = quit
-  Host only: I = send a Steam invite   G = start the game
-  Friend only: L = paste a lobby id
+VERSUS NOTES
+------------
+  * Everyone needs the same Versus version (vanilla, or the same release of
+    Enhanced SCCT Versus / SCCT Versus Reloaded) - mixing versions won't connect.
+  * With Enhanced SCCT Versus / Reloaded, keep the server unlisted
+    (console: listed false) so it doesn't appear on the public master
+    server - that would share your IP, which is what SCCTLink avoids.
+    You don't need their port forwarding/UPnP when using SCCTLink.
 
 
 BEFORE YOU PLAY (avoids disconnects and desync)
@@ -73,12 +104,16 @@ FPS / LAG TIPS
 
 SAFETY
 ------
-  * Neither player ever sees the other's IP address. If the game writes your
+  * Neither player ever sees the other's IP address. SCCTLink turns off
+    Steam's direct connections, so traffic always goes through Valve's relay
+    whatever Steam's own "IP sharing" setting is. If the game writes your
     LAN address into a packet, SCCTLink replaces it before it leaves your PC.
   * Nothing is installed, no ports are opened, no router settings change.
     SCCTLink only writes steam_appid.txt and scctlink.log in its own folder.
-  * Only the host's Steam friends who joined the lobby get through. The lobby
+  * Only the host's Steam friends who joined the lobby get through (others
+    are refused by Steam before any data arrives). The lobby
     is friends-only; anyone else is blocked and shown in the window.
+    Co-op lobbies hold 2 players, Versus lobbies 4.
   * Only Splinter Cell itself can use the connection: packets from any other
     program on your PC are dropped (and noted in scctlink.log).
   * The game is not modified and nothing is injected into it. Chaos Theory's
@@ -96,30 +131,31 @@ SAFETY
 TROUBLESHOOTING
 ---------------
   "Steam is not running" / "offline mode"  -> start Steam, go online, retry.
-  The friend's SCCTLink doesn't find the host -> press L and paste the lobby
-    id, or have the host press I and send an invite.
+  The friend's SCCTLink doesn't find the host -> click Refresh, or paste the
+    host's lobby code in the box and click "Join this code".
   The host's game is not in the LAN list:
     1. The host must be in Co-op -> LAN -> Create game first.
-    2. Both press D: "Your game: running" must show on both sides, and the
+    2. Both click Details: "Your game: running" must show on both sides, and the
        friend should see the host's ports listed.
     3. Restart the friend's game while SCCTLink stays connected.
     4. Send both scctlink.log files to the developer. They contain no IP
        addresses (they are written as LAN-IP#1 etc).
   Disconnects after a minute -> see "Before you play" (mods/FOV/FPS).
   "different SCCTLink version" -> both need the same SCCTLink zip.
-  If your game file isn't splintercell3.exe:
-    SCCTLink.exe host --exe <name>.exe   (or join)
+  "port ... is busy - error 10013" -> the game runs as administrator: start
+    SCCTLink as administrator too (right-click SCCTLink.exe).
 
 
-VERSION 0.1 - WHAT IS TESTED
+VERSION 0.5 - WHAT IS TESTED
 ----------------------------
 Tested end to end on a simulated network: two separate "PCs", a stand-in for
 the game that finds LAN games by broadcast, embeds its address in packets and
 uses UDP and TCP, and a stand-in for Steam with 10% packet loss and 60 ms delay.
 Packets arrived byte-for-byte exact and in order; the relay added about 1.5 ms.
-It has NOT yet been tried with the real Chaos Theory on two real PCs - you two
-are the first. If something doesn't work, the D key and scctlink.log show
-exactly where it stops.
+Versus was tested the same way with a host and two friends on three "PCs".
+It has NOT yet been tried with the real Chaos Theory (co-op or Versus) on real
+PCs - you are the first. If something doesn't work, the Details button and
+scctlink.log show exactly where it stops.
 
 
 SCCTLink by Mhdshehri. MIT license. Not affiliated with Ubisoft or Valve.

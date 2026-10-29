@@ -8,9 +8,9 @@ echo "fdafb7c65ec7d4182b42bf92cc8671c68e4dc547cc6e613899d2618a47eb65da  $DLL" | 
 sh build_windows.sh
 D=dist/SCCTLink-$VER
 rm -rf dist && mkdir -p "$D"
-cp build/win/SCCTLink.exe "$DLL" package/Host-SCCT.bat package/Join-SCCT.bat "$D/"
-for f in package/README.txt LICENSE; do sed "s/\r*$/\r/" "$f" > "$D/$(basename "$f")"; done  # Windows line endings
-(cd "$D" && sha256sum SCCTLink.exe steam_api.dll Host-SCCT.bat Join-SCCT.bat README.txt LICENSE > SHA256SUMS.txt)
+cp build/win/SCCTLink.exe "$DLL" "$D/"
+sed "s/\r*$/\r/" package/README.txt > "$D/README.txt"; sed "s/\r*$/\r/" LICENSE > "$D/LICENSE.txt"  # Windows line endings
+(cd "$D" && sha256sum SCCTLink.exe steam_api.dll README.txt LICENSE.txt > SHA256SUMS.txt)
 find "$D" -exec touch -d 2026-10-27T00:00:00Z {} +
 (cd dist && TZ=UTC zip -X -q -r "SCCTLink-$VER.zip" "SCCTLink-$VER")
 sha256sum "dist/SCCTLink-$VER.zip"

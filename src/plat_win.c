@@ -23,16 +23,30 @@ IMP BOOL WINAPI SetConsoleTitleA(const char *t);
 IMP BOOL WINAPI SetConsoleOutputCP(UINT cp);
 IMP void *WINAPI LoadLibraryExA(const char *path, void *file, DWORD flags);
 IMP void *WINAPI GetProcAddress(void *mod, const char *name);
-IMP HANDLE WINAPI OpenProcess(DWORD access, BOOL inherit, DWORD pid);
-IMP BOOL WINAPI QueryFullProcessImageNameA(HANDLE h, DWORD flags, char *name, DWORD *size);
+IMP HANDLE WINAPI CreateToolhelp32Snapshot(DWORD flags, DWORD pid);
+IMP DWORD WINAPI GetFileAttributesA(const char *path);
+typedef struct { DWORD cb; char *reserved, *desktop, *title; DWORD x, y, w, h, cx, cy, fill, flags;
+                 uint16_t show, reserved2; void *reserved3; HANDLE in, out, err; } StartupInfoA; /* 68 bytes */
+typedef struct { HANDLE process, thread; DWORD pid, tid; } ProcInfo;
+IMP BOOL WINAPI CreateProcessA(const char *app, char *cmd, void *pa, void *ta, BOOL inherit, DWORD flags,
+                               void *env, const char *dir, StartupInfoA *si, ProcInfo *pi);
+IMP BOOL WINAPI Process32First(HANDLE snap, void *entry);
+IMP BOOL WINAPI Process32Next(HANDLE snap, void *entry);
 IMP BOOL WINAPI CloseHandle(HANDLE h);
 IMP DWORD WINAPI GetCurrentProcessId(void);
 #define LOAD_LIBRARY_SEARCH_SYSTEM32 0x800
-#define PROCESS_QUERY_LIMITED_INFORMATION 0x1000
 IMP BOOL WINAPI OpenClipboard(HANDLE w);
 IMP BOOL WINAPI EmptyClipboard(void);
 IMP HANDLE WINAPI SetClipboardData(UINT fmt, HANDLE h);
 IMP BOOL WINAPI CloseClipboard(void);
+IMP HANDLE WINAPI GlobalFree(HANDLE h);
+IMP int WINAPI MultiByteToWideChar(UINT cp, DWORD flags, const char *s, int n, void *w, int wn);
+IMP HANDLE WINAPI GetClipboardData(UINT fmt);
+IMP HANDLE WINAPI GetStdHandle(DWORD which);
+IMP BOOL WINAPI GetConsoleMode(HANDLE h, DWORD *mode);
+IMP BOOL WINAPI SetConsoleMode(HANDLE h, DWORD mode);
+IMP BOOL WINAPI GetNumberOfConsoleInputEvents(HANDLE h, DWORD *n);
+IMP BOOL WINAPI ReadConsoleInputW(HANDLE h, void *rec, DWORD len, DWORD *read);
 IMP HANDLE WINAPI ShellExecuteA(HANDLE w, const char *op, const char *file, const char *params, const char *dir, int show);
 
 struct sockaddr_in4 { uint16_t family; uint16_t port; uint32_t addr; uint8_t zero[8]; };
@@ -82,6 +96,7 @@ u64 _strtoui64(const char *s, char **end, int radix);
 #define INVALID ((SOCKET)~(uintptr_t)0)
 
 volatile int g_quit;
+static int g_sock_err;
 static char g_exe_dir[600];
 
 static uint16_t be16(uint16_t v) { return (uint16_t)((v >> 8) | (v << 8)); }
@@ -96,6 +111,9 @@ static BOOL WINAPI on_ctrl(DWORD ev)
 
 typedef DWORD(WINAPI *GetTable_t)(void *table, DWORD *size, BOOL order, unsigned long af, int cls, unsigned long reserved);
 static GetTable_t pGetExtendedUdpTable, pGetExtendedTcpTable;
+
+static HANDLE g_in;
+static bool g_console;
 
 void plat_init(void)
 {
@@ -114,6 +132,14 @@ void plat_init(void)
     }
     SetConsoleCtrlHandler(on_ctrl, 1);
     SetConsoleOutputCP(65001);
+    /* Keys are read straight from the console (see key_poll). Turn off
+       "Quick Edit": with it on, one click in the window pauses SCCTLink -
+       and the game traffic with it - until Esc is pressed. */
+    g_in = GetStdHandle((DWORD)-10 /* STD_INPUT_HANDLE */);
+    DWORD mode;
+    g_console = g_in && GetConsoleMode(g_in, &mode);
+    if (g_console)
+        SetConsoleMode(g_in, (mode & ~(DWORD)0x40 /* QUICK_EDIT */) | 0x80 /* EXTENDED_FLAGS */);
     DWORD n = GetModuleFileNameA(0, g_exe_dir, sizeof g_exe_dir - 1);
     g_exe_dir[n] = 0;
     for (int i = (int)n - 1; i >= 0; i--)
@@ -146,7 +172,7 @@ sock_t udp_open(uint32_t ip, uint16_t port, int flags)
     if (flags & UDP_BROADCAST) setsockopt(s, SOL_SOCKET, SO_BROADCAST, &on, sizeof on);
     if (flags & UDP_REUSE) setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &on, sizeof on);
     setsockopt(s, SOL_SOCKET, SO_RCVBUF, &big, sizeof big);
-    if (!bind4(s, ip, port)) { closesocket(s); return BADSOCK; }
+    if (!bind4(s, ip, port)) { g_sock_err = WSAGetLastError(); closesocket(s); return BADSOCK; }
     nonblock(s);
     /* Without this, an ICMP "port unreachable" (game not started yet) makes
        every later recv on the socket fail with WSAECONNRESET. */
@@ -188,6 +214,8 @@ uint16_t sock_local_port(sock_t s)
 }
 
 void sock_close(sock_t s) { if (s != BADSOCK) closesocket((SOCKET)s); }
+int sock_last_error(void) { return g_sock_err; }
+bool sock_err_denied(int err) { return err == 10013 /* WSAEACCES */; }
 
 static void tcp_tune(SOCKET s)
 {
@@ -258,34 +286,48 @@ void wait_socks(const sock_t *s, int n, int ms)
 
 /* ---- the game's ports, from the same tables "netstat -ano" shows ---- */
 
-typedef struct { DWORD pid; bool match; } PidName;
-static PidName g_pids[256];
-static int g_npids;
-static u64 g_pids_at;
+/* The game's process ids, from the process list (not from its sockets: a game
+   in the menu may have no sockets, or only short-lived ones). */
+typedef struct {
+    DWORD size, usage, pid;
+    uintptr_t heap;
+    DWORD module, threads, parent;
+    long prio;
+    DWORD flags;
+    char exe[260];
+} ProcEntry; /* PROCESSENTRY32 (ANSI) */
+
+static DWORD g_game_pids[16];
+static int g_ngame_pids;
 
 static char lower(char c) { return (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c; }
 
-static bool pid_is_game(DWORD pid, const char *prefix)
+static bool name_match(const char *name, const char *prefix)
 {
-    if (!pid) return false;
-    if (now_ms() - g_pids_at > 5000) { g_npids = 0; g_pids_at = now_ms(); }
-    for (int i = 0; i < g_npids; i++) if (g_pids[i].pid == pid) return g_pids[i].match;
-    bool m = false;
-    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-    if (h) {
-        char path[600];
-        DWORD n = sizeof path;
-        if (QueryFullProcessImageNameA(h, 0, path, &n)) {
-            const char *base = path;
-            for (DWORD i = 0; i < n; i++) if (path[i] == '\\' || path[i] == '/') base = path + i + 1;
-            m = true;
-            for (int i = 0; prefix[i]; i++)
-                if (lower(base[i]) != lower(prefix[i])) { m = false; break; }
-        }
-        CloseHandle(h);
+    for (int i = 0; prefix[i]; i++)
+        if (lower(name[i]) != lower(prefix[i])) return false;
+    return true;
+}
+
+static void find_game_pids(const char *prefix)
+{
+    g_ngame_pids = 0;
+    HANDLE snap = CreateToolhelp32Snapshot(2 /* TH32CS_SNAPPROCESS */, 0);
+    if (snap == (HANDLE)(intptr_t)-1) return;
+    ProcEntry e;
+    memset(&e, 0, sizeof e);
+    e.size = sizeof e;
+    for (BOOL ok = Process32First(snap, &e); ok; ok = Process32Next(snap, &e)) {
+        e.exe[259] = 0;
+        if (name_match(e.exe, prefix) && g_ngame_pids < 16) g_game_pids[g_ngame_pids++] = e.pid;
     }
-    if (g_npids < 256) { g_pids[g_npids].pid = pid; g_pids[g_npids++].match = m; }
-    return m;
+    CloseHandle(snap);
+}
+
+static bool pid_is_game(DWORD pid)
+{
+    for (int i = 0; i < g_ngame_pids; i++) if (g_game_pids[i] == pid) return true;
+    return false;
 }
 
 static void *get_table(GetTable_t fn, int cls)
@@ -310,6 +352,8 @@ static void *get_table(GetTable_t fn, int cls)
 void game_scan(const char *exe_prefix, GameNet *g)
 {
     memset(g, 0, sizeof *g);
+    find_game_pids(exe_prefix);
+    g->running = g_ngame_pids > 0;
     DWORD me = GetCurrentProcessId();
     DWORD *u = get_table(pGetExtendedUdpTable, 1 /* UDP_TABLE_OWNER_PID */);
     if (u) {
@@ -318,8 +362,7 @@ void game_scan(const char *exe_prefix, GameNet *g)
             DWORD *row = u + 1 + 3 * i; /* addr, port, pid */
             uint16_t port = be16((uint16_t)row[1]);
             if (row[2] != me && g->nbusy < 512) g->busy_udp[g->nbusy++] = port;
-            if (pid_is_game(row[2], exe_prefix)) {
-                g->running = true;
+            if (pid_is_game(row[2])) {
                 if (g->nudp < MAX_GPORTS) g->udp[g->nudp++] = (Bound){ (uint32_t)row[0], port };
             }
         }
@@ -329,8 +372,7 @@ void game_scan(const char *exe_prefix, GameNet *g)
         DWORD n = t[0];
         for (DWORD i = 0; i < n; i++) {
             DWORD *row = t + 1 + 6 * i; /* state, addr, port, raddr, rport, pid */
-            if (!pid_is_game(row[5], exe_prefix)) continue;
-            g->running = true;
+            if (!pid_is_game(row[5])) continue;
             uint16_t port = be16((uint16_t)row[2]);
             if (row[0] == 2 /* LISTEN */) { if (g->ntcpl < MAX_GPORTS) g->tcpl[g->ntcpl++] = (Bound){ (uint32_t)row[1], port }; }
             else if (g->ntcpc < MAX_GPORTS) g->tcpc[g->ntcpc++] = port;
@@ -353,31 +395,157 @@ int local_ipv4s(uint32_t *out, int max)
     return n;
 }
 
-int key_poll(void) { return _kbhit() ? _getch() : -1; }
+/* ---- keyboard ----
+ * Keys are matched by their position on the keyboard (virtual key code), not
+ * by the letter they type, so I, L, S, Y... work with an Arabic (or any other)
+ * keyboard layout too. Arabic-Indic digits are read as 0-9. Ctrl+V pastes. */
+
+typedef struct {
+    uint16_t type, pad;
+    BOOL down;
+    uint16_t repeat, vk, scan;
+    uint16_t ch;
+    DWORD ctrl;
+} KeyRec; /* INPUT_RECORD holding a KEY_EVENT_RECORD: 20 bytes */
+
+enum { K_NONE = -1, K_ENTER = '\r', K_BACK = 8, K_ESC = 27, K_PASTE = 22 };
+
+static int map_key(const KeyRec *k)
+{
+    if (k->type != 1 /* KEY_EVENT */ || !k->down) return K_NONE;
+    unsigned vk = k->vk, ch = k->ch;
+    bool ctrl = (k->ctrl & (0x4 | 0x8)) != 0 && !(k->ctrl & (0x1 | 0x2)); /* Ctrl without AltGr */
+    if (ctrl && vk == 'V') return K_PASTE;
+    if (vk == 0x0D) return K_ENTER;
+    if (vk == 0x08) return K_BACK;
+    if (vk == 0x1B) return K_ESC;
+    if (ch >= 0x660 && ch <= 0x669) return '0' + (int)(ch - 0x660); /* Arabic-Indic digits */
+    if (ch >= 0x6F0 && ch <= 0x6F9) return '0' + (int)(ch - 0x6F0); /* Persian digits */
+    if (vk >= 0x60 && vk <= 0x69) return '0' + (int)(vk - 0x60);     /* number pad */
+    if (vk >= 'A' && vk <= 'Z') return (int)vk;                       /* same key, any layout */
+    if (vk >= '0' && vk <= '9' && !(k->ctrl & 0x10 /* Shift */)) return (int)vk;
+    if (ch >= 0x20 && ch < 0x7F) return (int)ch;                      /* pasted text etc. */
+    return K_NONE;
+}
+
+static int next_key(bool wait)
+{
+    for (;;) {
+        DWORD n = 0;
+        if (!wait && (!GetNumberOfConsoleInputEvents(g_in, &n) || n == 0)) return K_NONE;
+        KeyRec r;
+        if (!ReadConsoleInputW(g_in, &r, 1, &n) || n == 0) return wait ? K_ESC : K_NONE;
+        int k = map_key(&r);
+        if (k != K_NONE) return k;
+    }
+}
+
+int broadcast_listen_addrs(uint32_t *out, int max) { return local_ipv4s(out, max); }
+
+int key_poll(void)
+{
+    if (!g_console) return _kbhit() ? _getch() : -1;
+    return next_key(false);
+}
+
+int clipboard_get(char *out, int n)
+{
+    int len = 0;
+    if (!OpenClipboard(0)) return 0;
+    HANDLE h = GetClipboardData(1 /* CF_TEXT */);
+    const char *t = h ? GlobalLock(h) : 0;
+    if (t) {
+        for (; t[len] && len < n - 1; len++) out[len] = t[len];
+        GlobalUnlock(h);
+    }
+    out[len] = 0;
+    CloseClipboard();
+    return len;
+}
 
 bool read_line(char *buf, int n)
 {
-    if (!fgets(buf, n, stdin)) return false;
-    size_t l = strlen(buf);
-    while (l && (buf[l - 1] == '\n' || buf[l - 1] == '\r')) buf[--l] = 0;
-    return true;
+    if (!g_console) {
+        if (!fgets(buf, n, stdin)) return false;
+        size_t l = strlen(buf);
+        while (l && (buf[l - 1] == '\n' || buf[l - 1] == '\r')) buf[--l] = 0;
+        return true;
+    }
+    int len = 0;
+    buf[0] = 0;
+    for (;;) {
+        int k = next_key(true);
+        if (k == K_ENTER) { printf("\n"); fflush(0); return true; }
+        if (k == K_BACK) {
+            if (len) { buf[--len] = 0; printf("\b \b"); fflush(0); }
+            continue;
+        }
+        if (k == K_ESC) { while (len) { buf[--len] = 0; printf("\b \b"); } fflush(0); continue; }
+        char add[128];
+        int na = 0;
+        if (k == K_PASTE) {
+            char clip[128];
+            int c = clipboard_get(clip, sizeof clip);
+            for (int i = 0; i < c && na < 127; i++)
+                if (clip[i] >= 0x20 && clip[i] < 0x7F) add[na++] = clip[i];
+        } else if (k > 0 && k < 0x7F) {
+            add[na++] = (char)k;
+        }
+        for (int i = 0; i < na && len < n - 1; i++) {
+            buf[len++] = add[i];
+            printf("%c", add[i]);
+        }
+        buf[len] = 0;
+        fflush(0);
+    }
 }
 
 void clipboard_set(const char *text)
 {
-    size_t n = strlen(text) + 1;
-    HANDLE h = GlobalAlloc(2 /* GMEM_MOVEABLE */, n);
+    /* As Unicode, so names in any language (Arabic too) survive; Windows
+       makes the plain-text version from it. */
+    int wn = MultiByteToWideChar(65001 /* UTF-8 */, 0, text, -1, 0, 0);
+    if (wn <= 0) return;
+    HANDLE h = GlobalAlloc(2 /* GMEM_MOVEABLE */, (size_t)wn * 2);
     if (!h) return;
-    memcpy(GlobalLock(h), text, n);
+    void *p = GlobalLock(h);
+    if (!p) { GlobalFree(h); return; }
+    MultiByteToWideChar(65001, 0, text, -1, p, wn);
     GlobalUnlock(h);
-    if (OpenClipboard(0)) {
-        EmptyClipboard();
-        SetClipboardData(1 /* CF_TEXT */, h);
-        CloseClipboard();
-    }
+    if (!OpenClipboard(0)) { GlobalFree(h); return; }
+    EmptyClipboard();
+    if (!SetClipboardData(13 /* CF_UNICODETEXT */, h)) GlobalFree(h); /* on success Windows owns it */
+    CloseClipboard();
 }
 
 void open_url(const char *url) { ShellExecuteA(0, "open", url, 0, 0, 1); }
+
+bool file_exists(const char *path)
+{
+    DWORD a = GetFileAttributesA(path);
+    return a != 0xFFFFFFFFu && !(a & 0x10 /* directory */);
+}
+
+bool run_program(const char *exe, const char *args, const char *dir)
+{
+    static char cmd[1400];
+    sfmt(cmd, sizeof cmd, "\"%s\" %s", exe, args);
+    StartupInfoA si;
+    memset(&si, 0, sizeof si);
+    si.cb = sizeof si;
+    ProcInfo pi;
+    memset(&pi, 0, sizeof pi);
+    if (!CreateProcessA(exe, cmd, 0, 0, 0, 0, 0, dir, &si, &pi)) return false;
+    CloseHandle(pi.thread);
+    CloseHandle(pi.process);
+    return true;
+}
+
+bool game_is_running(const char *prefix)
+{
+    find_game_pids(prefix);
+    return g_ngame_pids > 0;
+}
 void set_title(const char *t) { SetConsoleTitleA(t); }
 void u64_to_str(u64 v, char out[24]) { _ui64toa(v, out, 10); }
 u64 str_to_u64(const char *s) { return _strtoui64(s, 0, 10); }
