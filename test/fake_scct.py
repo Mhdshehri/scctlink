@@ -29,6 +29,56 @@ import os
 ctypes.CDLL(None).prctl(15, os.environ.get("FAKE_NAME", "splintercell3").encode(), 0, 0, 0)  # PR_SET_NAME
 
 GAME, BEACON, LOBBY, PUSH = 7776, 8888, 7777, 9999
+NETZ_DISC, NETZ_GAME = 9100, 9103  # Chaos Theory's real ports (Quazal Net-Z)
+
+
+# --- Quazal Net-Z LAN discovery, as the real game does it ---------------------
+# PRUDP v0 USER packet: 10-byte header, payload, 1-byte checksum. The payload is
+# RC4-encrypted with key = MD5 applied 4099 times to "LAN" (fresh RC4 for every
+# packet). The reply carries "prudp:/address=<LAN IP>;port=9103" inside the
+# encrypted part, and the joiner connects to exactly that address.
+def _netz_key():
+    import hashlib
+    k = b"LAN"
+    for _ in range(0x1003):
+        k = hashlib.md5(k).digest()
+    return k
+
+
+NETZ_KEY = _netz_key()
+
+
+def rc4(key, data):
+    S = list(range(256))
+    j = 0
+    for i in range(256):
+        j = (j + S[i] + key[i % len(key)]) & 255
+        S[i], S[j] = S[j], S[i]
+    i = j = 0
+    out = bytearray()
+    for b in data:
+        i = (i + 1) & 255
+        j = (j + S[i]) & 255
+        S[i], S[j] = S[j], S[i]
+        out.append(b ^ S[(S[i] + S[j]) & 255])
+    return bytes(out)
+
+
+def netz_checksum(data):
+    n = len(data) // 4
+    t = sum(struct.unpack_from("<%dI" % n, data)) & 0xFFFFFFFF
+    return (sum(data[n * 4:]) + sum(struct.pack("<I", t))) & 0xFF
+
+
+def netz_packet(plain):
+    p = bytes([0x61, 0x61, 0x05, 0x00]) + bytes(6) + rc4(NETZ_KEY, plain)
+    return p + bytes([netz_checksum(p)])
+
+
+def netz_open(p):
+    if len(p) < 12 or p[2] & 7 != 5 or netz_checksum(p[:-1]) != p[-1]:
+        return None
+    return rc4(NETZ_KEY, p[10:-1])
 
 
 ANY = os.environ.get("FAKE_BIND_ANY") == "1"  # bind ports on all addresses, like most games
@@ -92,7 +142,29 @@ def host(ip, bcast):
                 c.close()
             threading.Thread(target=serve, daemon=True).start()
 
-    for f in (beacon, push, game, lobby):
+    nd = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    nd.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    nd.bind((bind_ip, NETZ_DISC))
+    ng = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    ng.bind((bind_ip, NETZ_GAME))
+
+    def netz_disc():
+        while True:
+            d, a = nd.recvfrom(2000)
+            q = netz_open(d)
+            if q is None or q[:4] != b"\x08\x00\x00\x00":
+                continue
+            url = f"prudp:/address={ip};port={NETZ_GAME}".encode() + b"\0"
+            body = (struct.pack("<II", 2, 0) + q[8:12] + b"\x01\x0e\x00SPLINTERCELL3\x00"
+                    + struct.pack("<H", len(url)) + url + b"SessionDifficulty=1")
+            nd.sendto(netz_packet(body), a)
+
+    def netz_game():
+        while True:
+            d, a = ng.recvfrom(2000)
+            ng.sendto(b"NZ:" + d, a)
+
+    for f in (beacon, push, game, lobby, netz_disc, netz_game):
         threading.Thread(target=f, daemon=True).start()
     while True:
         time.sleep(1)
@@ -232,6 +304,37 @@ def join(ip, bcast, n_stream):
         c.close()
     except Exception as e:
         result("tcp", ["error " + str(e), False, False])
+    # Net-Z: find the host by the real game's encrypted discovery, then connect
+    # to the address read from inside the encrypted reply
+    nq = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    nq.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    nq.bind((ip, 0))
+    nq.settimeout(0.5)
+    url = None
+    end = time.time() + 15
+    while time.time() < end and not url:
+        nq.sendto(netz_packet(struct.pack("<II", 8, 1) + os.urandom(4) + os.urandom(17)), (bcast, NETZ_DISC))
+        try:
+            d, a = nq.recvfrom(2000)
+            r = netz_open(d)
+            if r and b"prudp:/address=" in r:
+                url = r.split(b"prudp:/address=", 1)[1].split(b"\0", 1)[0].decode()
+        except socket.timeout:
+            pass
+    result("netz_url", url)
+    joined = False
+    if url:
+        addr, port = url.split(";port=")
+        for _ in range(10):
+            nq.sendto(b"JOIN", (addr, int(port)))
+            try:
+                d, a = nq.recvfrom(2000)
+                if d == b"NZ:JOIN":
+                    joined = True
+                    break
+            except socket.timeout:
+                pass
+    result("netz_join", joined)
     print("JOIN DONE", flush=True)
     while True:
         time.sleep(1)

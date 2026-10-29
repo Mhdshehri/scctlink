@@ -25,7 +25,7 @@
 #include "plat.h"
 #include "ui.h"
 
-#define VERSION "0.5"
+#define VERSION "0.6"
 #define SCCT_APPID 13570
 #define SPACEWAR_APPID 480
 #define MAX_PEERS 3
@@ -33,7 +33,7 @@
 #define CH_GAME 0
 #define CH_CTL 1
 #define CH_TCP 2
-#define PROTO '2' /* relay protocol; both players need the same */
+#define PROTO '3' /* relay protocol; both players need the same */
 #define KEEPALIVE_MS 1000
 #define PEER_TIMEOUT_MS 30000
 #define HOST_QUIET_MS 15000
@@ -242,6 +242,80 @@ static int swap_ip(uint8_t *p, int n, uint32_t from, uint32_t to)
         i += 2 * L - 1;
     }
     return hits;
+}
+
+/* ---------- Quazal Net-Z (Chaos Theory's network library) ----------
+   The game's LAN discovery reply carries "prudp:/address=<LAN IP>;port=9103"
+   and the joining game connects to exactly that address. The reply is a PRUDP
+   v0 USER packet: 10-byte header, payload, 1-byte checksum, and the payload is
+   RC4-encrypted (a fresh RC4 for every packet) with key = MD5 applied 4099
+   times to "LAN" (found in splintercell3.exe; test/fake_scct.py derives it).
+   So the address is decrypted, swapped like any other copy, and the packet is
+   encrypted again with a new checksum. Same length, nothing else changes. */
+static const uint8_t NETZ_LAN_KEY[16] = {
+    0x18, 0xa9, 0xe8, 0x23, 0xdd, 0x0c, 0x13, 0xa0, 0x4a, 0x09, 0x7d, 0x51, 0x6c, 0xf8, 0xe1, 0x8a
+};
+#define NETZ_HDR 10
+
+static void rc4_crypt(const uint8_t *key, int klen, uint8_t *d, int n)
+{
+    uint8_t S[256];
+    for (int i = 0; i < 256; i++) S[i] = (uint8_t)i;
+    for (int i = 0, j = 0; i < 256; i++) {
+        j = (j + S[i] + key[i % klen]) & 255;
+        uint8_t t = S[i]; S[i] = S[j]; S[j] = t;
+    }
+    for (int k = 0, i = 0, j = 0; k < n; k++) {
+        i = (i + 1) & 255;
+        j = (j + S[i]) & 255;
+        uint8_t t = S[i]; S[i] = S[j]; S[j] = t;
+        d[k] ^= S[(S[i] + S[j]) & 255];
+    }
+}
+
+/* PRUDP v0 checksum without the access-key part (that part is kept from the
+   original packet, so it works whatever the key is). */
+static uint8_t netz_sum(const uint8_t *d, int n)
+{
+    uint32_t words = 0, sum = 0;
+    int w = n / 4;
+    for (int i = 0; i < w; i++) words += (uint32_t)d[4 * i] | (uint32_t)d[4 * i + 1] << 8 | (uint32_t)d[4 * i + 2] << 16 | (uint32_t)d[4 * i + 3] << 24;
+    for (int i = w * 4; i < n; i++) sum += d[i];
+    sum += (words & 255) + (words >> 8 & 255) + (words >> 16 & 255) + (words >> 24);
+    return (uint8_t)sum;
+}
+
+static bool netz_user(const uint8_t *d, int n) { return n >= NETZ_HDR + 2 && n <= MAX_GAME_PKT && (d[2] & 7) == 5; }
+
+/* Decrypt the payload of a Net-Z discovery packet into out (for swapping or the log). */
+static int netz_open(const uint8_t *d, int n, uint8_t *out)
+{
+    if (!netz_user(d, n)) return -1;
+    int len = n - NETZ_HDR - 1;
+    memcpy(out, d + NETZ_HDR, (size_t)len);
+    rc4_crypt(NETZ_LAN_KEY, 16, out, len);
+    return len;
+}
+
+static int netz_swap(uint8_t *d, int n, uint32_t from, uint32_t to)
+{
+    static uint8_t plain[MAX_GAME_PKT];
+    int len = netz_open(d, n, plain);
+    if (len <= 0) return 0;
+    int hits = swap_ip(plain, len, from, to);
+    if (!hits) return 0; /* finding the exact address text proves it really was Net-Z */
+    uint8_t key_part = (uint8_t)(d[n - 1] - netz_sum(d, n - 1));
+    rc4_crypt(NETZ_LAN_KEY, 16, plain, len);
+    memcpy(d + NETZ_HDR, plain, (size_t)len);
+    d[n - 1] = (uint8_t)(key_part + netz_sum(d, n - 1));
+    return hits;
+}
+
+/* Swap in the packet as it is and inside Net-Z's encrypted discovery packets. */
+static int swap_ip_all(uint8_t *d, int n, uint32_t from, uint32_t to)
+{
+    int hits = netz_swap(d, n, from, to);
+    return hits + swap_ip(d, n, from, to);
 }
 
 /* ---------- the game ---------- */
@@ -636,7 +710,7 @@ static void catchers_update(void)
 static int hide_my_ips(Peer *p, uint8_t *d, int n)
 {
     int hits = 0;
-    for (int i = 0; i < g_nmy_ips; i++) hits += swap_ip(d, n, g_my_ips[i], p->my_alias);
+    for (int i = 0; i < g_nmy_ips; i++) hits += swap_ip_all(d, n, g_my_ips[i], p->my_alias);
     if (hits && !p->swapped) say("(The game put your LAN address in a packet. SCCTLink replaced it, so %s never sees it.)", who(p->id));
     p->swapped += (u64)hits;
     return hits;
@@ -645,7 +719,7 @@ static int hide_my_ips(Peer *p, uint8_t *d, int n)
 /* Payload from a peer: their idea of this PC's address becomes the real one. */
 static void unhide_my_ip(Peer *p, uint8_t *d, int n)
 {
-    if (g_nmy_ips && p->my_alias) swap_ip(d, n, p->my_alias, g_my_ips[0]);
+    if (g_nmy_ips && p->my_alias) swap_ip_all(d, n, p->my_alias, g_my_ips[0]);
 }
 
 /* Packet log for finding out what the game sends (only in scctlink.log):
@@ -669,6 +743,21 @@ static void capture(Peer *p, bool out, uint16_t src, uint16_t dst, const uint8_t
     if (n > 160) { memcpy(line + k, " ...", 4); k += 4; }
     line[k] = 0;
     log_line(line);
+    /* Net-Z discovery: also log what's inside (any address that isn't loopback is masked) */
+    static uint8_t plain[MAX_GAME_PKT];
+    int len = netz_open(d, n, plain);
+    if (len > 0 && (*cnt <= 12 || what)) {
+        char t[260];
+        int m = 0;
+        for (int i = 0; i < len && m < (int)sizeof t - 1; i++) t[m++] = plain[i] >= 32 && plain[i] < 127 ? (char)plain[i] : '.';
+        t[m] = 0;
+        for (char *a = strstr(t, "address="); a; a = strstr(a + 1, "address=")) {
+            char *v = a + 8;
+            if (strncmp(v, "127.", 4)) for (; *v && *v != ';'; v++) if (*v >= '0' && *v <= '9') *v = '#';
+        }
+        sfmt(line, sizeof line, "    Net-Z: %s", t);
+        log_line(line);
+    }
 }
 
 static void send_udp_frame(Peer *p, char kind, uint16_t src, uint16_t dst, const uint8_t *d, int n)

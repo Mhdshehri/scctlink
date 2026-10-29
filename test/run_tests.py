@@ -145,8 +145,8 @@ def session(title, mockdir, host_pc, join_pc, extra=None, n_stream=2000, join_fi
     check(h.wait_for(r"Splinter Cell is running") is not None, "host's SCCTLink found splintercell3 and its ports")
     j = relay(join_pc, "join", 1002, "1001", ["join", "--no-launch", "--yes"], mockdir, extra)
     check(j.wait_for(r"Connected to user1001 through Steam") is not None, "joiner found the host by itself and connected")
-    check(j.wait_for(r"user1001's Splinter Cell is running \(2 UDP / 1 TCP") is not None,
-          "joiner learned the host game's ports (2 UDP, 1 TCP)")
+    check(j.wait_for(r"user1001's Splinter Cell is running \(4 UDP / 1 TCP") is not None,
+          "joiner learned the host game's ports (4 UDP, 1 TCP)")
     jg = fake(join_pc, "join", n_stream)
     check(jg.wait_for("JOIN DONE", timeout=90) is not None, "joiner's game finished its scripted session")
     return h, j, hg, jg
@@ -196,6 +196,10 @@ def main():
         check((r.get("rtt_median_ms") or 99) < 5, f"relay adds little delay: median round trip {r.get('rtt_median_ms')} ms (mock Steam, no internet)")
         t = r.get("tcp") or ["", False, False]
         check(t[1] and t[2], "TCP lobby connection works both ways, including a 300 KB message")
+        nu = r.get("netz_url") or ""
+        check(nu.startswith(r.get("announce_from", "?") + ";"),
+              f"Net-Z: the host's address inside the ENCRYPTED discovery reply was replaced too ({nu})")
+        check(r.get("netz_join") is True, "Net-Z: joining at that address reaches the host's game (the real game's join)")
         m = hg.wait_for(r"LOBBY CLIENT (\S+)", 2)
         check(m is not None and is_alias(m.group(1)), f"host's game sees the joiner at a loopback address ({m and m.group(1)})")
         check("10.42.7.23" not in hg.log, "the joiner's real address never reached the host's game")
