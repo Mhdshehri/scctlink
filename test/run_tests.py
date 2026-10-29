@@ -586,6 +586,8 @@ def main():
             return root
         base = {"System/splintercell3.exe": b"MZ" + b"\1" * 5000, "System/Core.u": b"core" * 300,
                 "Maps/1_1_0Tbilisi.scl": b"map" * 900, "System/SplinterCell3.ini": b"[Engine]\nres=1920\n"}
+        for k in range(1500):  # a real game folder: the file list is ~100 KB, sent in pieces
+            base[f"Textures/Pack{k:04d}_with_a_long_name_like_the_real_ones.utx"] = b"t" * (k + 1)
         modded = dict(base)
         modded["System/dinput8.dll"] = b"MZasi-loader"
         modded["System/scripts/SplinterCellChaosTheory.WidescreenFix.asi"] = b"MZwsfix"
@@ -595,6 +597,8 @@ def main():
         ga, gb, gc = game_dir("a", modded), game_dir("b", other), game_dir("c", base)
         hm = relay(A, "HM", 1191, "1192", ["host"], d, {"MOCK_GAME_DIR": ga})
         procs.append(hm)
+        check(hm.wait_for(r"\[mods\] Mod files found \(2\)") is not None,
+              "Mods tab: the host's own mods are listed right away (no friend, no game running)")
         check(hm.wait_for(r"Lobby is ready") is not None, "host ready")
         jm = relay(B, "JM", 1192, "1191", ["join", "--no-launch", "--yes"], d, {"MOCK_GAME_DIR": gb})
         procs.append(jm)
@@ -605,16 +609,27 @@ def main():
               "...the widescreen fix only on the host's PC")
         check(hm.wait_for(r"different version: system/core\.u", timeout=3) is not None, "...a game file with the same size but other content")
         check(jm.wait_for(r"only on user1191's PC: system/dinput8\.dll", timeout=15) is not None, "the friend sees the same, from their side")
+        check(hm.wait_for(r"\[mods\] \[x\] Same game version", timeout=3) is not None, "Mods tab: [x] same game version")
+        check(hm.wait_for(r"\[mods\] \[  \] Same mods - 2 differences", timeout=3) is not None, "Mods tab: [  ] same mods, 2 differences")
+        check(hm.wait_for(r"\[mods\] \[  \] Same game files - 1 difference", timeout=3) is not None, "Mods tab: [  ] same game files, 1 difference")
         check("splintercell3.ini" not in hm.log + jm.log, "settings files (.ini) are not compared")
         check(gd not in hm.log + jm.log and gd not in open(os.path.join(d, "log_HM.txt")).read(), "the game folder's path is never sent or logged")
         hm.stop(); jm.stop()
         hs = relay(A, "HS", 1193, "1194", ["host"], d, {"MOCK_GAME_DIR": gc})
         procs.append(hs)
         check(hs.wait_for(r"Lobby is ready") is not None, "host ready")
-        js = relay(B, "JS", 1194, "1193", ["join", "--no-launch", "--yes"], d, {"MOCK_GAME_DIR": game_dir("d", base)})
+        gdd = game_dir("d", base)
+        js = relay(B, "JS", 1194, "1193", ["join", "--no-launch", "--yes"], d, {"MOCK_GAME_DIR": gdd}, stdin=subprocess.PIPE)
         procs.append(js)
-        check(js.wait_for(r"Game files check: same as user1193's \(3 files\)", timeout=15) is not None, "identical games: 'same' on the friend's side")
+        check(js.wait_for(r"Game files check: same as user1193's \(1503 files\)", timeout=15) is not None, "identical games: 'same' on the friend's side")
         check(hs.wait_for(r"Game files check: same as user1194's", timeout=15) is not None, "...and on the host's side")
+        check(hs.wait_for(r"\[mods\] All 1503 files are the same", timeout=3) is not None, "Mods tab: all the same")
+        with open(os.path.join(gdd, "System", "d3d9.dll"), "wb") as f:  # the friend installs a mod...
+            f.write(b"MZreshade")
+        js.p.stdin.write("M\n"); js.p.stdin.flush()  # ...and clicks "Check again"
+        check(js.wait_for(r"Game files checked again", timeout=10) is not None, "Check again: the friend's game is listed again")
+        check(js.wait_for(r"only on your PC: system/d3d9\.dll", timeout=10) is not None, "...the new mod shows up on the friend's side")
+        check(hs.wait_for(r"only on user1194's PC: system/d3d9\.dll", timeout=10) is not None, "...and on the host's side, without clicking anything")
         hs.stop(); js.stop()
 
         print("[13] bad internet: 10% packet loss each way and 60 ms delay each way")

@@ -18,6 +18,19 @@ void ui_log(const char *line)
 }
 
 void ui_state(const UiState *s) { (void)s; }
+void ui_mods(const char *text, bool warn)
+{
+    printf("[mods%s]\n", warn ? " !" : "");
+    for (const char *l = text; *l;) {
+        const char *e = l;
+        while (*e && *e != '\n') e++;
+        int n = (int)(e - l);
+        if (n && l[n - 1] == '\r') n--;
+        printf("[mods] %.*s\n", n, l);
+        l = *e ? e + 1 : e;
+    }
+    fflush(0);
+}
 void ui_alert(const char *what) { printf("[alert] %s\n", what); fflush(0); }
 static u64 g_last_peer; /* tests: K kicks the last linked friend */
 void ui_list(int which, int n, const UiPerson *p) { if (which == LIST_FRIENDS_ONLINE && n > 0) g_last_peer = p[n - 1].id; }
@@ -71,6 +84,7 @@ bool ui_poll(Cmd *c)
     case 'j': case 'J': c->kind = CMD_JOIN; break;
     case 'v': case 'V': c->kind = CMD_SET_VERSUS; c->arg = 1; break;
     case 'c': case 'C': c->kind = CMD_SET_VERSUS; c->arg = 0; break;
+    case 'm': case 'M': c->kind = CMD_RECHECK; break;
     case KEY_PASTE:
         if (clipboard_get(line, sizeof line) > 0) {
             c->kind = CMD_JOIN_LOBBY;

@@ -155,7 +155,7 @@ IMP void *WINAPI GetProcAddress(void *mod, const char *name);
 enum {
     ID_HOST = 101, ID_JOIN, ID_STOP, ID_STATUS, ID_LOBBY, ID_COPYID, ID_JOINID,
     ID_LISTLABEL, ID_LIST, ID_ACTION, ID_LAUNCH, ID_COPYCONN, ID_LOG, ID_TITLE, ID_REFRESH, ID_ACCENT, ID_THEME, ID_TAB_HOWTO, ID_TAB_LOG, ID_COPYLOG, ID_HOWTO,
-    ID_LOBBYLABEL, ID_GAMEMODE,
+    ID_LOBBYLABEL, ID_TAB_MODS, ID_MODS, ID_RECHECK, ID_GAMEMODE,
 };
 
 typedef struct { UINT type, id, item, action, state; HWND hwnd; HDC dc; RECT rc; uintptr_t data; } DrawItem;
@@ -172,6 +172,8 @@ static UiPerson g_lists[2][64];
 static int g_nlist[2];
 static bool g_list_dirty[2];
 static bool g_alert, g_warned; /* g_warned: a "!" line arrived */
+static char g_mods_text[16384];
+static bool g_mods_dirty, g_mods_warn;
 static Cmd g_cmds[32];
 static int g_cmd_head, g_cmd_tail;
 
@@ -186,6 +188,15 @@ void ui_log(const char *line)
         g_pend[g_npend++] = '\r';
         g_pend[g_npend++] = '\n';
     }
+    LeaveCriticalSection(&g_cs);
+}
+
+void ui_mods(const char *text, bool warn)
+{
+    EnterCriticalSection(&g_cs);
+    sfmt(g_mods_text, sizeof g_mods_text, "%s", text);
+    g_mods_dirty = true;
+    g_mods_warn = warn;
     LeaveCriticalSection(&g_cs);
 }
 
@@ -265,8 +276,10 @@ static u64 g_close_ms;
 static UiPerson g_view[2][64]; /* what the list box shows (GUI thread copy) */
 static int g_nview[2];
 static int g_list_shown = -1;
-static bool g_tab_log;     /* false: "How to" is shown in the box, true: the log */
+enum { TAB_HOWTO, TAB_LOG, TAB_MODS };
+static int g_tab;          /* what the box shows: "How to", the log or the mods checklist */
 static bool g_log_unseen;  /* a warning arrived while "How to" was shown: red dot on Log */
+static bool g_mods_unseen; /* the game files differ: dot on "Mods" */
 
 static int S_(int v) { return v * g_dpi / 96; }
 
@@ -339,6 +352,7 @@ static void apply_system_parts(void)
         const WCHAR *name = T.dark ? WTEXT("DarkMode_Explorer") : WTEXT("Explorer");
         theme(g_c[ID_LOG], name, 0);
         theme(g_c[ID_HOWTO], name, 0);
+        theme(g_c[ID_MODS], name, 0);
         theme(g_c[ID_LIST], name, 0);
     }
 }
@@ -370,12 +384,13 @@ static void set_theme(bool dark)
 }
 
 static bool is_primary(UINT id) { return id == ID_HOST || id == ID_JOIN || id == ID_ACTION; }
-static bool is_tab(UINT id) { return id == ID_TAB_HOWTO || id == ID_TAB_LOG; }
+static bool is_tab(UINT id) { return id == ID_TAB_HOWTO || id == ID_TAB_LOG || id == ID_TAB_MODS; }
+static int tab_of(UINT id) { return id == ID_TAB_LOG ? TAB_LOG : id == ID_TAB_MODS ? TAB_MODS : TAB_HOWTO; }
 
 /* "How to" / "Log": the chosen one looks like a raised tab with a green line under it */
 static void draw_tab(DrawItem *d)
 {
-    bool on = (d->id == ID_TAB_LOG) == g_tab_log;
+    bool on = tab_of(d->id) == g_tab;
     FillRect(d->dc, &d->rc, g_br_bg);
     if (on) {
         HBRUSH b = CreateSolidBrush(T.btn);
@@ -397,7 +412,7 @@ static void draw_tab(DrawItem *d)
     RECT tr = d->rc;
     DrawTextW(d->dc, w, n, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     SelectObject(d->dc, of);
-    if (d->id == ID_TAB_LOG && g_log_unseen) { /* dot: a warning is waiting in the log */
+    if ((d->id == ID_TAB_LOG && g_log_unseen) || (d->id == ID_TAB_MODS && g_mods_unseen)) { /* dot: something needs a look */
         HANDLE p = CreatePen(0, 1, T.accent);
         HANDLE ob = SelectObject(d->dc, g_br_accent), op = SelectObject(d->dc, p);
         int r = S_(7), x = d->rc.right - S_(12), y = d->rc.top + S_(6);
@@ -467,7 +482,7 @@ static void draw_list_item(DrawItem *d)
 static LRESULT control_colors(UINT msg, HDC dc, HWND ctl_)
 {
     if (ctl_ == g_c[ID_ACCENT]) return (LRESULT)g_br_accent;
-    bool box = msg != WM_CTLCOLORSTATIC || ctl_ == g_c[ID_LOG] || ctl_ == g_c[ID_LOBBY] || ctl_ == g_c[ID_HOWTO];
+    bool box = msg != WM_CTLCOLORSTATIC || ctl_ == g_c[ID_LOG] || ctl_ == g_c[ID_LOBBY] || ctl_ == g_c[ID_HOWTO] || ctl_ == g_c[ID_MODS];
     SetTextColor(dc, (ctl_ == g_c[ID_LISTLABEL] || ctl_ == g_c[ID_LOBBYLABEL]) ? T.dim : T.text);
     SetBkColor(dc, box ? T.panel : T.bg);
     return (LRESULT)(box ? g_br_panel : g_br_bg);
@@ -539,10 +554,13 @@ static void build(void)
     ctl(ID_COPYCONN, B, WTEXT("Details"), OD, 0, 204, 312, 200, 30, g_font);
     ctl(ID_TAB_HOWTO, B, WTEXT("How to"), OD, 0, 14, 350, 96, 28, g_font);
     ctl(ID_TAB_LOG, B, WTEXT("Log"), OD, 0, 114, 350, 80, 28, g_font);
+    ctl(ID_TAB_MODS, B, WTEXT("Mods"), OD, 0, 198, 350, 84, 28, g_font);
     ctl(ID_COPYLOG, B, WTEXT("Copy log"), OD, 0, 486, 350, 100, 26, g_font);
+    ctl(ID_RECHECK, B, WTEXT("Check again"), OD, 0, 466, 350, 120, 26, g_font);
     /* one box: "How to" and the log take turns in it */
     framed(ID_LOG, E, WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY, 14, 384, 572, 180, 7, 5);
     ctl(ID_HOWTO, E, WTEXT(""), WS_VSCROLL | ES_MULTILINE | ES_READONLY, 0, 14 + 7, 384 + 5, 572 - 14, 180 - 10, g_font);
+    ctl(ID_MODS, E, WTEXT("Checking the game files..."), WS_VSCROLL | ES_MULTILINE | ES_READONLY, 0, 14 + 7, 384 + 5, 572 - 14, 180 - 10, g_font);
     SendMessageW(g_c[ID_LOG], EM_SETLIMITTEXT, 0x7FFFFFFE, 0);
 }
 
@@ -600,7 +618,7 @@ static void build_howto(const UiState *s, char *o, int n)
             "- Keep SCCTLink open the whole time you play.\r\n"
             "- Only people on your Steam friends list can link. Kick removes someone until you click Stop.\r\n"
             "- Game running as administrator? Then run SCCTLink as administrator too (both the same).\r\n"
-            "- Same SCCTLink version, same game files and same mods (FOV, widescreen fix) on every PC.\r\n"
+            "- Same SCCTLink version, same game files and same mods on every PC (see the Mods tab).\r\n"
             "- Cap the frame rate at 60 on every PC. Don't Alt+Tab during co-op.",
             s->versus ? "VERSUS" : "CO-OP",
             mark(s, 0, open), mark(s, 1, open), game, create, mark(s, 2, open), mark(s, 3, open));
@@ -614,7 +632,7 @@ static void build_howto(const UiState *s, char *o, int n)
             "WATCH OUT\r\n"
             "- Keep SCCTLink open the whole time you play.\r\n"
             "- Game running as administrator? Then run SCCTLink as administrator too (both the same).\r\n"
-            "- Same SCCTLink version, same game files and same mods (FOV, widescreen fix) as the host.\r\n"
+            "- Same SCCTLink version, same game files and same mods as the host (see the Mods tab).\r\n"
             "- Cap the frame rate at 60. Don't Alt+Tab during co-op.\r\n"
             "- Can't join? Click Details, then Log -> Copy log, and send it with the host's log.",
             s->versus ? "VERSUS" : "CO-OP",
@@ -631,19 +649,24 @@ static void build_howto(const UiState *s, char *o, int n)
             "Before your first game: Steam -> right-click the game -> Properties -> Installed Files\r\n"
             "-> Verify integrity of game files. Use the same mods on every PC.\r\n\r\n"
             "In the steps, [x] = done and [>] = what to do now.\r\n"
-            "Everything SCCTLink does is in the Log (a dot on Log = something needs a look).");
+            "Everything SCCTLink does is in the Log (a dot on Log = something needs a look).\r\n"
+            "The Mods tab compares your game files and mods with your friend's when you link.");
     }
 }
 
-static void show_tab(bool log)
+static void show_tab(int tab)
 {
-    g_tab_log = log;
-    if (log) g_log_unseen = false;
-    ShowWindow(g_c[ID_LOG], log ? 5 : 0);
-    ShowWindow(g_c[ID_HOWTO], log ? 0 : 5);
-    ShowWindow(g_c[ID_COPYLOG], log ? 5 : 0);
+    g_tab = tab;
+    if (tab == TAB_LOG) g_log_unseen = false;
+    if (tab == TAB_MODS) g_mods_unseen = false;
+    ShowWindow(g_c[ID_LOG], tab == TAB_LOG ? 5 : 0);
+    ShowWindow(g_c[ID_HOWTO], tab == TAB_HOWTO ? 5 : 0);
+    ShowWindow(g_c[ID_MODS], tab == TAB_MODS ? 5 : 0);
+    ShowWindow(g_c[ID_COPYLOG], tab == TAB_LOG ? 5 : 0);
+    ShowWindow(g_c[ID_RECHECK], tab == TAB_MODS ? 5 : 0);
     RedrawWindow(g_c[ID_TAB_HOWTO], 0, 0, 0x1 | 0x4);
     RedrawWindow(g_c[ID_TAB_LOG], 0, 0, 0x1 | 0x4);
+    RedrawWindow(g_c[ID_TAB_MODS], 0, 0, 0x1 | 0x4);
 }
 
 static void update_howto(void)
@@ -716,6 +739,10 @@ static void on_timer(void)
     g_npend = 0;
     bool alert = g_alert, warned = g_warned;
     g_alert = g_warned = false;
+    static char mods[16384];
+    bool mods_dirty = g_mods_dirty, mods_warn = g_mods_warn;
+    if (mods_dirty) memcpy(mods, g_mods_text, sizeof mods);
+    g_mods_dirty = false;
     st = g_state;
     st_dirty = g_state_dirty;
     g_state_dirty = false;
@@ -730,7 +757,13 @@ static void on_timer(void)
     LeaveCriticalSection(&g_cs);
 
     if (n) { pend[n] = 0; append_log(pend); }
-    if (warned && !g_tab_log && !g_log_unseen) { /* red dot on "Log" */
+    if (mods_dirty) {
+        static WCHAR w[16384];
+        SetWindowTextW(g_c[ID_MODS], wide(mods, w, 16384));
+        bool dot = mods_warn && g_tab != TAB_MODS;
+        if (dot != g_mods_unseen) { g_mods_unseen = dot; RedrawWindow(g_c[ID_TAB_MODS], 0, 0, 0x1 | 0x4); }
+    }
+    if (warned && g_tab != TAB_LOG && !g_log_unseen) { /* red dot on "Log" */
         g_log_unseen = true;
         RedrawWindow(g_c[ID_TAB_LOG], 0, 0, 0x1 | 0x4);
     }
@@ -825,8 +858,10 @@ static void on_command(int id, int code)
         break;
     case ID_LAUNCH: push_cmd(CMD_LAUNCH, 0); break;
     case ID_REFRESH: push_cmd(CMD_REFRESH, 0); break;
-    case ID_TAB_HOWTO: show_tab(false); break;
-    case ID_TAB_LOG: show_tab(true); break;
+    case ID_TAB_HOWTO: show_tab(TAB_HOWTO); break;
+    case ID_TAB_LOG: show_tab(TAB_LOG); break;
+    case ID_TAB_MODS: show_tab(TAB_MODS); break;
+    case ID_RECHECK: push_cmd(CMD_RECHECK, 0); break;
     case ID_COPYLOG:
         copy_log();
         ui_log("(Log copied. Paste it with Ctrl+V.)");
@@ -837,7 +872,7 @@ static void on_command(int id, int code)
         break;
     case ID_COPYCONN: /* "Details": ping, packet loss, ports - shown in the Log */
         push_cmd(CMD_DETAILS, 0);
-        show_tab(true);
+        show_tab(TAB_LOG);
         break;
     case ID_GAMEMODE: push_cmd(CMD_SET_VERSUS, g_shown.versus ? 0 : 1); break;
     default: break;
@@ -937,12 +972,12 @@ int main(int argc, char **argv)
     AdjustWindowRectEx(&r, style, 0, 0);
     int ww = r.right - r.left, wh = r.bottom - r.top;
     int x = (GetSystemMetrics(0) - ww) / 2, y = (GetSystemMetrics(1) - wh) / 2;
-    g_wnd = CreateWindowExW(0, wc.className, WTEXT("SCCTLink 0.7 - Splinter Cell: Chaos Theory"), style, x < 0 ? 0 : x,
+    g_wnd = CreateWindowExW(0, wc.className, WTEXT("SCCTLink 0.7.1 - Splinter Cell: Chaos Theory"), style, x < 0 ? 0 : x,
                             y < 0 ? 0 : y, ww, wh, 0, 0, inst, 0);
     if (!g_wnd) return 1;
     build();
     set_theme(T.dark); /* button label, title bar, scrollbars */
-    show_tab(false); /* start on "How to" */
+    show_tab(TAB_HOWTO); /* start on "How to" */
     on_timer();
     ShowWindow(g_wnd, 1);
     UpdateWindow(g_wnd);

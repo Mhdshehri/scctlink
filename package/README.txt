@@ -1,4 +1,4 @@
-SCCTLink 0.7 - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
+SCCTLink 0.7.1 - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
 ==============================================================================
 
 No VPN (no Hamachi, Radmin or ZeroTier), no port forwarding, no IP addresses.
@@ -13,7 +13,7 @@ Both players need:
   * each other on their Steam friends list
   * this folder unzipped somewhere (Desktop is fine). Keep SCCTLink.exe and
     steam_api.dll together.
-  * the SAME SCCTLink version (0.7) - older versions can't link with it.
+  * the SAME SCCTLink version (0.7.1) - older versions can't link with it.
 
 
 HOW TO PLAY
@@ -50,8 +50,11 @@ The box at the bottom has two tabs:
   Log    = everything SCCTLink did. A dot on "Log" means a warning arrived.
            "Copy log" copies it - send it with your friend's when something
            doesn't work.
-GAME FILES CHECK: when you link, SCCTLink compares your game's files with
-your friend's (Steam copies) and shows in the Log what differs, for example
+MODS TAB (game files check): next to "Log". As soon as SCCTLink opens it
+lists your game's mods (the game doesn't have to be running). When you link,
+it compares your game's files with your friend's (Steam copies) as a
+checklist - same game version / same mods / same game files - and lists what
+differs (also in the Log). "Check again" after you change mods. For example
     only on your PC: system/dinput8.dll
     different version: system/core.u
 Co-op disconnects when the two games aren't the same: install the same mods
@@ -154,7 +157,7 @@ TROUBLESHOOTING
     SCCTLink as administrator too (right-click SCCTLink.exe).
 
 
-VERSION 0.7 - WHAT IS TESTED
+VERSION 0.7.1 - WHAT IS TESTED
 ----------------------------
 New in 0.6: the friend could see the host's game in the LAN list but not
 join. The game hides the host's real address inside an encrypted packet, so
@@ -176,6 +179,8 @@ With 0.6.4 joining works with the real game (tested: host and friend in
 different homes, into the first map).
 0.7: the game files check above, and scctlink.log now keeps the last game
 packets before a disconnect, with times, so a disconnect can be traced.
+0.7.1: the Mods tab and "Check again"; the check works with real game
+folders (0.7 dropped the big file list).
 
 Tested end to end on a simulated network: two separate "PCs", a stand-in for
 the game that finds LAN games by broadcast (including the real game's

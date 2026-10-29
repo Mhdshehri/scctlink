@@ -17,6 +17,7 @@ typedef enum {
     CMD_DETAILS,     /* print ports, ping, packet loss */
     CMD_SET_VERSUS,  /* arg = 1: Versus (Spies vs. Mercenaries), 0: co-op. Only when stopped. */
     CMD_KICK,        /* host: arg = friend's Steam id */
+    CMD_RECHECK,     /* list the game files again and compare with the friends again */
     CMD_STOP,        /* stop hosting/joining, back to the start screen */
     CMD_QUIT,
 } CmdKind;
@@ -45,6 +46,9 @@ void ui_log(const char *line); /* lines starting with "!" are warnings */
    game is up): the window flashes in the taskbar and plays a short sound */
 void ui_alert(const char *what);
 void ui_state(const UiState *s);
+/* The "Mods" tab: the game files check as a checklist. warn: something differs
+   (a dot on the tab). */
+void ui_mods(const char *text, bool warn);
 void ui_list(int which, int n, const UiPerson *p);
 /* Friends found hosting. Return the lobby to join now, or 0. Set *reject to a
    lobby the user said no to (so it isn't offered again). */

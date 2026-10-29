@@ -1,10 +1,10 @@
-# SCCTLink 0.7
+# SCCTLink 0.7.1
 
 Play **Splinter Cell: Chaos Theory** co-op (2 players) or Spies vs. Mercenaries / Versus (up to 4) with Steam friends: no VPN (no Hamachi, Radmin or ZeroTier), no port forwarding, no IP addresses.
 
 Chaos Theory's online servers are gone, so PC multiplayer only works in **LAN** mode. SCCTLink makes your friends' PCs look like they are on your LAN, and carries the game's traffic through Steam's relay network. The host invites the friend from Steam.
 
-**Download:** `SCCTLink-0.7.zip` from [Releases](../../releases). Both players unzip it.
+**Download:** `SCCTLink-0.7.1.zip` from [Releases](../../releases). Both players unzip it.
 
 ## How to play
 
@@ -20,7 +20,7 @@ See [package/README.txt](package/README.txt) for the full guide, FPS/lag tips an
 
 ## Game files check
 
-Co-op disconnects when the two games differ (a mod on one PC only, another patch). When two players link, each SCCTLink lists its game folder (Steam copy): file names relative to the game folder, sizes, and SHA-256 of the program files (`System`, `scripts`, `Versus\System`). It sends the list to the other player and both see what differs. Settings files (`.ini`), logs and saves are left out. Nothing else about the PC is sent.
+Co-op disconnects when the two games differ (a mod on one PC only, another patch). When two players link, each SCCTLink lists its game folder (Steam copy): file names relative to the game folder, sizes, and SHA-256 of the program files (`System`, `scripts`, `Versus\System`). It sends the list to the other player and both see what differs, in the **Mods** tab (a checklist: same game version, same mods, same game files) and in the Log. The Mods tab lists your own mods as soon as SCCTLink opens; the game doesn't need to be running. **Check again** redoes it after you change mods. Settings files (`.ini`), logs and saves are left out. Nothing else about the PC is sent.
 
 ## How it works
 

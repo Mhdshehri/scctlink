@@ -25,7 +25,7 @@
 #include "plat.h"
 #include "ui.h"
 
-#define VERSION "0.7"
+#define VERSION "0.7.1"
 #define SCCT_APPID 13570
 #define SPACEWAR_APPID 480
 #define MAX_PEERS 3
@@ -758,7 +758,7 @@ typedef struct {
     double rtt; bool have_rtt;
     Rate rate;
     char *mf; int nmf;        /* the peer's game file list, as it arrives */
-    bool mf_sent, mf_done;
+    bool mf_sent, mf_done, mf_found;
 } Peer;
 
 static Peer g_peers[MAX_PEERS];
@@ -823,6 +823,9 @@ static void peer_sockets_close(Peer *p)
 }
 
 static void ring_dump(const char *why);
+static void mods_forget(u64 id);
+static void mods_publish(void);
+static void mods_local_text(void);
 
 static void drop_peer(u64 id, const char *why)
 {
@@ -830,6 +833,7 @@ static void drop_peer(u64 id, const char *why)
         if (g_peers[i].id != id) continue;
         say("- %s disconnected (%s).", who(id), why);
         ring_dump("the link to a friend ended");
+        mods_forget(id);
         peer_sockets_close(&g_peers[i]);
         close_session(id);
         g_peers[i] = g_peers[--g_npeers];
@@ -1918,6 +1922,8 @@ static void mf_make(void)
         mf_sort(g_mfs, g_nmfs);
         note("game files check: %d files listed in %d ms", g_nmfs, (int)(now_ms() - t));
     }
+    mods_local_text();
+    mods_publish();
     free(g_mf_text);
     g_mf_text = malloc((size_t)g_nmfs * 140 + 16);
     int k = 0;
@@ -1929,6 +1935,78 @@ static void mf_make(void)
         k += (int)strlen(g_mf_text + k);
     }
     g_mf_len = k;
+}
+
+/* Files that are mods (or that mods put in the game folder), to name them as such. */
+static bool mf_is_mod(const char *path)
+{
+    const char *name = path;
+    for (const char *c = path; *c; c++) if (*c == '/') name = c + 1;
+    size_t L = strlen(name);
+    if (L > 4 && !strcmp(name + L - 4, ".asi")) return true;
+    if (strstr(path, "scripts/") || strstr(path, "plugins/") || strstr(path, "reshade") || strstr(path, "widescreen"))
+        return true;
+    static const char *const loaders[] = { "dinput8.dll", "d3d9.dll", "d3d8.dll", "dsound.dll", "winmm.dll",
+                                           "dxgi.dll", "version.dll", "d3d11.dll", "vorbisfile.dll", "xlive.dll" };
+    bool top = name == path || !strncmp(path, "system/", 7) || !strncmp(path, "versus/system/", 14);
+    for (unsigned i = 0; i < sizeof loaders / sizeof *loaders; i++)
+        if (top && !strcmp(name, loaders[i])) return true;
+    return false;
+}
+
+/* The "Mods" tab: this PC's game, then one checklist per linked friend. */
+static char g_mods_local[4096];
+static struct { u64 id; bool warn; char text[6144]; } g_cmp[MAX_PEERS];
+static int g_ncmp;
+
+static void mods_publish(void)
+{
+    static char t[16384];
+    int k = 0;
+    bool warn = false;
+    sfmt(t, sizeof t, "%s", g_mods_local);
+    k = (int)strlen(t);
+    for (int i = 0; i < g_ncmp && k < (int)sizeof t - 10; i++) {
+        sfmt(t + k, sizeof t - (size_t)k, "\r\n%s", g_cmp[i].text);
+        k += (int)strlen(t + k);
+        warn |= g_cmp[i].warn;
+    }
+    if (!g_ncmp) {
+        sfmt(t + k, sizeof t - (size_t)k, "\r\nWhen a friend links, their game is compared with yours here.\r\n"
+             "(Both of you need SCCTLink 0.7 or newer. The game doesn't have to be running.)");
+    }
+    ui_mods(t, warn);
+}
+
+static void mods_forget(u64 id)
+{
+    for (int i = 0; i < g_ncmp; i++)
+        if (g_cmp[i].id == id) { g_cmp[i] = g_cmp[--g_ncmp]; mods_publish(); return; }
+}
+
+static void mods_local_text(void)
+{
+    char *o = g_mods_local;
+    size_t n = sizeof g_mods_local;
+    if (g_nmfs <= 0) {
+        sfmt(o, n, "YOUR GAME\r\n[?] The game's folder wasn't found. Only Steam copies of Splinter Cell:\r\n"
+                   "    Chaos Theory can be checked.\r\n");
+        return;
+    }
+    int nm = 0;
+    for (int i = 0; i < g_nmfs; i++) nm += mf_is_mod(g_mfs[i].path);
+    sfmt(o, n, "YOUR GAME (Steam folder, %d files checked)\r\n", g_nmfs);
+    size_t k = strlen(o);
+    if (!nm) { sfmt(o + k, n - k, "No mods found: plain game files.\r\n"); return; }
+    sfmt(o + k, n - k, "Mod files found (%d):\r\n", nm);
+    k = strlen(o);
+    int shown = 0;
+    for (int i = 0; i < g_nmfs && k < n - 120; i++)
+        if (mf_is_mod(g_mfs[i].path) && shown++ < 30) {
+            sfmt(o + k, n - k, "    %s\r\n", g_mfs[i].path);
+            k = strlen(o);
+        }
+    if (nm > shown) sfmt(o + k, n - k, "    ...and %d more\r\n", nm - shown);
 }
 
 /* Send the list in pieces: 'M' PROTO index count bytes... (index from 0). */
@@ -1968,20 +2046,34 @@ static void mf_report(Peer *p, bool they_found)
 {
     char them[96];
     sfmt(them, sizeof them, "%s", who(p->id));
+    int ci;
+    for (ci = 0; ci < g_ncmp; ci++) if (g_cmp[ci].id == p->id) break;
+    if (ci == g_ncmp) { if (g_ncmp == MAX_PEERS) return; g_ncmp++; }
+    g_cmp[ci].id = p->id;
+    g_cmp[ci].warn = false;
+    char *o = g_cmp[ci].text;
+    size_t on = sizeof g_cmp[ci].text;
     if (g_nmfs <= 0 || !they_found) {
-        say("Game files check: skipped - the game's folder wasn't found on %s (only Steam copies can be checked).",
-            g_nmfs <= 0 && !they_found ? "either PC" : g_nmfs <= 0 ? "your PC" : "their PC");
+        const char *where = g_nmfs <= 0 && !they_found ? "either PC" : g_nmfs <= 0 ? "your PC" : "their PC";
+        say("Game files check: skipped - the game's folder wasn't found on %s (only Steam copies can be checked).", where);
+        sfmt(o, on, "COMPARED WITH %s\r\n[?] Skipped: the game's folder wasn't found on %s.\r\n", them, where);
+        mods_publish();
         return;
     }
     static MFile theirs[MF_MAX];
     int nt = 0;
-    for (int o = 0; o < p->nmf && nt < MF_MAX;) {
-        int e = o;
+    for (int q = 0; q < p->nmf && nt < MF_MAX;) {
+        int e = q;
         while (e < p->nmf && p->mf[e] != '\n') e++;
-        if (mf_parse_line(p->mf + o, e - o, &theirs[nt])) nt++;
-        o = e + 1;
+        if (mf_parse_line(p->mf + q, e - q, &theirs[nt])) nt++;
+        q = e + 1;
     }
     mf_sort(theirs, nt);
+    /* three groups: the game program, mods, everything else */
+    static char lines[3][4096];
+    int cnt[3] = { 0, 0, 0 };
+    size_t ln[3] = { 0, 0, 0 };
+    lines[0][0] = lines[1][0] = lines[2][0] = 0;
     int diffs = 0, shown = 0;
     char line[300], their_pc[120];
     sfmt(their_pc, sizeof their_pc, "only on %s's PC", them);
@@ -1998,19 +2090,44 @@ static void mf_report(Peer *p, bool they_found)
         }
         if (!what) continue;
         if (!diffs++) say("! Game files differ from %s's. Co-op can disconnect when the games aren't the same:", them);
-        if (shown < 25) { sfmt(line, sizeof line, "    %s: %s", what, path); say("%s", line); shown++; }
+        sfmt(line, sizeof line, "    %s: %s", what, path);
+        if (shown < 25) { say("%s", line); shown++; }
+        else log_line(line);
+        int g = (strstr(path, "splintercell3.exe") || strstr(path, "scct_versus.exe")) ? 0 : mf_is_mod(path) ? 1 : 2;
+        if (cnt[g]++ < 12 && ln[g] < sizeof lines[g] - 300) {
+            sfmt(lines[g] + ln[g], sizeof lines[g] - ln[g], "%s\r\n", line);
+            ln[g] += strlen(lines[g] + ln[g]);
+        }
     }
-    if (!diffs) { say("Game files check: same as %s's (%d files).", them, g_nmfs); return; }
     if (diffs > shown) say("    ...and %d more (all in scctlink.log)", diffs - shown);
-    say("  Make both games the same: the same mods (same versions) on both PCs, or none.");
-    ui_alert("game files differ");
+    sfmt(o, on, "COMPARED WITH %s\r\n", them);
+    size_t k = strlen(o);
+    static const char *const label[3] = { "Same game version (splintercell3.exe)", "Same mods", "Same game files" };
+    for (int g = 0; g < 3 && k < on - 200; g++) {
+        if (!cnt[g]) sfmt(o + k, on - k, "[x] %s\r\n", label[g]);
+        else sfmt(o + k, on - k, "[  ] %s - %d difference%s:\r\n%s%s", label[g], cnt[g], cnt[g] == 1 ? "" : "s",
+                  lines[g], cnt[g] > 12 ? "    ...more in the Log\r\n" : "");
+        k = strlen(o);
+    }
+    if (!diffs) {
+        say("Game files check: same as %s's (%d files).", them, g_nmfs);
+        sfmt(o + k, on - k, "All %d files are the same. Good to go.\r\n", g_nmfs);
+    } else {
+        say("  Make both games the same: the same mods (same versions) on both PCs, or none.");
+        sfmt(o + k, on - k, "Make both games the same: the same mods (same versions) on both PCs, or\r\n"
+                            "none. Then click \"Check again\". Co-op can disconnect while they differ.\r\n");
+        g_cmp[ci].warn = true;
+        ui_alert("game files differ");
+    }
+    mods_publish();
 }
 
 static void mf_recv(Peer *p, const uint8_t *m, int n)
 {
-    if (n < 5 || p->mf_done) return;
+    if (n < 5) return;
     int idx = m[2], count = m[3];
-    if (idx == 0) { free(p->mf); p->mf = 0; p->nmf = 0; }
+    if (idx == 0) { free(p->mf); p->mf = 0; p->nmf = 0; p->mf_done = false; } /* a new list (they clicked "Check again") */
+    if (p->mf_done) return;
     int len = n - 5;
     if (p->nmf + len > MF_MAX * 140) return;
     char *nb = realloc(p->mf, (size_t)(p->nmf + len + 1));
@@ -2020,9 +2137,10 @@ static void mf_recv(Peer *p, const uint8_t *m, int n)
     p->nmf += len;
     if (idx + 1 < count) return;
     p->mf_done = true;
+    p->mf_found = m[4] != 0;
     mf_send(p); /* make sure they get ours too */
     mf_make();
-    mf_report(p, m[4] != 0);
+    mf_report(p, p->mf_found);
 }
 
 /* ---------- control messages ---------- */
@@ -2146,7 +2264,9 @@ static void drain_steam(void)
     while ((n = S.NM_ReceiveMessagesOnChannel(NM, CH_CTL, msgs, 64)) > 0) {
         for (int i = 0; i < n; i++) {
             int sz = msg_size(msgs[i]);
-            if (sz > 0 && sz < 1024) on_ctl(msg_sender(msgs[i]), msg_data(msgs[i]), sz);
+            const uint8_t *md = msg_data(msgs[i]);
+            /* control messages are small, except the game file list ('M', sent in pieces) */
+            if (sz > 0 && (sz < 1024 || (md[0] == 'M' && sz <= MF_CHUNK + 8))) on_ctl(msg_sender(msgs[i]), md, sz);
             S.Msg_Release(msgs[i]);
         }
     }
@@ -2250,6 +2370,8 @@ static void stop_mode(bool quiet)
 {
     if (g_mode == MODE_IDLE) return;
     ring_dump("Stop");
+    g_ncmp = 0;
+    if (g_nmfs >= 0) mods_publish();
     for (int i = 0; i < g_npeers; i++) send_ctl1(g_peers[i].id, 'B');
     for (int i = 0; i < 20; i++) { S.MD_RunFrame(g_pipe); sleep_ms(10); } /* flush goodbyes */
     if (g_lobby) S.MM_LeaveLobby(MM, g_lobby);
@@ -2348,6 +2470,19 @@ static void handle_cmd(const Cmd *c)
     case CMD_KICK: kick_peer(c->arg); break;
     case CMD_STATUS: status(false); break;
     case CMD_DETAILS: status(true); ring_dump("Details"); break;
+    case CMD_RECHECK:
+        if (!g_steam_ok) { say("Steam isn't running, so the game's folder can't be found."); break; }
+        g_nmfs = -1;
+        mf_make();
+        say("Game files checked again.");
+        for (int i = 0; i < g_npeers; i++) {
+            Peer *p = &g_peers[i];
+            if (!p->welcomed) continue;
+            p->mf_sent = false;
+            mf_send(p);
+            if (p->mf_done) mf_report(p, p->mf_found);
+        }
+        break;
     case CMD_SET_VERSUS:
         if (g_mode != MODE_IDLE) { say("Click Stop first, then switch between Co-op and Versus."); break; }
         if ((c->arg != 0) != g_versus) {
@@ -2381,6 +2516,7 @@ void engine_run(const EngineOpts *o, Cmd first)
     /* Connect to Steam right away, so an invite accepted on the start screen
        reaches SCCTLink. If Steam isn't running yet, Host/Join retries. */
     g_steam_ok = steam_start();
+    if (g_steam_ok) mf_make(); /* the "Mods" tab shows this PC's game right away, game running or not */
     if (first.kind != CMD_NONE) handle_cmd(&first);
 
     u64 last_scan = 0, last_friends = 0, last_state = 0;
