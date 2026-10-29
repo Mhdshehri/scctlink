@@ -25,7 +25,7 @@
 #include "plat.h"
 #include "ui.h"
 
-#define VERSION "0.8.2-vpn"
+#define VERSION "0.8.3-vpn"
 #define SCCT_APPID 13570
 #define SPACEWAR_APPID 480
 #define MAX_PEERS 3
@@ -1481,7 +1481,13 @@ static void on_lobby_entered(u64 lobby, uint32_t response)
         const char *why = response == 2 ? "it doesn't exist any more" :
                           response == 3 ? "you are not allowed to join" :
                           response == 4 ? "it is full" : "Steam refused";
-        say("! Could not join that lobby: %s.", why);
+        bool known = false; /* LobbyEnter can arrive twice: say it once */
+        for (int i = 0; i < g_nrejected; i++) known |= g_rejected[i] == lobby;
+        if (!known) {
+            say("! Could not join that lobby: %s.", why);
+            /* a closed lobby can still be named for a while: don't try it again */
+            if (response == 2 && g_nrejected < 16) g_rejected[g_nrejected++] = lobby;
+        }
         return;
     }
     const char *tag = S.MM_GetLobbyData(MM, lobby, "scctlink");
@@ -1594,6 +1600,12 @@ static void status(bool details)
     for (int i = 0; i < G.ntcpl; i++) say("  TCP listen %s:%u", ip_kind(G.tcpl[i].ip), (unsigned)G.tcpl[i].port);
     for (int i = 0; i < g_npeers; i++) {
         Peer *p = &g_peers[i];
+        if (p->vpn) {
+            char t[16];
+            ip_text(p->vpn_ip, t);
+            say("%s's game (VPN mode, at %s on the virtual LAN): %s packets in, %s out through the adapter.",
+                who(p->id), t, idstr(p->down), idstr(p->up));
+        } else
         say("%s's game (at %s on this PC):", who(p->id), ip_kind(p->alias));
         for (int k = 0; k < p->nals; k++)
             say("  UDP %u -> here %u  (%s packets in)", (unsigned)p->als[k].port, (unsigned)sock_local_port(p->als[k].s),
@@ -1932,6 +1944,7 @@ static void vpn_send(Peer *p, const uint8_t *d, int n, const IpInfo *ii)
 static void vpn_from_adapter(const uint8_t *d, int n)
 {
     IpInfo ii;
+    if (n < 1 || (d[0] >> 4) != 4) { g_vpn_dropped++; return; } /* IPv6: Windows' own chatter, never the game */
     if (!ip_info(d, n, &ii) || ii.src != g_vpn_ip) { vpn_drop("not the game's UDP/TCP", d, n); return; }
     bool probe = ii.proto == 17 && ii.sport == PROBE_PORT; /* SCCTLink's own VPN test */
     if (ii.first && !probe && !game_port(ii.proto, ii.sport)) { vpn_drop("from a program that is not the game", d, n); return; } /* Windows chatter etc. */

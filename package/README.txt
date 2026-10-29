@@ -1,4 +1,4 @@
-SCCTLink 0.8.2-vpn - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
+SCCTLink 0.8.3-vpn - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
 ==============================================================================
 
 No VPN (no Hamachi, Radmin or ZeroTier), no port forwarding, no IP addresses.
@@ -13,7 +13,7 @@ Both players need:
   * each other on their Steam friends list
   * this folder unzipped somewhere (Desktop is fine). Keep SCCTLink.exe and
     steam_api.dll together.
-  * the SAME SCCTLink version (0.8.2-vpn) - older versions can't link with it.
+  * the SAME SCCTLink version (0.8.3-vpn) - older versions can't link with it.
 
 
 VPN MODE (EXPERIMENTAL BUILD)
@@ -185,7 +185,7 @@ TROUBLESHOOTING
     SCCTLink as administrator too (right-click SCCTLink.exe).
 
 
-VERSION 0.8.2-vpn - WHAT IS TESTED
+VERSION 0.8.3-vpn - WHAT IS TESTED
 ----------------------------
 New in 0.6: the friend could see the host's game in the LAN list but not
 join. The game hides the host's real address inside an encrypted packet, so
@@ -211,7 +211,10 @@ packets before a disconnect, with times, so a disconnect can be traced.
 folders (0.7 dropped the big file list).
 0.8-vpn (experimental): VPN mode, see the top of this file.
 0.8.1-vpn: the firewall stays on (Private network + one allow rule).
-0.8.2-vpn: VPN test (Details), to check the virtual LAN without the game. Tested on a
+0.8.2-vpn: VPN test (Details), to check the virtual LAN without the game.
+0.8.3-vpn: VPN mode tested between two real Windows PCs (VPN test OK both
+ways). A closed lobby isn't retried; Details shows VPN-mode counts; Windows'
+own IPv6 chatter on the adapter is blocked without filling the log. Tested on a
 simulated network (virtual adapters on two PCs, the game's discovery, Net-Z
 join, UDP and TCP, untouched); not yet with the real game on Windows.
 
