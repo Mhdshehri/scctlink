@@ -198,18 +198,22 @@ def lzo_unpack(src):
         t = src[ip]; ip += 1
 
 
-def quazal_msg(body):  # u32 length, 1 byte, body (as the real game's messages)
-    return struct.pack("<I", len(body)) + b"\x01" + body
+def quazal_msg(body):
+    """A game message as the real game sends it: u32 length, body, checksum
+    byte (PRUDP-style sum with key 0; the game drops a message that doesn't match)."""
+    m = struct.pack("<I", len(body)) + body
+    return m + bytes([netz_checksum(m)])
 
 
 def quazal_payload(m):
-    """Message from a DATA payload: ratio byte 0 = plain, else LZO."""
+    """Message body from a DATA payload (ratio byte 0 = plain, else LZO), or
+    None if its checksum is wrong (the real game drops it)."""
     if not m:
         return None
     raw = m[1:] if m[0] == 0 else lzo_unpack(m[1:])
-    if len(raw) < 5 or struct.unpack_from("<I", raw)[0] + 5 != len(raw):
+    if len(raw) < 5 or struct.unpack_from("<I", raw)[0] + 5 != len(raw) or netz_checksum(raw[:-1]) != raw[-1]:
         return None
-    return raw[5:]
+    return raw[4:-1]
 
 
 def netz_open(p):
@@ -306,8 +310,10 @@ def host(ip, bcast):
             m = netz_data_open(d)
             if m is None:
                 continue
-            if m.startswith(b"HELLO "):  # the joiner's own station URL, as Net-Z sends it
-                said = m[6:].split(b"prudp:/address=", 1)[-1].split(b";", 1)[0].decode()
+            if m[:1] == b"\x00" and quazal_payload(m) is None:
+                m = b"BADMSG"  # the joiner's message arrived with a broken checksum
+            elif m[:1] == b"\x00" and quazal_payload(m).startswith(b"HELLO "):  # the joiner's own station URL, as Net-Z sends it
+                said = quazal_payload(m)[6:].split(b"prudp:/address=", 1)[-1].split(b";", 1)[0].decode()
                 m = b"URLOK" if said == a[0] else b"URLBAD " + said.encode()
             elif m == b"STATIONS2":  # both adapters' URLs, LZO-compressed like the real game
                 ip2 = os.environ.get("FAKE_IP2", ip)
@@ -323,8 +329,8 @@ def host(ip, bcast):
                 assert quazal_payload(m) == body
                 ng.sendto(netz_data(m), a)
                 continue
-            elif m == b"STATIONS":
-                m = f"prudp:/address={ip};port={NETZ_GAME}".encode() + b"\0"
+            elif m == b"STATIONS":  # an uncompressed game message (ratio byte 0)
+                m = b"\x00" + quazal_msg(b"\x10" + f"prudp:/address={ip};port={NETZ_GAME}".encode() + b"\0")
             else:
                 m = b"NZ:" + m
             ng.sendto(netz_data(m), a)
@@ -505,8 +511,9 @@ def join(ip, bcast, n_stream):
         joined = ask(b"JOIN") == b"NZ:JOIN"
         for i in range(4):
             ask(b"PING%d" % i)
-        replies.append(ask(f"HELLO prudp:/address={ip};port={NETZ_GAME}".encode()))
-        replies.append(ask(b"STATIONS"))
+        replies.append(ask(b"\x00" + quazal_msg(f"HELLO prudp:/address={ip};port={NETZ_GAME}".encode())))
+        st = ask(b"STATIONS")
+        replies.append(quazal_payload(st) if st and st[:1] == b"\x00" else None)
         r2 = quazal_payload(ask(b"STATIONS2") or b"")
         urls = []
         if r2:

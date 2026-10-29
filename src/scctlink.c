@@ -25,7 +25,7 @@
 #include "plat.h"
 #include "ui.h"
 
-#define VERSION "0.6.3"
+#define VERSION "0.6.4"
 #define SCCT_APPID 13570
 #define SPACEWAR_APPID 480
 #define MAX_PEERS 3
@@ -520,25 +520,66 @@ match_next:
 #undef LOOKBEHIND
 }
 
-/* A PRUDP v0 DATA packet carrying an LZO-compressed message (first payload
-   byte = compression ratio, 0 = not compressed). If the address is inside,
-   the message is decompressed, swapped, and sent uncompressed (ratio byte 0,
-   which the game itself uses for small messages). The packet gets longer. */
+static uint32_t le32(const uint8_t *p) { return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24; }
+
+/* Quazal messages inside a DATA payload: [u32 length][length bytes][checksum],
+   one after another, where checksum = netz_sum(length + bytes) with key 0
+   (the game checks it, at 0x10dcde90, and drops a message that doesn't match).
+   True if buf is exactly such a sequence with valid checksums. */
+static bool netz_msgs_ok(const uint8_t *b, int n)
+{
+    int o = 0, k = 0;
+    while (o < n) {
+        if (n - o < 5) return false;
+        uint32_t L = le32(b + o);
+        if (L > (uint32_t)(n - o - 5)) return false;
+        int end = o + 4 + (int)L;
+        if (netz_sum(b + o, end - o) != b[end]) return false;
+        o = end + 1;
+        k++;
+    }
+    return k > 0;
+}
+
+/* Swap inside each message's bytes and redo its checksum. */
+static int netz_msgs_swap(uint8_t *b, int n, uint32_t from, uint32_t to)
+{
+    int o = 0, hits = 0;
+    while (o < n) {
+        uint32_t L = le32(b + o);
+        int end = o + 4 + (int)L;
+        int h = swap_ip(b + o + 4, (int)L, from, to);
+        if (h) { b[end] = netz_sum(b + o, end - o); hits += h; }
+        o = end + 1;
+    }
+    return hits;
+}
+
+/* A PRUDP v0 DATA packet: [10-byte header][fragment id][ratio][messages][checksum].
+   ratio 0 = messages as they are; otherwise LZO-compressed (LZO 1.08). An
+   address inside a message is swapped and the message checksum redone; a
+   compressed payload is then sent uncompressed (ratio 0, which the game uses
+   itself), so the packet can get longer.
+   Returns hits, or -1 if this isn't a Net-Z DATA packet with messages. */
 static int netz_data_swap(uint8_t *d, int *pn, int cap, uint32_t from, uint32_t to, uint8_t key)
 {
     static uint8_t msg[MAX_GAME_PKT];
     int n = *pn;
-    if (n < NETZ_HDR + 4 || (d[2] & 7) != 2 || (d[2] >> 3) & (1 | 8) || d[NETZ_HDR] != 0) return 0;
-    const uint8_t *pl = d + NETZ_HDR + 1;
+    if (n < NETZ_HDR + 8 || (d[2] & 7) != 2 || (d[2] >> 3) & (1 | 8) || d[NETZ_HDR] != 0) return -1;
+    uint8_t *pl = d + NETZ_HDR + 1;
     int plen = n - NETZ_HDR - 2;
-    if (plen < 2 || pl[0] == 0) return 0;
+    if (pl[0] == 0) {
+        if (!netz_msgs_ok(pl + 1, plen - 1)) return -1;
+        int hits = netz_msgs_swap(pl + 1, plen - 1, from, to);
+        if (hits) d[n - 1] = (uint8_t)(key + netz_sum(d, n - 1));
+        return hits;
+    }
     int dl = lzo1x_decompress(pl + 1, plen - 1, msg, (int)sizeof msg);
-    /* a Quazal message starts with its length: u32 + 1 byte + that many */
-    if (dl < 5 || (uint32_t)msg[0] + ((uint32_t)msg[1] << 8) + ((uint32_t)msg[2] << 16) + ((uint32_t)msg[3] << 24) + 5 != (uint32_t)dl) return 0;
-    int hits = swap_ip(msg, dl, from, to);
+    if (dl <= 0 || !netz_msgs_ok(msg, dl)) return -1;
+    int hits = netz_msgs_swap(msg, dl, from, to);
     if (!hits) return 0;
     int nn = NETZ_HDR + 1 + 1 + dl + 1;
-    if (nn > cap || nn > MAX_GAME_PKT) return 0;
+    if (nn > cap || nn > MAX_GAME_PKT) return 0; /* too big uncompressed: leave it */
     d[NETZ_HDR + 1] = 0;
     memcpy(d + NETZ_HDR + 2, msg, (size_t)dl);
     d[nn - 1] = (uint8_t)(key + netz_sum(d, nn - 1));
@@ -563,8 +604,11 @@ static int swap_ip_all(uint8_t *d, int *pn, int cap, uint32_t from, uint32_t to,
     if (port && n > NETZ_HDR) {
         key = (uint8_t)(d[n - 1] - netz_sum(d, n - 1));
         prudp = netz_key_known(dir, port, d, n, key);
-        hits = netz_data_swap(d, pn, cap, from, to, key); /* proves PRUDP by itself */
-        if (hits) { prudp = true; n = *pn; }
+        /* valid message checksums inside prove it's the game's PRUDP, so the
+           packet's own last byte gives the key even before it is learned */
+        hits = netz_data_swap(d, pn, cap, from, to, key);
+        if (hits >= 0) return hits; /* game messages: handled (or left alone) whole */
+        hits = 0;
     }
     int h2 = swap_ip(d, n, from, to);
     if (h2 && prudp) d[n - 1] = (uint8_t)(key + netz_sum(d, n - 1));
@@ -1013,7 +1057,7 @@ static void capture(Peer *p, bool out, uint16_t src, uint16_t dst, const uint8_t
     if (len <= 0 && n > NETZ_HDR + 3 && (d[2] & 7) == 2 && d[NETZ_HDR] == 0 && d[NETZ_HDR + 1] != 0) {
         /* a compressed game message: log what's inside */
         len = lzo1x_decompress(d + NETZ_HDR + 2, n - NETZ_HDR - 3, plain, (int)sizeof plain);
-        if (len < 5 || (uint32_t)plain[0] + ((uint32_t)plain[1] << 8) + 5 != (uint32_t)len) len = -1;
+        if (len <= 0 || !netz_msgs_ok(plain, len)) len = -1;
     }
     if (len > 0 && (*cnt <= 12 || what || memmem_has(plain, len, "address="))) {
         char t[260];
