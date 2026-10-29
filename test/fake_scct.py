@@ -75,6 +75,20 @@ def netz_packet(plain):
     return p + bytes([netz_checksum(p)])
 
 
+NETZ_DATA_KEY = 0x5A  # checksum key byte of the game's data stream (any value; SCCTLink learns it)
+
+
+def netz_data(payload):
+    p = bytes([0x31, 0x31, 0x02, 0x00]) + bytes(6) + b"\0" + payload
+    return p + bytes([(NETZ_DATA_KEY + netz_checksum(p)) & 0xFF])
+
+
+def netz_data_open(p):
+    if len(p) < 12 or p[2] & 7 != 2 or (NETZ_DATA_KEY + netz_checksum(p[:-1])) & 0xFF != p[-1]:
+        return None  # a bad checksum: the real game drops the packet
+    return p[11:-1]
+
+
 def netz_open(p):
     if len(p) < 12 or p[2] & 7 != 5 or netz_checksum(p[:-1]) != p[-1]:
         return None
@@ -162,7 +176,17 @@ def host(ip, bcast):
     def netz_game():
         while True:
             d, a = ng.recvfrom(2000)
-            ng.sendto(b"NZ:" + d, a)
+            m = netz_data_open(d)
+            if m is None:
+                continue
+            if m.startswith(b"HELLO "):  # the joiner's own station URL, as Net-Z sends it
+                said = m[6:].split(b"prudp:/address=", 1)[-1].split(b";", 1)[0].decode()
+                m = b"URLOK" if said == a[0] else b"URLBAD " + said.encode()
+            elif m == b"STATIONS":
+                m = f"prudp:/address={ip};port={NETZ_GAME}".encode() + b"\0"
+            else:
+                m = b"NZ:" + m
+            ng.sendto(netz_data(m), a)
 
     for f in (beacon, push, game, lobby, netz_disc, netz_game):
         threading.Thread(target=f, daemon=True).start()
@@ -323,17 +347,28 @@ def join(ip, bcast, n_stream):
             pass
     result("netz_url", url)
     joined = False
+    replies = []
     if url:
         addr, port = url.split(";port=")
-        for _ in range(10):
-            nq.sendto(b"JOIN", (addr, int(port)))
-            try:
-                d, a = nq.recvfrom(2000)
-                if d == b"NZ:JOIN":
-                    joined = True
-                    break
-            except socket.timeout:
-                pass
+        dest = (addr, int(port))
+
+        def ask(msg):
+            for _ in range(10):
+                nq.sendto(netz_data(msg), dest)
+                try:
+                    d, a = nq.recvfrom(2000)
+                    return netz_data_open(d)  # None = bad checksum
+                except socket.timeout:
+                    pass
+            return b"(no answer)"
+        joined = ask(b"JOIN") == b"NZ:JOIN"
+        for i in range(4):
+            ask(b"PING%d" % i)
+        replies.append(ask(f"HELLO prudp:/address={ip};port={NETZ_GAME}".encode()))
+        replies.append(ask(b"STATIONS"))
+    result("netz_hello", replies[0].decode(errors="replace") if replies and replies[0] else repr(replies[:1]))
+    st = replies[1] if len(replies) > 1 else None
+    result("netz_stations", st.split(b"prudp:/address=", 1)[-1].split(b";")[0].decode() if st else repr(st))
     result("netz_join", joined)
     print("JOIN DONE", flush=True)
     while True:

@@ -1,10 +1,10 @@
-# SCCTLink 0.6
+# SCCTLink 0.6.1
 
 Play **Splinter Cell: Chaos Theory** co-op (2 players) or Spies vs. Mercenaries / Versus (up to 4) with Steam friends: no VPN (no Hamachi, Radmin or ZeroTier), no port forwarding, no IP addresses.
 
 Chaos Theory's online servers are gone, so PC multiplayer only works in **LAN** mode. SCCTLink makes your friends' PCs look like they are on your LAN, and carries the game's traffic through Steam's relay network. The host invites the friend from Steam.
 
-**Download:** `SCCTLink-0.6.zip` from [Releases](../../releases). Both players unzip it.
+**Download:** `SCCTLink-0.6.1.zip` from [Releases](../../releases). Both players unzip it.
 
 ## How to play
 
@@ -34,6 +34,7 @@ The game's LAN protocol is not documented, so SCCTLink doesn't hard-code it:
 - TCP connections are carried as reliable streams; UDP is sent unreliable/no-Nagle (the game has its own reliability), unchanged and in order.
 - If the game puts the PC's LAN address in a packet (as raw bytes or text), it is swapped for the loopback address that stands for that PC, so the other side can connect to it and never learns the real address. The loopback addresses are chosen so the text has the same length.
 - Chaos Theory's network library (Quazal Net-Z) hides the host's address inside an **encrypted** LAN discovery reply (`prudp:/address=...;port=9103`, RC4 with a fixed key, a fresh RC4 per packet). SCCTLink decrypts it, swaps the address, encrypts it again and fixes the packet's checksum. Without this, the friend sees the game in the list but can't join, because their game tries the host's real LAN address.
+- Every Net-Z (PRUDP) packet ends in a 1-byte checksum with a per-stream key byte. When SCCTLink swaps an address in a game packet, it fixes that checksum; the key byte is learned from the game's own packets.
 - Lobbies, invites and the relay come from Valve's free "Spacewar" test app (AppID 480). While SCCTLink is open, Steam shows you as "playing Spacewar".
 
 ## Safety
@@ -65,9 +66,9 @@ gcc -std=c11 -fsanitize=address,undefined -o build/scctlink_mock src/scctlink.c 
 sudo python3 test/run_tests.py   # prints ALL OK
 ```
 
-They cover: LAN discovery by broadcast in both directions; the game's real encrypted Net-Z discovery reply and joining at the address inside it; the host's address hidden in raw and text form; 2000 mixed-size packets exact and in order; a 300-packet level-load burst; relay delay; TCP streams with a 300 KB message; strangers blocked; programs other than the game blocked; quit and reconnect; invites; joining by short lobby code; Refresh; finding a host Steam shows in the game instead of Spacewar; foreign lobbies refused; join confirmation; Versus with a host and two friends on three separate "PCs"; co-op/Versus lobbies kept apart; and 10% packet loss with 60 ms delay each way.
+They cover: LAN discovery by broadcast in both directions; the game's real encrypted Net-Z discovery reply and joining at the address inside it; addresses swapped in checksummed game packets on both sides; the host's address hidden in raw and text form; 2000 mixed-size packets exact and in order; a 300-packet level-load burst; relay delay; TCP streams with a 300 KB message; strangers blocked; programs other than the game blocked; quit and reconnect; invites; joining by short lobby code; Refresh; finding a host Steam shows in the game instead of Spacewar; foreign lobbies refused; join confirmation; Versus with a host and two friends on three separate "PCs"; co-op/Versus lobbies kept apart; and 10% packet loss with 60 ms delay each way.
 
-**Tested with the real game (0.5):** two PCs in different homes linked, and the friend saw the host's game in the LAN list but could not join. The packet log showed why (the encrypted address above); 0.6 fixes that. Joining a real game is not yet confirmed. `scctlink.log` shows where it stops if something goes wrong.
+**Tested with the real game (0.5):** two PCs in different homes linked, and the friend saw the host's game in the LAN list but could not join. The packet log showed why (the encrypted address above); 0.6.1 fixes that. Joining a real game is not yet confirmed. `scctlink.log` shows where it stops if something goes wrong.
 
 ## Credits
 

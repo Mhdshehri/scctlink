@@ -200,6 +200,10 @@ def main():
         check(nu.startswith(r.get("announce_from", "?") + ";"),
               f"Net-Z: the host's address inside the ENCRYPTED discovery reply was replaced too ({nu})")
         check(r.get("netz_join") is True, "Net-Z: joining at that address reaches the host's game (the real game's join)")
+        check(r.get("netz_hello") == "URLOK",
+              f"Net-Z: the joiner's own address in its game packets was replaced, checksum still valid ({r.get('netz_hello')})")
+        check(r.get("netz_stations") == r.get("announce_from"),
+              f"Net-Z: the host's address in its game packets was replaced, checksum still valid ({r.get('netz_stations')})")
         m = hg.wait_for(r"LOBBY CLIENT (\S+)", 2)
         check(m is not None and is_alias(m.group(1)), f"host's game sees the joiner at a loopback address ({m and m.group(1)})")
         check("10.42.7.23" not in hg.log, "the joiner's real address never reached the host's game")

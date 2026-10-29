@@ -25,7 +25,7 @@
 #include "plat.h"
 #include "ui.h"
 
-#define VERSION "0.6"
+#define VERSION "0.6.1"
 #define SCCT_APPID 13570
 #define SPACEWAR_APPID 480
 #define MAX_PEERS 3
@@ -311,11 +311,53 @@ static int netz_swap(uint8_t *d, int n, uint32_t from, uint32_t to)
     return hits;
 }
 
-/* Swap in the packet as it is and inside Net-Z's encrypted discovery packets. */
-static int swap_ip_all(uint8_t *d, int n, uint32_t from, uint32_t to)
+/* Every PRUDP packet ends in a 1-byte checksum (sum of the bytes plus a key
+   byte per stream; Quazal's code at 0x10dcdde0). After swapping an address in
+   a plain game packet the checksum must be fixed, or the game drops the packet.
+   The key byte isn't known in advance, so it is learned: when the packets one
+   game port sends to one stream keep giving the same key byte, that port speaks
+   PRUDP and its swapped packets get a new checksum with that key. */
+#define NETZ_LEARN 64
+static struct { uint16_t port; uint8_t dir, stream, key, seen; } g_nzk[NETZ_LEARN];
+static int g_nnzk;
+
+static bool netz_key_known(int dir, uint16_t port, const uint8_t *d, int n, uint8_t key)
 {
-    int hits = netz_swap(d, n, from, to);
-    return hits + swap_ip(d, n, from, to);
+    if (n < NETZ_HDR + 1 || n > MAX_GAME_PKT) return false;
+    uint8_t stream = d[0];
+    int i;
+    for (i = 0; i < g_nnzk; i++)
+        if (g_nzk[i].port == port && g_nzk[i].dir == dir && g_nzk[i].stream == stream) break;
+    if (i == g_nnzk) {
+        if (g_nnzk == NETZ_LEARN) i = (int)(port % NETZ_LEARN); /* full: reuse a slot */
+        else g_nnzk++;
+        g_nzk[i].port = port; g_nzk[i].dir = (uint8_t)dir; g_nzk[i].stream = stream;
+        g_nzk[i].key = key; g_nzk[i].seen = 0;
+    }
+    bool known = g_nzk[i].seen >= 3 && g_nzk[i].key == key;
+    if (g_nzk[i].key == key) { if (g_nzk[i].seen < 255) g_nzk[i].seen++; }
+    else { g_nzk[i].key = key; g_nzk[i].seen = 1; }
+    return known;
+}
+
+/* Swap in the packet as it is and inside Net-Z's encrypted discovery packets.
+   dir/port: where the packet comes from (0 = this PC's game, 1 = the peer's), for
+   fixing PRUDP checksums; port 0 = not a UDP game packet (TCP). */
+static int swap_ip_all(uint8_t *d, int n, uint32_t from, uint32_t to, int dir, uint16_t port)
+{
+    if (netz_user(d, n)) {
+        int hits = netz_swap(d, n, from, to);
+        return hits + swap_ip(d, n, from, to);
+    }
+    bool prudp = false;
+    uint8_t key = 0;
+    if (port && n > NETZ_HDR) {
+        key = (uint8_t)(d[n - 1] - netz_sum(d, n - 1));
+        prudp = netz_key_known(dir, port, d, n, key);
+    }
+    int hits = swap_ip(d, n, from, to);
+    if (hits && prudp) d[n - 1] = (uint8_t)(key + netz_sum(d, n - 1));
+    return hits;
 }
 
 /* ---------- the game ---------- */
@@ -707,19 +749,21 @@ static void catchers_update(void)
 }
 
 /* Payload from the local game, going to a peer: hide this PC's LAN addresses. */
-static int hide_my_ips(Peer *p, uint8_t *d, int n)
+static int hide_my_ips(Peer *p, uint8_t *d, int n, uint16_t port)
 {
     int hits = 0;
-    for (int i = 0; i < g_nmy_ips; i++) hits += swap_ip_all(d, n, g_my_ips[i], p->my_alias);
+    if (port && n > NETZ_HDR && !netz_user(d, n) && !g_nmy_ips) /* still learn the checksum key */
+        netz_key_known(0, port, d, n, (uint8_t)(d[n - 1] - netz_sum(d, n - 1)));
+    for (int i = 0; i < g_nmy_ips; i++) hits += swap_ip_all(d, n, g_my_ips[i], p->my_alias, 0, port);
     if (hits && !p->swapped) say("(The game put your LAN address in a packet. SCCTLink replaced it, so %s never sees it.)", who(p->id));
     p->swapped += (u64)hits;
     return hits;
 }
 
 /* Payload from a peer: their idea of this PC's address becomes the real one. */
-static void unhide_my_ip(Peer *p, uint8_t *d, int n)
+static void unhide_my_ip(Peer *p, uint8_t *d, int n, uint16_t port)
 {
-    if (g_nmy_ips && p->my_alias) swap_ip_all(d, n, p->my_alias, g_my_ips[0]);
+    if (g_nmy_ips && p->my_alias) swap_ip_all(d, n, p->my_alias, g_my_ips[0], 1, port);
 }
 
 /* Packet log for finding out what the game sends (only in scctlink.log):
@@ -768,7 +812,7 @@ static void send_udp_frame(Peer *p, char kind, uint16_t src, uint16_t dst, const
     put16(g_out + 3, dst);
     put16(g_out + 5, p->tx_seq++);
     memcpy(g_out + HDR, d, (size_t)n);
-    hide_my_ips(p, g_out + HDR, n);
+    hide_my_ips(p, g_out + HDR, n, src);
     capture(p, true, src, dst, g_out + HDR, n, kind == 'B' ? "(LAN broadcast)" : 0);
     send_msg(p->id, g_out, n + HDR, false, CH_GAME);
     if (!p->up++) p->first_up_ms = now_ms();
@@ -798,7 +842,7 @@ static void deliver_udp(Peer *p, const uint8_t *m, int n)
     if (!a) return;
     int len = n - HDR;
     memcpy(g_buf, m + HDR, (size_t)len);
-    unhide_my_ip(p, g_buf, len);
+    unhide_my_ip(p, g_buf, len, src);
     udp_sendto(a->s, g_buf, len, deliver_ip(b->ip), dst);
     a->pkts++;
     p->down++;
@@ -922,7 +966,7 @@ static void poll_tcp(Peer *p)
             if (r < 0) { stream_close(p, i--, true); goto next; }
             g_out[0] = 'D';
             put32(g_out + 1, x->sid);
-            hide_my_ips(p, g_out + 5, r);
+            hide_my_ips(p, g_out + 5, r, 0);
             send_msg(p->id, g_out, r + 5, true, CH_TCP);
             p->up++;
         }
@@ -953,7 +997,7 @@ static void on_tcp_msg(Peer *p, const uint8_t *m, int n)
     } else if (m[0] == 'D' && x) {
         int len = n - 5;
         memcpy(g_buf, m + 5, (size_t)len);
-        unhide_my_ip(p, g_buf, len);
+        unhide_my_ip(p, g_buf, len, 0);
         p->down++;
         int w = x->nout ? 0 : tcp_send(x->s, g_buf, len);
         if (w < 0) { stream_close(p, idx, true); return; }
