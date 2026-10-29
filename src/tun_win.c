@@ -8,9 +8,10 @@
  * Creating an adapter needs administrator rights. The adapter gets
  * 10.231.0.x/24, no gateway (so it never carries internet traffic), metric 1
  * (so the game's LAN broadcasts go out on it) and MTU 1400. Windows Firewall
- * is told to leave this one adapter alone: only SCCTLink puts packets into it,
- * and SCCTLink lets in nothing but the game's own traffic from linked
- * friends. Everything is undone, and the adapter removed, when SCCTLink closes. */
+ * stays on: the adapter's network is marked Private and one rule allows
+ * incoming traffic from 10.231.0.x only (and SCCTLink lets in nothing but the
+ * game's own traffic from linked friends). The rule and the adapter are
+ * removed when SCCTLink stops. */
 #include "plat.h"
 
 typedef unsigned long DWORD;
@@ -57,6 +58,7 @@ static struct {
 struct Tun { void *adapter, *session; };
 
 #define NAME_A "SCCTLink"
+#define RULE "SCCTLink virtual LAN (Splinter Cell over Steam)"
 static const uint16_t NAME_W[] = { 'S', 'C', 'C', 'T', 'L', 'i', 'n', 'k', 0 };
 /* a fixed id, so Windows reuses the same adapter entry every time */
 static const Guid ADAPTER_GUID = { 0x5cc71e4b, 0x2d3a, 0x4f61, { 0x9a, 0x07, 0x53, 0x43, 0x43, 0x54, 0x4c, 0x6b } };
@@ -132,16 +134,28 @@ Tun *tun_open(uint32_t ip, char *err, int errn)
     }
     run_hidden("netsh.exe", "interface ipv4 set interface interface=\"" NAME_A "\" metric=1 store=active");
     run_hidden("netsh.exe", "interface ipv4 set subinterface \"" NAME_A "\" mtu=1400 store=active");
-    /* Windows Firewall: leave this adapter alone (each profile keeps its other exceptions) */
-    run_hidden(PS, PS_ARGS "\"foreach($p in 'Domain','Private','Public'){"
-                          "$a=@((Get-NetFirewallProfile -Name $p).DisabledInterfaceAliases|?{$_ -and $_ -ne 'NotConfigured'});"
-                          "if($a -notcontains '" NAME_A "'){Set-NetFirewallProfile -Name $p -DisabledInterfaceAliases ($a+'" NAME_A "')}}\"");
     void *s = W.start(a, 0x400000);
     if (!s) {
         sfmt(err, (size_t)errn, "The virtual adapter could not be started (Windows error %lu).", (unsigned long)GetLastError());
         W.close(a);
         return 0;
     }
+    /* (the adapter is up now, so Windows lists its network) */
+    /* Windows Firewall stays fully on. 0.8-vpn told it to ignore this adapter,
+       which Windows reports as unsafe: undo that if it's still there. Then
+       mark this adapter's network "Private" (an old "Block" choice for the
+       game, made on a public network, doesn't apply there) and allow
+       incoming traffic only from the SCCTLink network 10.231.0.x. */
+    run_hidden(PS, PS_ARGS "\"foreach($p in 'Domain','Private','Public'){"
+                          "$a=@((Get-NetFirewallProfile -Name $p).DisabledInterfaceAliases|?{$_ -and $_ -ne 'NotConfigured'});"
+                          "if($a -contains '" NAME_A "'){$b=@($a|?{$_ -ne '" NAME_A "'});"
+                          "if($b.Count){Set-NetFirewallProfile -Name $p -DisabledInterfaceAliases $b}else{Set-NetFirewallProfile -Name $p -DisabledInterfaceAliases NotConfigured}}};"
+                          "for($i=0;$i -lt 30;$i++){if(Get-NetConnectionProfile -InterfaceAlias '" NAME_A "' -EA SilentlyContinue){"
+                          "Set-NetConnectionProfile -InterfaceAlias '" NAME_A "' -NetworkCategory Private -EA SilentlyContinue;break};Start-Sleep -Milliseconds 300}\"");
+    run_hidden("netsh.exe", "advfirewall firewall delete rule name=\"" RULE "\"");
+    run_hidden("netsh.exe", "advfirewall firewall add rule name=\"" RULE "\" dir=in action=allow protocol=any "
+                            "localip=10.231.0.0/24 remoteip=10.231.0.0/24 profile=any "
+                            "description=\"SCCTLink: the game's traffic from linked Steam friends. Removed when SCCTLink closes.\"");
     Tun *t = calloc(1, sizeof *t);
     t->adapter = a;
     t->session = s;
@@ -173,9 +187,6 @@ void tun_close(Tun *t)
     if (!t) return;
     W.end(t->session);
     W.close(t->adapter); /* removes the adapter */
-    /* take the adapter off the firewall's exception lists again */
-    run_hidden(PS, PS_ARGS "\"foreach($p in 'Domain','Private','Public'){"
-                          "$a=@((Get-NetFirewallProfile -Name $p).DisabledInterfaceAliases|?{$_ -and $_ -ne 'NotConfigured' -and $_ -ne '" NAME_A "'});"
-                          "if($a.Count){Set-NetFirewallProfile -Name $p -DisabledInterfaceAliases $a}else{Set-NetFirewallProfile -Name $p -DisabledInterfaceAliases NotConfigured}}\"");
+    run_hidden("netsh.exe", "advfirewall firewall delete rule name=\"" RULE "\"");
     free(t);
 }

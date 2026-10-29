@@ -1,10 +1,10 @@
-# SCCTLink 0.8-vpn (experimental)
+# SCCTLink 0.8.1-vpn (experimental)
 
 Play **Splinter Cell: Chaos Theory** co-op (2 players) or Spies vs. Mercenaries / Versus (up to 4) with Steam friends: no VPN (no Hamachi, Radmin or ZeroTier), no port forwarding, no IP addresses.
 
 Chaos Theory's online servers are gone, so PC multiplayer only works in **LAN** mode. SCCTLink makes your friends' PCs look like they are on your LAN, and carries the game's traffic through Steam's relay network. The host invites the friend from Steam.
 
-**Download:** `SCCTLink-0.8-vpn.zip` from [Releases](../../releases). Both players unzip it.
+**Download:** `SCCTLink-0.8.1-vpn.zip` from [Releases](../../releases). Both players unzip it.
 
 ## How to play
 
@@ -20,7 +20,7 @@ See [package/README.txt](package/README.txt) for the full guide, FPS/lag tips an
 
 ## VPN mode (experimental, branch `vpn-mode`)
 
-Like Radmin VPN, but over Steam: SCCTLink creates a virtual network adapter "SCCTLink" with [Wintun](https://www.wintun.net/) (the WireGuard project's signed driver; `wintun.dll` 0.14.1 x86, SHA-256 `d694fa46ab4cfebcb2632d094c7aa97278eef2f8052438621766d863ae98a931`, from the official zip `07c256185d6ee3652e09fa55c0b673e2624b565e02c4b9091c79ca7d2f24ef51`). The host is 10.231.0.1, friends 10.231.0.2 and up; the game's IPv4 packets travel between the adapters through Steam unchanged, so nothing inside them has to be rewritten. Only the game's own UDP/TCP packets pass, both ways. Needs administrator rights; the adapter has no gateway (never carries internet traffic), metric 1 (the game's LAN broadcasts use it), and Windows Firewall leaves only this adapter alone while SCCTLink runs. If either player can't use VPN mode, the normal connection is used.
+Like Radmin VPN, but over Steam: SCCTLink creates a virtual network adapter "SCCTLink" with [Wintun](https://www.wintun.net/) (the WireGuard project's signed driver; `wintun.dll` 0.14.1 x86, SHA-256 `d694fa46ab4cfebcb2632d094c7aa97278eef2f8052438621766d863ae98a931`, from the official zip `07c256185d6ee3652e09fa55c0b673e2624b565e02c4b9091c79ca7d2f24ef51`). The host is 10.231.0.1, friends 10.231.0.2 and up; the game's IPv4 packets travel between the adapters through Steam unchanged, so nothing inside them has to be rewritten. Only the game's own UDP/TCP packets pass, both ways. Needs administrator rights; the adapter has no gateway (never carries internet traffic), metric 1 (the game's LAN broadcasts use it), and Windows Firewall stays on: the adapter's network is marked Private and one rule allows incoming traffic from 10.231.0.0/24 only, removed with the adapter when SCCTLink stops. If either player can't use VPN mode, the normal connection is used.
 
 ## Game files check
 
