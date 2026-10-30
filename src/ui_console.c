@@ -20,7 +20,7 @@ void ui_log(const char *line)
 void ui_state(const UiState *s) { (void)s; }
 void ui_settings(const UiSettings *s)
 {
-    printf("[settings] mine %dx%d fov %d fps %d ws %d", s->w, s->h, s->fov, s->fps, s->wsfov);
+    printf("[settings] fpsfix %d mine %dx%d fov %d fps %d ws %d", s->fpsfix, s->w, s->h, s->fov, s->fps, s->wsfov);
     if (s->friend_) printf(" | %s %dx%d fov %d fps %d ws %d", s->friend_name, s->fw, s->fh, s->ffov, s->ffps, s->fwsfov);
     printf("\n");
     fflush(0);
@@ -92,6 +92,10 @@ bool ui_poll(Cmd *c)
     case 'v': case 'V': c->kind = CMD_SET_VERSUS; c->arg = 1; break;
     case 'c': case 'C': c->kind = CMD_SET_VERSUS; c->arg = 0; break;
     case 'm': case 'M': c->kind = CMD_RECHECK; break;
+    case 'f': case 'F': /* the Settings tab's FPS fix button: then "1" (install) or "0" (remove) */
+        c->kind = CMD_FPSFIX;
+        c->arg = read_line(line, sizeof line) && line[0] == '1';
+        break;
     case 'a': case 'A': { /* the Settings tab's Apply: "width height fov fps wsfactor*100" */
         int v[5] = { 0, 0, 0, 0, 0 };
         if (read_line(line, sizeof line)) {
