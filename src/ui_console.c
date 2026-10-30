@@ -92,7 +92,7 @@ bool ui_poll(Cmd *c)
     case 'v': case 'V': c->kind = CMD_SET_VERSUS; c->arg = 1; break;
     case 'c': case 'C': c->kind = CMD_SET_VERSUS; c->arg = 0; break;
     case 'm': case 'M': c->kind = CMD_RECHECK; break;
-    case 'f': case 'F': /* the Settings tab's FPS fix button: then "1" (install) or "0" (remove) */
+    case 'f': case 'F': /* the Settings tab's SCCT Fix button: then "1" (install) or "0" (remove) */
         c->kind = CMD_FPSFIX;
         c->arg = read_line(line, sizeof line) && line[0] == '1';
         break;

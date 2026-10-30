@@ -594,9 +594,9 @@ def main():
         modded["System/SplinterCell3.ini"] = b"[Engine]\nres=2560\n"  # settings differ on purpose: not reported
         other = dict(base)
         other["System/Core.u"] = b"core" * 299 + b"CORE"  # same size, other content (another patch)
-        modded["System/SplinterCell3.ini"] = b"[WinDrv.WindowsClient]\r\nFullscreenViewportX=2560\r\nFullscreenViewportY=1440\r\n[SIMULATION]\r\nMAXFPS=60\r\n"
+        modded["System/SplinterCell3.ini"] = b"[WinDrv.WindowsClient]\r\nFullscreenViewportX=2560\r\nFullscreenViewportY=1440\r\nStartupFullscreen=True\r\n[SIMULATION]\r\nMAXFPS=60\r\n"
         modded["System/scripts/SplinterCellChaosTheory.WidescreenFix.ini"] = b"[MAIN]\r\nResX = 0\r\nResY = 0\r\nFOVFactor = 1.2\r\nFPSLimit = 144 // frame rate cap\r\n"
-        other["System/SplinterCell3.ini"] = b"[WinDrv.WindowsClient]\nFullscreenViewportX=1920\nFullscreenViewportY=1080\n[SIMULATION]\nMAXFPS=60\n"
+        other["System/SplinterCell3.ini"] = b"[WinDrv.WindowsClient]\nFullscreenViewportX=1920\nFullscreenViewportY=1080\nStartupFullscreen=True\n[SIMULATION]\nMAXFPS=60\n"
         other["System/SplinterCell3User.ini"] = b"[Engine.PlayerController]\nDesiredFOV=90.000000\n"
         pd = os.path.join(gd, "programdata_a", "Ubisoft", "Tom Clancy's Splinter Cell Chaos Theory", "Profiles")
         os.makedirs(pd, exist_ok=True)
@@ -648,7 +648,7 @@ def main():
         check(rd(uini) == b"[Engine.PlayerController]\r\nDesiredFOV=90.000000\r\n"
               and rd(uini + ".scctlink-backup") == b"[Engine.PlayerController]\r\nDesiredFOV=75.000000\r\n",
               "...FOV in the user's settings (ProgramData), the original kept as a backup")
-        check(rd(ga, "System", "SplinterCell3.ini") == b"[WinDrv.WindowsClient]\r\nFullscreenViewportX=1920\r\nFullscreenViewportY=1080\r\n[SIMULATION]\r\nMAXFPS=60\r\n",
+        check(rd(ga, "System", "SplinterCell3.ini") == b"[WinDrv.WindowsClient]\r\nFullscreenViewportX=1920\r\nFullscreenViewportY=1080\r\nStartupFullscreen=True\r\n[SIMULATION]\r\nMAXFPS=60\r\n",
               "...resolution in SplinterCell3.ini, the rest of the file unchanged")
         check(rd(ga, "System", "scripts", "SplinterCellChaosTheory.WidescreenFix.ini") ==
               b"[MAIN]\r\nResX = 0\r\nResY = 0\r\nFOVFactor = 1.00\r\nFPSLimit = 60 // frame rate cap\r\n",
@@ -658,7 +658,7 @@ def main():
         hm.p.stdin.write("A\n0 0 30 0 0\n"); hm.p.stdin.flush()
         check(hm.wait_for(r"! Settings: FOV must be between 50 and 130", timeout=5) is not None, "a wrong value is refused")
         check(rd(uini) == b"[Engine.PlayerController]\r\nDesiredFOV=90.000000\r\n", "...and nothing is written")
-        # the FPS fix button
+        # the SCCT Fix button
         fixsrc = os.path.join(ROOT, "package", "SCCTFix-d3d9.dll")
         fixhere = os.path.join(os.getcwd(), "SCCTFix-d3d9.dll")  # next to SCCTLink (its working folder in the tests)
         shutil.copy(fixsrc, fixhere)
@@ -666,15 +666,17 @@ def main():
         with open(sysd3d, "wb") as f:
             f.write(b"MZanother-d3d9-mod")
         hm.p.stdin.write("F\n1\n"); hm.p.stdin.flush()
-        check(hm.wait_for(r"FPS fix installed", timeout=10) is not None and rd(sysd3d) == rd(fixsrc)
+        check(hm.wait_for(r"SCCT Fix installed", timeout=10) is not None and rd(sysd3d) == rd(fixsrc)
               and rd(sysd3d + ".scctlink-backup") == b"MZanother-d3d9-mod",
-              "Install FPS fix: d3d9.dll copied into System, the other d3d9.dll kept as a backup")
+              "Install SCCT Fix: d3d9.dll copied into System, the other d3d9.dll kept as a backup")
         check(hm.wait_for(r"\[settings\] fpsfix 1 ", timeout=10) is not None, "...the Settings tab shows it installed")
-        check(jm.wait_for(r"! FPS fix \(60 FPS cap\) differs: you not installed, user1191 installed", timeout=15) is not None,
+        check(b"StartupFullscreen=False" in rd(ga, "System", "SplinterCell3.ini"), "...and the game starts in a window (StartupFullscreen=False)")
+        check(jm.wait_for(r"! SCCT Fix \(60 FPS cap, borderless\) differs: you not installed, user1191 installed", timeout=15) is not None,
               "...and the friend is told they don't have it")
         hm.p.stdin.write("F\n0\n"); hm.p.stdin.flush()
-        check(hm.wait_for(r"FPS fix removed", timeout=10) is not None and rd(sysd3d) == b"MZanother-d3d9-mod"
-              and not os.path.exists(sysd3d + ".scctlink-backup"), "Remove FPS fix: the earlier d3d9.dll is put back")
+        check(hm.wait_for(r"SCCT Fix removed", timeout=10) is not None and rd(sysd3d) == b"MZanother-d3d9-mod"
+              and not os.path.exists(sysd3d + ".scctlink-backup") and b"StartupFullscreen=True" in rd(ga, "System", "SplinterCell3.ini"),
+              "Remove SCCT Fix: the earlier d3d9.dll is put back, fullscreen again")
         os.unlink(fixhere)
         hm.stop(); jm.stop()
         hs = relay(A, "HS", 1193, "1194", ["host"], d, {"MOCK_GAME_DIR": gc})
