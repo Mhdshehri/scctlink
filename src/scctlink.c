@@ -25,7 +25,7 @@
 #include "plat.h"
 #include "ui.h"
 
-#define VERSION "0.8.3-vpn"
+#define VERSION "0.8.4-vpn"
 #define SCCT_APPID 13570
 #define SPACEWAR_APPID 480
 #define MAX_PEERS 3
@@ -2189,6 +2189,178 @@ static void mf_sort(MFile *f, int n)
     }
 }
 
+/* ---------- settings that must match ----------
+   Resolution (shown only), FOV and frame rate limits (must match: different
+   values make co-op drift apart). Read from the game's .ini files and the
+   widescreen fix's .ini, sent along with the file list as entries named
+   "@key" with the value in place of the checksum. */
+static bool ini_get(const char *path, const char *section, const char *key, char *out, int n)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f) return false;
+    static char buf[1 << 19];
+    int len = (int)fread(buf, 1, sizeof buf - 1, f);
+    fclose(f);
+    if (len <= 0) return false;
+    buf[len] = 0;
+    bool in_sec = !section;
+    int kl = (int)strlen(key);
+    for (char *l = buf; *l;) {
+        char *e = l;
+        while (*e && *e != '\n') e++;
+        char save = *e;
+        *e = 0;
+        while (*l == ' ' || *l == '\t') l++;
+        if (*l == '[') {
+            if (section) {
+                char *c = l + 1, *x = (char *)section;
+                while (*c && *x && ((*c | 32) == (*x | 32))) { c++; x++; }
+                in_sec = !*x && *c == ']';
+            }
+        } else if (in_sec) {
+            int i = 0;
+            while (i < kl && l[i] && ((l[i] | 32) == (key[i] | 32))) i++;
+            char *v = l + i;
+            while (*v == ' ' || *v == '\t') v++;
+            if (i == kl && *v == '=') {
+                v++;
+                while (*v == ' ' || *v == '\t') v++;
+                int m = 0;
+                while (v[m] && v[m] != '\r' && v[m] != ' ' && v[m] != '\t' && v[m] != ';' && !(v[m] == '/' && v[m + 1] == '/') && m < n - 1) m++;
+                memcpy(out, v, (size_t)m);
+                out[m] = 0;
+                /* "90.000000" -> "90" */
+                char *dot = strchr(out, '.');
+                if (dot) { bool zeros = true; for (char *z = dot + 1; *z; z++) zeros &= *z == '0'; if (zeros) *dot = 0; }
+                *e = save;
+                return m > 0;
+            }
+        }
+        *e = save;
+        l = *e ? e + 1 : e;
+    }
+    return false;
+}
+
+typedef struct { const char *key, *label; bool must_match; } SetDef;
+static const SetDef SETS[] = {
+    { "res", "Resolution", false },
+    { "fov", "FOV", true },
+    { "fps", "FPS limit (game)", true },
+    { "ws_res", "Resolution (widescreen fix)", false },
+    { "ws_fov", "FOV (widescreen fix)", true },
+    { "ws_fps", "FPS limit (widescreen fix)", true },
+};
+#define NSETS ((int)(sizeof SETS / sizeof *SETS))
+
+static void set_add(const char *key, const char *value)
+{
+    if (!value[0] || g_nmfs >= MF_MAX) return;
+    for (int i = 0; i < g_nmfs; i++)
+        if (g_mfs[i].path[0] == '@' && !strcmp(g_mfs[i].path + 1, key)) return; /* first found wins */
+    MFile *f = &g_mfs[g_nmfs++];
+    sfmt(f->path, sizeof f->path, "@%s", key);
+    f->size = 0;
+    sfmt(f->hash, sizeof f->hash, "%s", value);
+}
+
+/* the user settings file can also live in ProgramData\Ubisoft\... */
+static char g_user_ini[800];
+static void find_user_ini(const char *dir, int depth);
+static void user_ini_cb(void *ctx, const char *name, bool is_dir, u64 size)
+{
+    (void)size;
+    const char *dir = ctx;
+    char path[800], low[64];
+    sfmt(path, sizeof path, "%s" PATHSEP "%s", dir, name);
+    sfmt(low, sizeof low, "%s", name);
+    for (char *c = low; *c; c++) if (*c >= 'A' && *c <= 'Z') *c = (char)(*c + 32);
+    if (is_dir) { if (!g_user_ini[0]) find_user_ini(path, -1); return; }
+    if (!strcmp(low, "splintercell3user.ini") && !g_user_ini[0]) sfmt(g_user_ini, sizeof g_user_ini, "%s", path);
+}
+static void find_user_ini(const char *dir, int depth)
+{
+    static int left;
+    if (depth >= 0) left = depth; else if (--left < 0) { left++; return; }
+    dir_list(dir, user_ini_cb, (void *)dir);
+    if (depth < 0) left++;
+}
+
+static void ws_ini_cb(void *ctx, const char *name, bool is_dir, u64 size)
+{
+    (void)size;
+    if (is_dir) return;
+    const char *dir = ctx;
+    char low[128];
+    sfmt(low, sizeof low, "%s", name);
+    for (char *c = low; *c; c++) if (*c >= 'A' && *c <= 'Z') *c = (char)(*c + 32);
+    size_t L = strlen(low);
+    if (L < 4 || strcmp(low + L - 4, ".ini") || !strstr(low, "widescreen")) return;
+    char path[900], v[24], x[24], y[24];
+    sfmt(path, sizeof path, "%s" PATHSEP "%s", dir, name);
+    if (ini_get(path, 0, "ResX", x, sizeof x) && ini_get(path, 0, "ResY", y, sizeof y)) {
+        char r[17];
+        sfmt(r, sizeof r, "%sx%s", x, y);
+        set_add("ws_res", strcmp(r, "0x0") ? r : "auto");
+    }
+    if (ini_get(path, 0, "FOVFactor", v, sizeof v) || ini_get(path, 0, "FOV", v, sizeof v)) set_add("ws_fov", v);
+    if (ini_get(path, 0, "FPSLimit", v, sizeof v)) set_add("ws_fps", strcmp(v, "0") ? v : "off");
+}
+
+static void settings_collect(void)
+{
+    char sys[800], path[900], x[24], y[24], v[24];
+    sfmt(sys, sizeof sys, "%s" PATHSEP "System", g_mf_dir);
+    /* the user's own settings first (ProgramData), then the game folder's */
+    g_user_ini[0] = 0;
+    const char *pd = getenv("PROGRAMDATA");
+    if (pd && *pd) {
+        char ubi[700];
+        sfmt(ubi, sizeof ubi, "%s" PATHSEP "Ubisoft", pd);
+        find_user_ini(ubi, 3);
+    }
+    sfmt(path, sizeof path, "%s" PATHSEP "SplinterCell3User.ini", sys);
+    const char *users[2] = { g_user_ini, path };
+    for (int i = 0; i < 2; i++) {
+        if (!users[i][0]) continue;
+        if (ini_get(users[i], 0, "DesiredFOV", v, sizeof v) || ini_get(users[i], 0, "DefaultFOV", v, sizeof v)) set_add("fov", v);
+        if (ini_get(users[i], "WinDrv.WindowsClient", "FullscreenViewportX", x, sizeof x) &&
+            ini_get(users[i], "WinDrv.WindowsClient", "FullscreenViewportY", y, sizeof y)) {
+            char r[17];
+            sfmt(r, sizeof r, "%sx%s", x, y);
+            set_add("res", r);
+        }
+    }
+    sfmt(path, sizeof path, "%s" PATHSEP "SplinterCell3.ini", sys);
+    if (ini_get(path, "WinDrv.WindowsClient", "FullscreenViewportX", x, sizeof x) &&
+        ini_get(path, "WinDrv.WindowsClient", "FullscreenViewportY", y, sizeof y)) {
+        char r[17];
+        sfmt(r, sizeof r, "%sx%s", x, y);
+        set_add("res", r);
+    }
+    if (ini_get(path, "SIMULATION", "MAXFPS", v, sizeof v)) set_add("fps", v);
+    if (ini_get(path, 0, "DesiredFOV", v, sizeof v)) set_add("fov", v);
+    /* the ThirteenAG widescreen fix keeps its .ini in scripts\ (System\scripts or the game folder) */
+    sfmt(path, sizeof path, "%s" PATHSEP "scripts", sys);
+    dir_list(path, ws_ini_cb, path);
+    sfmt(path, sizeof path, "%s" PATHSEP "scripts", g_mf_dir);
+    dir_list(path, ws_ini_cb, path);
+}
+
+static const char *set_value(const MFile *f, int n, const char *key)
+{
+    for (int i = 0; i < n; i++)
+        if (f[i].path[0] == '@' && !strcmp(f[i].path + 1, key)) return f[i].hash;
+    return 0;
+}
+
+static int files_count(void)
+{
+    int k = 0;
+    for (int i = 0; i < g_nmfs; i++) k += g_mfs[i].path[0] != '@';
+    return k;
+}
+
 /* Make this PC's list once (it takes a second or two: the program files are hashed). */
 static void mf_make(void)
 {
@@ -2201,8 +2373,9 @@ static void mf_make(void)
     } else {
         u64 t = now_ms();
         mf_walk("", false, 3);
+        settings_collect();
         mf_sort(g_mfs, g_nmfs);
-        note("game files check: %d files listed in %d ms", g_nmfs, (int)(now_ms() - t));
+        note("game files check: %d files listed in %d ms", files_count(), (int)(now_ms() - t));
     }
     mods_local_text();
     mods_publish();
@@ -2276,15 +2449,21 @@ static void mods_local_text(void)
         return;
     }
     int nm = 0;
-    for (int i = 0; i < g_nmfs; i++) nm += mf_is_mod(g_mfs[i].path);
-    sfmt(o, n, "YOUR GAME (Steam folder, %d files checked)\r\n", g_nmfs);
+    for (int i = 0; i < g_nmfs; i++) nm += g_mfs[i].path[0] != '@' && mf_is_mod(g_mfs[i].path);
+    sfmt(o, n, "YOUR GAME (Steam folder, %d files checked)\r\n", files_count());
     size_t k = strlen(o);
+    for (int d = 0; d < NSETS; d++) { /* the settings that matter for co-op */
+        const char *v = set_value(g_mfs, g_nmfs, SETS[d].key);
+        if (!v) continue;
+        sfmt(o + k, n - k, "%s: %s\r\n", SETS[d].label, v);
+        k = strlen(o);
+    }
     if (!nm) { sfmt(o + k, n - k, "No mods found: plain game files.\r\n"); return; }
     sfmt(o + k, n - k, "Mod files found (%d):\r\n", nm);
     k = strlen(o);
     int shown = 0;
     for (int i = 0; i < g_nmfs && k < n - 120; i++)
-        if (mf_is_mod(g_mfs[i].path) && shown++ < 30) {
+        if (g_mfs[i].path[0] != '@' && mf_is_mod(g_mfs[i].path) && shown++ < 30) {
             sfmt(o + k, n - k, "    %s\r\n", g_mfs[i].path);
             k = strlen(o);
         }
@@ -2361,6 +2540,8 @@ static void mf_report(Peer *p, bool they_found)
     sfmt(their_pc, sizeof their_pc, "only on %s's PC", them);
     int i = 0, j = 0;
     while (i < g_nmfs || j < nt) {
+        if (i < g_nmfs && g_mfs[i].path[0] == '@') { i++; continue; } /* settings: compared below */
+        if (j < nt && theirs[j].path[0] == '@') { j++; continue; }
         int c = i >= g_nmfs ? 1 : j >= nt ? -1 : strcmp(g_mfs[i].path, theirs[j].path);
         const char *what = 0, *path = 0;
         if (c < 0) { what = "only on your PC"; path = g_mfs[i++].path; }
@@ -2382,8 +2563,30 @@ static void mf_report(Peer *p, bool they_found)
         }
     }
     if (diffs > shown) say("    ...and %d more (all in scctlink.log)", diffs - shown);
+    /* settings: resolution is only shown; FOV and frame rate limits must match */
+    static char setl[2048];
+    size_t sl = 0;
+    int setdiff = 0;
+    setl[0] = 0;
+    for (int d = 0; d < NSETS; d++) {
+        const char *a = set_value(g_mfs, g_nmfs, SETS[d].key), *b = set_value(theirs, nt, SETS[d].key);
+        if (!a && !b) continue;
+        bool same = a && b && !strcmp(a, b);
+        if (!same && SETS[d].must_match) {
+            setdiff++;
+            say("! %s differs: you %s, %s %s. Set the same on both PCs.", SETS[d].label, a ? a : "not set", them, b ? b : "not set");
+        }
+        sfmt(setl + sl, sizeof setl - sl, "    %s: you %s, %s %s%s\r\n", SETS[d].label, a ? a : "not set", them, b ? b : "not set",
+             same ? "" : SETS[d].must_match ? "  <- must match" : "  (doesn't need to match)");
+        sl += strlen(setl + sl);
+    }
     sfmt(o, on, "COMPARED WITH %s\r\n", them);
     size_t k = strlen(o);
+    if (setl[0]) {
+        if (!setdiff) sfmt(o + k, on - k, "[x] Same settings (FOV, FPS limit)\r\n%s", setl);
+        else sfmt(o + k, on - k, "[  ] Same settings - %d difference%s:\r\n%s", setdiff, setdiff == 1 ? "" : "s", setl);
+        k = strlen(o);
+    }
     static const char *const label[3] = { "Same game version (splintercell3.exe)", "Same mods", "Same game files" };
     for (int g = 0; g < 3 && k < on - 200; g++) {
         if (!cnt[g]) sfmt(o + k, on - k, "[x] %s\r\n", label[g]);
@@ -2391,9 +2594,14 @@ static void mf_report(Peer *p, bool they_found)
                   lines[g], cnt[g] > 12 ? "    ...more in the Log\r\n" : "");
         k = strlen(o);
     }
-    if (!diffs) {
-        say("Game files check: same as %s's (%d files).", them, g_nmfs);
-        sfmt(o + k, on - k, "All %d files are the same. Good to go.\r\n", g_nmfs);
+    if (!diffs && !setdiff) {
+        say("Game files check: same as %s's (%d files).", them, files_count());
+        sfmt(o + k, on - k, "All %d files are the same. Good to go.\r\n", files_count());
+    } else if (!diffs) {
+        say("Game files check: same as %s's (%d files), but the settings above differ.", them, files_count());
+        sfmt(o + k, on - k, "All %d files are the same, but set FOV and the FPS limit the same on both PCs.\r\n", files_count());
+        g_cmp[ci].warn = true;
+        ui_alert("settings differ");
     } else {
         say("  Make both games the same: the same mods (same versions) on both PCs, or none.");
         sfmt(o + k, on - k, "Make both games the same: the same mods (same versions) on both PCs, or\r\n"

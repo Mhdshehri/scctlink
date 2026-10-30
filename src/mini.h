@@ -34,6 +34,7 @@ int fclose(FILE *f);
 char *fgets(char *buf, int n, FILE *f);
 int fflush(FILE *f);
 void exit(int code);
+char *getenv(const char *name);
 FILE *__iob_func(void);
 #define stdin ((FILE *)((char *)__iob_func() + 0))
 #else

@@ -1,4 +1,4 @@
-SCCTLink 0.8.3-vpn - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
+SCCTLink 0.8.4-vpn - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
 ==============================================================================
 
 No VPN (no Hamachi, Radmin or ZeroTier), no port forwarding, no IP addresses.
@@ -13,7 +13,7 @@ Both players need:
   * each other on their Steam friends list
   * this folder unzipped somewhere (Desktop is fine). Keep SCCTLink.exe and
     steam_api.dll together.
-  * the SAME SCCTLink version (0.8.3-vpn) - older versions can't link with it.
+  * the SAME SCCTLink version (0.8.4-vpn) - older versions can't link with it.
 
 
 VPN MODE (EXPERIMENTAL BUILD)
@@ -85,6 +85,9 @@ checklist - same game version / same mods / same game files - and lists what
 differs (also in the Log). "Check again" after you change mods. For example
     only on your PC: system/dinput8.dll
     different version: system/core.u
+It also shows your resolution, FOV and FPS limits (the game's own and the
+widescreen fix's) and compares them: FOV and FPS limits must match (flagged
+when they don't), the resolution doesn't have to.
 Co-op disconnects when the two games aren't the same: install the same mods
 (same versions) on both PCs, or remove them on both. Settings files (.ini)
 are not compared. Only file names relative to the game folder, sizes and
@@ -185,7 +188,7 @@ TROUBLESHOOTING
     SCCTLink as administrator too (right-click SCCTLink.exe).
 
 
-VERSION 0.8.3-vpn - WHAT IS TESTED
+VERSION 0.8.4-vpn - WHAT IS TESTED
 ----------------------------
 New in 0.6: the friend could see the host's game in the LAN list but not
 join. The game hides the host's real address inside an encrypted packet, so
@@ -214,7 +217,8 @@ folders (0.7 dropped the big file list).
 0.8.2-vpn: VPN test (Details), to check the virtual LAN without the game.
 0.8.3-vpn: VPN mode tested between two real Windows PCs (VPN test OK both
 ways). A closed lobby isn't retried; Details shows VPN-mode counts; Windows'
-own IPv6 chatter on the adapter is blocked without filling the log. Tested on a
+own IPv6 chatter on the adapter is blocked without filling the log.
+0.8.4-vpn: the Mods tab shows and compares resolution, FOV and FPS limits. Tested on a
 simulated network (virtual adapters on two PCs, the game's discovery, Net-Z
 join, UDP and TCP, untouched); not yet with the real game on Windows.
 

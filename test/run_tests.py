@@ -594,9 +594,20 @@ def main():
         modded["System/SplinterCell3.ini"] = b"[Engine]\nres=2560\n"  # settings differ on purpose: not reported
         other = dict(base)
         other["System/Core.u"] = b"core" * 299 + b"CORE"  # same size, other content (another patch)
+        modded["System/SplinterCell3.ini"] = b"[WinDrv.WindowsClient]\r\nFullscreenViewportX=2560\r\nFullscreenViewportY=1440\r\n[SIMULATION]\r\nMAXFPS=60\r\n"
+        modded["System/scripts/SplinterCellChaosTheory.WidescreenFix.ini"] = b"[MAIN]\r\nResX = 0\r\nResY = 0\r\nFOVFactor = 1.2\r\nFPSLimit = 144 // frame rate cap\r\n"
+        other["System/SplinterCell3.ini"] = b"[WinDrv.WindowsClient]\nFullscreenViewportX=1920\nFullscreenViewportY=1080\n[SIMULATION]\nMAXFPS=60\n"
+        other["System/SplinterCell3User.ini"] = b"[Engine.PlayerController]\nDesiredFOV=90.000000\n"
+        pd = os.path.join(gd, "programdata_a", "Ubisoft", "Tom Clancy's Splinter Cell Chaos Theory", "Profiles")
+        os.makedirs(pd, exist_ok=True)
+        with open(os.path.join(pd, "SplinterCell3User.ini"), "wb") as f:  # the host's own settings live in ProgramData
+            f.write(b"[Engine.PlayerController]\r\nDesiredFOV=75.000000\r\n")
         ga, gb, gc = game_dir("a", modded), game_dir("b", other), game_dir("c", base)
-        hm = relay(A, "HM", 1191, "1192", ["host"], d, {"MOCK_GAME_DIR": ga})
+        hm = relay(A, "HM", 1191, "1192", ["host"], d, {"MOCK_GAME_DIR": ga, "PROGRAMDATA": os.path.join(gd, "programdata_a")})
         procs.append(hm)
+        check(hm.wait_for(r"\[mods\] Resolution: 2560x1440") is not None and hm.wait_for(r"\[mods\] FOV: 75\b") is not None
+              and hm.wait_for(r"\[mods\] FPS limit \(widescreen fix\): 144") is not None,
+              "Mods tab: the host's resolution, FOV (from ProgramData) and FPS limit, before anyone links")
         check(hm.wait_for(r"\[mods\] Mod files found \(2\)") is not None,
               "Mods tab: the host's own mods are listed right away (no friend, no game running)")
         check(hm.wait_for(r"Lobby is ready") is not None, "host ready")
@@ -612,6 +623,14 @@ def main():
         check(hm.wait_for(r"\[mods\] \[x\] Same game version", timeout=3) is not None, "Mods tab: [x] same game version")
         check(hm.wait_for(r"\[mods\] \[  \] Same mods - 2 differences", timeout=3) is not None, "Mods tab: [  ] same mods, 2 differences")
         check(hm.wait_for(r"\[mods\] \[  \] Same game files - 1 difference", timeout=3) is not None, "Mods tab: [  ] same game files, 1 difference")
+        check(hm.wait_for(r"! FOV differs: you 75, user1192 90", timeout=3) is not None, "a different FOV is flagged")
+        check(hm.wait_for(r"\[mods\] \[  \] Same settings - 3 differences", timeout=3) is not None,
+              "Mods tab: [  ] same settings - FOV, the widescreen fix's FOV and FPS limit")
+        check(hm.wait_for(r"Resolution: you 2560x1440, user1192 1920x1080  \(doesn't need to match\)", timeout=3) is not None,
+              "a different resolution is shown, not flagged")
+        check(hm.wait_for(r"FPS limit \(game\): you 60, user1192 60\r?$", timeout=3) is not None or "FPS limit (game): you 60, user1192 60" in hm.log,
+              "the same FPS limit is shown as the same")
+        check(jm.wait_for(r"! FOV differs: you 90, user1191 75", timeout=3) is not None, "...and on the friend's side")
         check("splintercell3.ini" not in hm.log + jm.log, "settings files (.ini) are not compared")
         check(gd not in hm.log + jm.log and gd not in open(os.path.join(d, "log_HM.txt")).read(), "the game folder's path is never sent or logged")
         hm.stop(); jm.stop()
