@@ -25,7 +25,7 @@
 #include "plat.h"
 #include "ui.h"
 
-#define VERSION "0.8.5"
+#define VERSION "0.9"
 #define SCCT_APPID 13570
 #define SPACEWAR_APPID 480
 #define MAX_PEERS 3
@@ -1976,6 +1976,7 @@ static const SetDef SETS[] = {
     { "ws_res", "Resolution (widescreen fix)", false },
     { "ws_fov", "FOV (widescreen fix)", true },
     { "ws_fps", "FPS limit (widescreen fix)", true },
+    { "fpsfix", "FPS fix (60 FPS cap)", true },
 };
 #define NSETS ((int)(sizeof SETS / sizeof *SETS))
 
@@ -2034,6 +2035,7 @@ static void ws_ini_cb(void *ctx, const char *name, bool is_dir, u64 size)
     if (ini_get(path, 0, "FPSLimit", v, sizeof v)) set_add("ws_fps", strcmp(v, "0") ? v : "off");
 }
 
+static int fpsfix_state(void);
 static void settings_collect(void)
 {
     char sys[800], path[900], x[24], y[24], v[24];
@@ -2073,6 +2075,7 @@ static void settings_collect(void)
     dir_list(path, ws_ini_cb, path);
     sfmt(path, sizeof path, "%s" PATHSEP "scripts", g_mf_dir);
     dir_list(path, ws_ini_cb, path);
+    set_add("fpsfix", fpsfix_state() == 1 ? "installed" : "not installed");
 }
 
 /* Write value for key (in section, or anywhere if section is 0) into an .ini
@@ -2143,9 +2146,88 @@ static int ini_set(const char *path, const char *section, const char *key, const
     return ok ? hits : -1;
 }
 
-/* The Settings tab's Apply. */
+/* ---------- the FPS fix ----------
+   A small d3d9.dll (SkyTheKraKen's fix) that caps the game at 60 FPS, plus
+   borderless window / Alt+Tab fixes. Chaos Theory's co-op runs the same
+   simulation on both PCs and ends the session when they drift apart; a high
+   frame rate does that. It ships next to SCCTLink.exe as SCCTFix-d3d9.dll and
+   is only ever copied if its SHA-256 is exactly this one (checked: no network,
+   no other programs, only writes System\SCCTFix.log). */
+#define FPSFIX_FILE "SCCTFix-d3d9.dll"
+#define FPSFIX_SHA "2f05d8e9e7aaf750eb2889c7ba57dd453820e3a794b9ba74c43730446a84cae9"
+bool sha256_file(const char *path, char hex[65]);
+static const char *fpsfix_sha(void) { return FPSFIX_SHA; }
+static void fpsfix_paths(char *src, char *dst, char *bak, size_t n)
+{
+    sfmt(src, n, "%s" PATHSEP FPSFIX_FILE, exe_dir());
+    sfmt(dst, n, "%s" PATHSEP "System" PATHSEP "d3d9.dll", g_mf_dir);
+    sfmt(bak, n, "%s.scctlink-backup", dst);
+}
+static int fpsfix_state(void)
+{
+    if (!g_steam_ok || g_nmfs <= 0 || !g_mf_dir[0]) return -1;
+    char src[900], dst[900], bak[920], hex[65];
+    fpsfix_paths(src, dst, bak, sizeof src);
+    if (!sha256_file(dst, hex)) return 0;
+    return strcmp(hex, fpsfix_sha()) ? 2 : 1;
+}
+static bool copy_file(const char *from, const char *to)
+{
+    FILE *a = fopen(from, "rb");
+    if (!a) return false;
+    FILE *b = fopen(to, "wb");
+    if (!b) { fclose(a); return false; }
+    char buf[8192];
+    size_t r;
+    bool ok = true;
+    while ((r = fread(buf, 1, sizeof buf, a)) > 0) ok &= fwrite(buf, 1, r, b) == r;
+    fclose(a);
+    fclose(b);
+    return ok;
+}
+static void set_say(const char *fmt, ...);
 static void mf_recheck(void);
 static UiSettings g_uiset;
+static void fpsfix_(bool install)
+{
+    char src[900], dst[900], bak[920], hex[65];
+    if (fpsfix_state() < 0) { set_say("! FPS fix: the game's folder wasn't found (only Steam copies)."); return; }
+    if (game_is_running(g_exe)) { set_say("! FPS fix: close Splinter Cell first."); return; }
+    fpsfix_paths(src, dst, bak, sizeof src);
+    int st = fpsfix_state();
+    if (install) {
+        if (st == 1) { set_say("FPS fix: already installed."); return; }
+        if (!sha256_file(src, hex)) { set_say("! FPS fix: " FPSFIX_FILE " is missing (it must be next to SCCTLink.exe)."); return; }
+        if (strcmp(hex, fpsfix_sha())) { set_say("! FPS fix: " FPSFIX_FILE " is not the expected file, so it was NOT installed."); return; }
+        if (st == 2) { /* another d3d9.dll (another mod): keep it */
+            if (file_exists(bak)) { set_say("! FPS fix: there is another d3d9.dll in System and already a backup - move it out yourself first."); return; }
+            if (rename(dst, bak) != 0) { set_say("! FPS fix: couldn't move the other d3d9.dll aside."); return; }
+            say("FPS fix: the other d3d9.dll was renamed to d3d9.dll.scctlink-backup.");
+        }
+        if (!copy_file(src, dst) || !sha256_file(dst, hex) || strcmp(hex, fpsfix_sha())) {
+            remove(dst);
+            if (st == 2) rename(bak, dst);
+            set_say("! FPS fix: couldn't copy it into the game's System folder.");
+            return;
+        }
+        set_say("FPS fix installed: the game is capped at 60 FPS. Both players need it.");
+    } else {
+        if (st != 1) { set_say(st == 2 ? "! FPS fix: the d3d9.dll in System is another mod, not the FPS fix - left alone." : "FPS fix: not installed."); return; }
+        if (remove(dst) != 0) { set_say("! FPS fix: couldn't remove it."); return; }
+        if (file_exists(bak) && rename(bak, dst) == 0) say("FPS fix: the earlier d3d9.dll was put back.");
+        set_say("FPS fix removed.");
+    }
+}
+static void fpsfix(bool install)
+{
+    g_uiset.note[0] = 0;
+    g_uiset.note_warn = false;
+    fpsfix_(install);
+    mf_recheck(); /* the file list changed: show it and tell the friends */
+    settings_publish();
+}
+
+/* The Settings tab's Apply. */
 /* say() it, and show the first warning (or the last line) under the Settings tab's fields */
 static void set_say(const char *fmt, ...)
 {
@@ -2356,6 +2438,7 @@ static void settings_publish(void)
     else u->w = u->h = u->fov = u->fps = u->wsfov = 0;
     u->have_fov = u->found && set_value(g_mfs, g_nmfs, "fov");
     u->have_ws = u->found && g_ws_ini[0];
+    u->fpsfix = fpsfix_state();
     ui_settings(u);
 }
 
@@ -2915,6 +2998,7 @@ static void handle_cmd(const Cmd *c)
         say("Game files checked again.");
         break;
     case CMD_APPLY_SETTINGS: apply_settings(c->arg); break;
+    case CMD_FPSFIX: fpsfix(c->arg != 0); break;
     case CMD_SET_VERSUS:
         if (g_mode != MODE_IDLE) { say("Click Stop first, then switch between Co-op and Versus."); break; }
         if ((c->arg != 0) != g_versus) {

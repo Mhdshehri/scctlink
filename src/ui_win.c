@@ -158,7 +158,7 @@ enum {
     ID_LOBBYLABEL, ID_TAB_MODS, ID_MODS, ID_RECHECK,
     /* the Settings tab */
     ID_TAB_SET, ID_SET_NOTE, ID_SL_RES, ID_SL_X, ID_SL_FOV, ID_SL_FPS, ID_SL_WS, ID_SET_W, ID_SET_H, ID_SET_FOV, ID_SET_FPS,
-    ID_SET_WS, ID_SF_RES, ID_SF_FOV, ID_SF_FPS, ID_SF_WS, ID_SET_FRIEND, ID_SET_APPLY,
+    ID_SET_WS, ID_SF_RES, ID_SF_FOV, ID_SF_FPS, ID_SF_WS, ID_SET_FRIEND, ID_SET_FIX, ID_SET_APPLY,
     ID_GAMEMODE, /* keep last */
 };
 
@@ -605,6 +605,7 @@ static void build(void)
     framed(ID_SET_FPS, E, NUM, 180, 474, 64, 26, 6, 5);
     framed(ID_SET_WS, E, WS_TABSTOP | ES_AUTOHSCROLL, 180, 504, 64, 26, 6, 5);
     g_frame_tab = -1;
+    ctl(ID_SET_FIX, B, WTEXT("Install FPS fix"), OD, 0, 28, 534, 170, 24, g_font);
     ctl(ID_SET_FRIEND, B, WTEXT("Use friend's"), OD, 0, 346, 534, 112, 24, g_font);
     ctl(ID_SET_APPLY, B, WTEXT("Apply"), OD, 0, 466, 534, 110, 24, g_bold);
 }
@@ -768,10 +769,12 @@ static void show_settings(const UiSettings *n)
     if (!n->have_fov && !n->friend_) set_text(ID_SF_FOV, "(not in the game's files)");
     EnableWindow(g_c[ID_SET_FOV], n->have_fov);
     EnableWindow(g_c[ID_SET_WS], n->have_ws);
+    set_text(ID_SET_FIX, n->fpsfix == 1 ? "Remove FPS fix" : "Install FPS fix (60 FPS)");
     g_set_warn = n->note_warn;
     if (n->note[0]) set_text(ID_SET_NOTE, n->note);
     else if (!n->found) set_text(ID_SET_NOTE, "The game's folder wasn't found (only Steam copies of the game can be changed).");
-    else set_text(ID_SET_NOTE, "Close Splinter Cell first. FOV and the FPS limit must match your friend's.");
+    else if (n->fpsfix != 1) set_text(ID_SET_NOTE, "Co-op disconnects at high frame rates: install the FPS fix on both PCs (close the game first).");
+    else set_text(ID_SET_NOTE, "FPS fix installed. Close Splinter Cell before changing settings.");
     RedrawWindow(g_c[ID_SET_NOTE], 0, 0, 0x1 | 0x4);
 }
 
@@ -847,6 +850,7 @@ static void refresh_controls(void)
     EnableWindow(g_c[ID_STOP], !idle && !g_closing);
     EnableWindow(g_c[ID_SET_APPLY], g_set.found && !g_closing);
     EnableWindow(g_c[ID_SET_FRIEND], g_set.friend_ && !g_closing);
+    EnableWindow(g_c[ID_SET_FIX], g_set.found && !g_closing);
     static int ro = -1;
     int want_ro = host || (join && s->lobby);
     if (want_ro != ro) { SendMessageW(g_c[ID_LOBBY], EM_SETREADONLY, (WPARAM)want_ro, 0); ro = want_ro; }
@@ -1012,6 +1016,11 @@ static void on_command(int id, int code)
     case ID_TAB_SET: show_tab(TAB_SET); break;
     case ID_SET_APPLY: apply_clicked(); break;
     case ID_SET_FRIEND: use_friends(); break;
+    case ID_SET_FIX:
+        g_set_warn = false;
+        set_text(ID_SET_NOTE, "Working...");
+        push_cmd(CMD_FPSFIX, g_set.fpsfix == 1 ? 0 : 1);
+        break;
     case ID_RECHECK: push_cmd(CMD_RECHECK, 0); break;
     case ID_COPYLOG:
         copy_log();
@@ -1123,7 +1132,7 @@ int main(int argc, char **argv)
     AdjustWindowRectEx(&r, style, 0, 0);
     int ww = r.right - r.left, wh = r.bottom - r.top;
     int x = (GetSystemMetrics(0) - ww) / 2, y = (GetSystemMetrics(1) - wh) / 2;
-    g_wnd = CreateWindowExW(0, wc.className, WTEXT("SCCTLink 0.8.5 - Splinter Cell: Chaos Theory"), style, x < 0 ? 0 : x,
+    g_wnd = CreateWindowExW(0, wc.className, WTEXT("SCCTLink 0.9 - Splinter Cell: Chaos Theory"), style, x < 0 ? 0 : x,
                             y < 0 ? 0 : y, ww, wh, 0, 0, inst, 0);
     if (!g_wnd) return 1;
     build();
