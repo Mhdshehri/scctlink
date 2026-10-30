@@ -1845,7 +1845,8 @@ static bool mf_skip(const char *name)
     for (const char *c = name; *c; c++) if (*c == '.') dot = c;
     if (!dot) return false;
     static const char *const ext[] = { ".ini", ".log", ".txt", ".sav", ".bak", ".tmp", ".dmp", ".lnk", ".url",
-                                       ".pdf", ".htm", ".html", ".rtf", ".old", ".crash" };
+                                       ".pdf", ".htm", ".html", ".rtf", ".old", ".crash", ".zip", ".rar", ".7z",
+                                       ".scctlink-backup" /* SCCTLink's own copies of changed .ini files */ };
     for (unsigned i = 0; i < sizeof ext / sizeof *ext; i++) {
         const char *a = dot, *b = ext[i];
         while (*a && *b && ((*a | 32) == *b || *a == *b)) { a++; b++; }
