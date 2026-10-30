@@ -21,7 +21,6 @@ char *strstr(const char *h, const char *n);
 void *memcpy(void *d, const void *s, size_t n);
 void *memset(void *d, int c, size_t n);
 int memcmp(const void *a, const void *b, size_t n);
-int atoi(const char *s);
 void *malloc(size_t n);
 void *calloc(size_t n, size_t m);
 void *realloc(void *p, size_t n);

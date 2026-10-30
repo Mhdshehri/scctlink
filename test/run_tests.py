@@ -635,7 +635,7 @@ def main():
         check("splintercell3.ini" not in hm.log + jm.log, "settings files (.ini) are not compared")
         check(gd not in hm.log + jm.log and gd not in open(os.path.join(d, "log_HM.txt")).read(), "the game folder's path is never sent or logged")
         # the Settings tab
-        check(hm.wait_for(r"\[settings\] fpsfix 0 mine 2560x1440 fov 75 fps 60 ws 120 \| user1192 1920x1080 fov 90 fps 60 ws 0", timeout=5) is not None,
+        check(hm.wait_for(r"\[settings\] scctfix 0 mine 2560x1440 fov 75 fps 60 ws 120 \| user1192 1920x1080 fov 90 fps 60 ws 0", timeout=5) is not None,
               "Settings tab: this PC's values and the friend's")
         hm.p.stdin.write("A\n1920 1080 90 60 100\n"); hm.p.stdin.flush()  # "Use friend's", FOV factor 1.00, Apply
         check(hm.wait_for(r"Settings: resolution set to 1920x1080", timeout=10) is not None
@@ -653,7 +653,7 @@ def main():
         check(rd(ga, "System", "scripts", "SplinterCellChaosTheory.WidescreenFix.ini") ==
               b"[MAIN]\r\nResX = 0\r\nResY = 0\r\nFOVFactor = 1.00\r\nFPSLimit = 60 // frame rate cap\r\n",
               "...the widescreen fix's .ini: FOV factor and FPS limit changed, its comment and ResX=0 (auto) kept")
-        check(hm.wait_for(r"\[settings\] fpsfix 0 mine 1920x1080 fov 90 fps 60 ws 100", timeout=10) is not None, "the Settings tab shows the new values")
+        check(hm.wait_for(r"\[settings\] scctfix 0 mine 1920x1080 fov 90 fps 60 ws 100", timeout=10) is not None, "the Settings tab shows the new values")
         check(hm.wait_for(r"FOV: you 90, user1192 90", timeout=10) is not None, "...and the check is done again: FOV now the same")
         hm.p.stdin.write("A\n0 0 30 0 0\n"); hm.p.stdin.flush()
         check(hm.wait_for(r"! Settings: FOV must be between 50 and 130", timeout=5) is not None, "a wrong value is refused")
@@ -669,7 +669,7 @@ def main():
         check(hm.wait_for(r"SCCT Fix installed", timeout=10) is not None and rd(sysd3d) == rd(fixsrc)
               and rd(sysd3d + ".scctlink-backup") == b"MZanother-d3d9-mod",
               "Install SCCT Fix: d3d9.dll copied into System, the other d3d9.dll kept as a backup")
-        check(hm.wait_for(r"\[settings\] fpsfix 1 ", timeout=10) is not None, "...the Settings tab shows it installed")
+        check(hm.wait_for(r"\[settings\] scctfix 1 ", timeout=10) is not None, "...the Settings tab shows it installed")
         check(b"StartupFullscreen=False" in rd(ga, "System", "SplinterCell3.ini"), "...and the game starts in a window (StartupFullscreen=False)")
         check(jm.wait_for(r"! SCCT Fix \(60 FPS cap, borderless\) differs: you not installed, user1191 installed", timeout=15) is not None,
               "...and the friend is told they don't have it")

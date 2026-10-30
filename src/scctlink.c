@@ -19,13 +19,15 @@
  *     with the loopback address that stands for this PC on the other side, so
  *     no real address ever reaches the other player.
  *
- * The game is not modified. Pattern: coop-anything HXCoop relay,
- * playbook/networking-steam-spacewar.md, and the author's CoFLink. MIT license. */
+ * SCCTLink doesn't change the game's network code. It also checks that both
+ * games match (files, settings) and can install the SCCT Fix (a small d3d9.dll:
+ * 60 FPS cap, borderless window) that co-op needs. Same design as the author's
+ * CoFLink. MIT license. */
 #include "steam.h"
 #include "plat.h"
 #include "ui.h"
 
-#define VERSION "0.9.1"
+#define VERSION "0.9.2"
 #define SCCT_APPID 13570
 #define SPACEWAR_APPID 480
 #define MAX_PEERS 3
@@ -1535,8 +1537,6 @@ static void on_lobby_created(int32_t result, u64 lobby)
         return;
     }
     g_lobby = lobby;
-    char conn[64];
-    sfmt(conn, sizeof conn, "+connect_lobby %s", idstr(lobby));
     S.MM_SetLobbyData(MM, lobby, "scctlink", "1");
     S.MM_SetLobbyData(MM, lobby, "scctlink_ver", VERSION);
     S.MM_SetLobbyData(MM, lobby, "scctlink_mode", g_versus ? "versus" : "coop");
@@ -1547,7 +1547,6 @@ static void on_lobby_created(int32_t result, u64 lobby)
     /* Not "connect": with that key Steam shows friends a "Join Game" button,
        which only starts Spacewar (from CoFLink 0.9.4). */
     S.Friends_SetRichPresence(F, "scctlink_lobby", idstr(lobby));
-    (void)conn;
     clipboard_set(codestr(lobby));
     say("");
     say("=== Lobby is ready (code %s, copied to clipboard) ===", codestr(lobby));
@@ -1655,14 +1654,6 @@ static void handle_cb(int cb, uint8_t *p, int size)
             accept_lobby(rd64(p));
         }
         break;
-    case CB_GameRichPresenceJoinRequested: {
-        if (size < 9 || g_is_host) break;
-        char conn[257] = { 0 };
-        memcpy(conn, p + 8, (size_t)(size - 8 < 256 ? size - 8 : 256));
-        const char *c = strstr(conn, "+connect_lobby ");
-        if (c) accept_lobby(str_to_u64(c + 15));
-        break;
-    }
     case CB_NetMsgSessionRequest: {
         u64 from = S.Ident_GetSteamID64(p);
         /* host: accept, every message is checked against the lobby + friends list */
@@ -1757,7 +1748,7 @@ static u64 g_refresh_at;
 static int scan_for_host(bool verbose)
 {
     /* Ways to see a hosting friend: (1) the lobby in their "game played" info,
-       (2) the "+connect_lobby <id>" in their rich presence - both only while
+       (2) "scctlink_lobby" in their rich presence - both only while
        Steam shows them in SCCTLink ("Spacewar"). Once the host starts the game,
        Steam shows "playing Splinter Cell" instead and both go blank, so (3)
        SCCTLink asks friends' SCCTLink directly: every few seconds for friends in
@@ -1976,7 +1967,7 @@ static const SetDef SETS[] = {
     { "ws_res", "Resolution (widescreen fix)", false },
     { "ws_fov", "FOV (widescreen fix)", true },
     { "ws_fps", "FPS limit (widescreen fix)", true },
-    { "fpsfix", "SCCT Fix (60 FPS cap, borderless)", true },
+    { "scctfix", "SCCT Fix (60 FPS cap, borderless)", true },
     { "fullscreen", "Starts in fullscreen", true },
 };
 #define NSETS ((int)(sizeof SETS / sizeof *SETS))
@@ -2036,7 +2027,7 @@ static void ws_ini_cb(void *ctx, const char *name, bool is_dir, u64 size)
     if (ini_get(path, 0, "FPSLimit", v, sizeof v)) set_add("ws_fps", strcmp(v, "0") ? v : "off");
 }
 
-static int fpsfix_state(void);
+static int scctfix_state(void);
 static void settings_collect(void)
 {
     char sys[800], path[900], x[24], y[24], v[24];
@@ -2076,7 +2067,7 @@ static void settings_collect(void)
     dir_list(path, ws_ini_cb, path);
     sfmt(path, sizeof path, "%s" PATHSEP "scripts", g_mf_dir);
     dir_list(path, ws_ini_cb, path);
-    set_add("fpsfix", fpsfix_state() == 1 ? "installed" : "not installed");
+    set_add("scctfix", scctfix_state() == 1 ? "installed" : "not installed");
     sfmt(path, sizeof path, "%s" PATHSEP "SplinterCell3.ini", sys);
     if (ini_get(path, "WinDrv.WindowsClient", "StartupFullscreen", v, sizeof v)) set_add("fullscreen", (v[0] | 32) == 't' ? "yes" : "no");
 }
@@ -2150,29 +2141,31 @@ static int ini_set(const char *path, const char *section, const char *key, const
 }
 
 /* ---------- the SCCT Fix ----------
-   A small d3d9.dll that caps the game at 60 FPS, plus
-   borderless window / Alt+Tab fixes. Chaos Theory's co-op runs the same
-   simulation on both PCs and ends the session when they drift apart; a high
-   frame rate does that. It ships next to SCCTLink.exe as SCCTFix-d3d9.dll and
-   is only ever copied if its SHA-256 is exactly this one (checked: no network,
-   no other programs, only writes System\SCCTFix.log). */
-#define FPSFIX_FILE "SCCTFix-d3d9.dll"
-#define FPSFIX_SHA "2f05d8e9e7aaf750eb2889c7ba57dd453820e3a794b9ba74c43730446a84cae9"
+   A small d3d9.dll: 60 FPS cap, borderless window, Alt+Tab
+   works, System\SCCTFix.log on a crash. Chaos Theory's co-op runs the same
+   simulation on both PCs and ends the session when they drift apart; with this
+   file and StartupFullscreen=False on both PCs it stopped doing that. It ships
+   next to SCCTLink.exe as SCCTFix-d3d9.dll and is only ever copied if its
+   SHA-256 is exactly this one (checked: no network functions, starts no
+   programs, only writes System\SCCTFix.log). */
+#define SCCTFIX_FILE "SCCTFix-d3d9.dll"
+#define SCCTFIX_SHA "2f05d8e9e7aaf750eb2889c7ba57dd453820e3a794b9ba74c43730446a84cae9"
 bool sha256_file(const char *path, char hex[65]);
-static const char *fpsfix_sha(void) { return FPSFIX_SHA; }
-static void fpsfix_paths(char *src, char *dst, char *bak, size_t n)
+static void scctfix_paths(char *src, char *dst, char *bak, char *ini, size_t n)
 {
-    sfmt(src, n, "%s" PATHSEP FPSFIX_FILE, exe_dir());
+    sfmt(src, n, "%s" PATHSEP SCCTFIX_FILE, exe_dir());
     sfmt(dst, n, "%s" PATHSEP "System" PATHSEP "d3d9.dll", g_mf_dir);
     sfmt(bak, n, "%s.scctlink-backup", dst);
+    sfmt(ini, n, "%s" PATHSEP "System" PATHSEP "SplinterCell3.ini", g_mf_dir);
 }
-static int fpsfix_state(void)
+/* -1 no game folder, 0 not there, 1 installed, 2 another d3d9.dll is there */
+static int scctfix_state(void)
 {
     if (!g_steam_ok || g_nmfs <= 0 || !g_mf_dir[0]) return -1;
-    char src[900], dst[900], bak[920], hex[65];
-    fpsfix_paths(src, dst, bak, sizeof src);
+    char src[900], dst[900], bak[900], ini[900], hex[65];
+    scctfix_paths(src, dst, bak, ini, sizeof src);
     if (!sha256_file(dst, hex)) return 0;
-    return strcmp(hex, fpsfix_sha()) ? 2 : 1;
+    return strcmp(hex, SCCTFIX_SHA) ? 2 : 1;
 }
 static bool copy_file(const char *from, const char *to)
 {
@@ -2185,53 +2178,52 @@ static bool copy_file(const char *from, const char *to)
     bool ok = true;
     while ((r = fread(buf, 1, sizeof buf, a)) > 0) ok &= fwrite(buf, 1, r, b) == r;
     fclose(a);
-    fclose(b);
-    return ok;
+    return fclose(b) == 0 && ok;
 }
 static void set_say(const char *fmt, ...);
 static void mf_recheck(void);
 static UiSettings g_uiset;
-static void fpsfix_(bool install)
+static void scctfix_(bool install)
 {
-    char src[900], dst[900], bak[920], hex[65];
-    if (fpsfix_state() < 0) { set_say("! SCCT Fix: the game's folder wasn't found (only Steam copies)."); return; }
+    char src[900], dst[900], bak[900], ini[900], hex[65];
+    int st = scctfix_state();
+    if (st < 0) { set_say("! SCCT Fix: the game's folder wasn't found (only Steam copies)."); return; }
     if (game_is_running(g_exe)) { set_say("! SCCT Fix: close Splinter Cell first."); return; }
-    fpsfix_paths(src, dst, bak, sizeof src);
-    int st = fpsfix_state();
-    if (install) {
-        if (st == 1) { set_say("SCCT Fix: already installed."); return; }
-        if (!sha256_file(src, hex)) { set_say("! SCCT Fix: " FPSFIX_FILE " is missing (it must be next to SCCTLink.exe)."); return; }
-        if (strcmp(hex, fpsfix_sha())) { set_say("! SCCT Fix: " FPSFIX_FILE " is not the expected file, so it was NOT installed."); return; }
+    scctfix_paths(src, dst, bak, ini, sizeof src);
+    if (!install) {
+        if (st != 1) { set_say(st == 2 ? "! SCCT Fix: the d3d9.dll in System is another mod, not the SCCT Fix - left alone." : "SCCT Fix: not installed."); return; }
+        if (remove(dst) != 0) { set_say("! SCCT Fix: couldn't remove it."); return; }
+        if (file_exists(bak) && rename(bak, dst) == 0) say("SCCT Fix: the earlier d3d9.dll was put back.");
+        ini_set(ini, "WinDrv.WindowsClient", "StartupFullscreen", "True");
+        set_say("SCCT Fix removed (the game starts in fullscreen again).");
+        return;
+    }
+    if (st != 1) {
+        if (!sha256_file(src, hex)) { set_say("! SCCT Fix: " SCCTFIX_FILE " is missing (it must be next to SCCTLink.exe)."); return; }
+        if (strcmp(hex, SCCTFIX_SHA)) { set_say("! SCCT Fix: " SCCTFIX_FILE " is not the expected file, so it was NOT installed."); return; }
         if (st == 2) { /* another d3d9.dll (another mod): keep it */
             if (file_exists(bak)) { set_say("! SCCT Fix: there is another d3d9.dll in System and already a backup - move it out yourself first."); return; }
             if (rename(dst, bak) != 0) { set_say("! SCCT Fix: couldn't move the other d3d9.dll aside."); return; }
             say("SCCT Fix: the other d3d9.dll was renamed to d3d9.dll.scctlink-backup.");
         }
-        if (!copy_file(src, dst) || !sha256_file(dst, hex) || strcmp(hex, fpsfix_sha())) {
+        if (!copy_file(src, dst) || !sha256_file(dst, hex) || strcmp(hex, SCCTFIX_SHA)) {
             remove(dst);
             if (st == 2) rename(bak, dst);
             set_say("! SCCT Fix: couldn't copy it into the game's System folder.");
             return;
         }
-        char ini[900];
-        sfmt(ini, sizeof ini, "%s" PATHSEP "System" PATHSEP "SplinterCell3.ini", g_mf_dir);
-        if (ini_set(ini, "WinDrv.WindowsClient", "StartupFullscreen", "False") < 0) say("! SCCT Fix: couldn't set StartupFullscreen=False in SplinterCell3.ini.");
-        set_say("SCCT Fix installed: 60 FPS cap, borderless window (StartupFullscreen=False). Both players need it.");
-    } else {
-        if (st != 1) { set_say(st == 2 ? "! SCCT Fix: the d3d9.dll in System is another mod, not the SCCT Fix - left alone." : "SCCT Fix: not installed."); return; }
-        if (remove(dst) != 0) { set_say("! SCCT Fix: couldn't remove it."); return; }
-        if (file_exists(bak) && rename(bak, dst) == 0) say("SCCT Fix: the earlier d3d9.dll was put back.");
-        char ini[900];
-        sfmt(ini, sizeof ini, "%s" PATHSEP "System" PATHSEP "SplinterCell3.ini", g_mf_dir);
-        ini_set(ini, "WinDrv.WindowsClient", "StartupFullscreen", "True");
-        set_say("SCCT Fix removed (the game starts in fullscreen again).");
     }
+    /* the tested setup also starts the game in a window (the fix makes it borderless) */
+    if (ini_set(ini, "WinDrv.WindowsClient", "StartupFullscreen", "False") < 0)
+        say("! SCCT Fix: couldn't set StartupFullscreen=False in SplinterCell3.ini.");
+    set_say(st == 1 ? "SCCT Fix: already installed (StartupFullscreen=False checked)."
+                    : "SCCT Fix installed: 60 FPS cap, borderless window (StartupFullscreen=False). Both players need it.");
 }
-static void fpsfix(bool install)
+static void scctfix(bool install)
 {
     g_uiset.note[0] = 0;
     g_uiset.note_warn = false;
-    fpsfix_(install);
+    scctfix_(install);
     mf_recheck(); /* the file list changed: show it and tell the friends */
     settings_publish();
 }
@@ -2413,7 +2405,7 @@ static void mods_publish(void)
     }
     if (!g_ncmp) {
         sfmt(t + k, sizeof t - (size_t)k, "\r\nWhen a friend links, their game is compared with yours here.\r\n"
-             "(Both of you need SCCTLink 0.7 or newer. The game doesn't have to be running.)");
+             "(The game doesn't have to be running.)");
     }
     ui_mods(t, warn);
 }
@@ -2447,7 +2439,7 @@ static void settings_publish(void)
     else u->w = u->h = u->fov = u->fps = u->wsfov = 0;
     u->have_fov = u->found && set_value(g_mfs, g_nmfs, "fov");
     u->have_ws = u->found && g_ws_ini[0];
-    u->fpsfix = fpsfix_state();
+    u->scctfix = scctfix_state();
     ui_settings(u);
 }
 
@@ -2611,7 +2603,7 @@ static void mf_report(Peer *p, bool they_found)
     sfmt(o, on, "COMPARED WITH %s\r\n", them);
     size_t k = strlen(o);
     if (setl[0]) {
-        if (!setdiff) sfmt(o + k, on - k, "[x] Same settings (FOV, FPS limit)\r\n%s", setl);
+        if (!setdiff) sfmt(o + k, on - k, "[x] Same settings (FOV, FPS limits, SCCT Fix)\r\n%s", setl);
         else sfmt(o + k, on - k, "[  ] Same settings - %d difference%s:\r\n%s", setdiff, setdiff == 1 ? "" : "s", setl);
         k = strlen(o);
     }
@@ -2627,7 +2619,7 @@ static void mf_report(Peer *p, bool they_found)
         sfmt(o + k, on - k, "All %d files are the same. Good to go.\r\n", files_count());
     } else if (!diffs) {
         say("Game files check: same as %s's (%d files), but the settings above differ.", them, files_count());
-        sfmt(o + k, on - k, "All %d files are the same, but set FOV and the FPS limit the same on both PCs.\r\n", files_count());
+        sfmt(o + k, on - k, "All %d files are the same, but make the settings marked \"must match\" the same on both PCs.\r\n", files_count());
         g_cmp[ci].warn = true;
         ui_alert("settings differ");
     } else {
@@ -2937,10 +2929,8 @@ static void make_status(UiState *st)
 {
     memset(st, 0, sizeof *st);
     st->mode = g_mode;
-    st->steam_ok = g_steam_ok;
     st->versus = g_versus;
     st->lobby = g_lobby;
-    st->friends_connected = g_npeers;
     /* "How to" steps, one bit each */
     if (g_is_host) {
         bool linked = false, playing = false;
@@ -3007,7 +2997,7 @@ static void handle_cmd(const Cmd *c)
         say("Game files checked again.");
         break;
     case CMD_APPLY_SETTINGS: apply_settings(c->arg); break;
-    case CMD_FPSFIX: fpsfix(c->arg != 0); break;
+    case CMD_SCCTFIX: scctfix(c->arg != 0); break;
     case CMD_SET_VERSUS:
         if (g_mode != MODE_IDLE) { say("Click Stop first, then switch between Co-op and Versus."); break; }
         if ((c->arg != 0) != g_versus) {
