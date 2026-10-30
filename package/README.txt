@@ -99,9 +99,10 @@ action. Chaos Theory's co-op runs the same simulation on both PCs and ends
 the session the moment they drift apart.
 
 "Install SCCT Fix" copies SCCTFix-d3d9.dll into the game's System folder as
-d3d9.dll and sets StartupFullscreen=False in SplinterCell3.ini. The DLL caps the game at 60 FPS, runs it in a borderless window, keeps
-Alt+Tab working and writes System\SCCTFix.log if the game crashes. With it on
-both PCs, co-op works: shooting, jumping, changing maps, no disconnects.
+d3d9.dll and sets StartupFullscreen=False in SplinterCell3.ini. The DLL caps
+the game at 60 FPS, runs it in a borderless window, keeps Alt+Tab working and
+writes System\SCCTFix.log if the game crashes. With it on both PCs, co-op
+works: shooting, jumping, changing maps, no disconnects.
   * Close the game first. BOTH players need it - the Mods tab compares it.
   * SCCTLink only copies the file if its SHA-256 is exactly the checked one:
     2f05d8e9e7aaf750eb2889c7ba57dd453820e3a794b9ba74c43730446a84cae9
@@ -230,4 +231,4 @@ and two friends on three "PCs". Co-op was tested with the real game between
 two homes. If something doesn't work, send both scctlink.log files.
 
 
-SCCTLink by KaZ. MIT license. Not affiliated with Ubisoft or Valve.
+SCCTLink by Mhdshehri (github.com/Mhdshehri). MIT license. Not affiliated with Ubisoft or Valve.

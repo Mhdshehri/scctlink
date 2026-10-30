@@ -5,7 +5,7 @@ cd "$(dirname "$0")"
 VER=$(sed -n 's/^#define VERSION "\(.*\)"/\1/p' src/scctlink.c)
 DLL=${1:?usage: package.sh path/to/steam_api.dll}
 echo "fdafb7c65ec7d4182b42bf92cc8671c68e4dc547cc6e613899d2618a47eb65da  $DLL" | sha256sum -c -
-FIX=package/SCCTFix-d3d9.dll   # the FPS fix (d3d9.dll), pinned
+FIX=package/SCCTFix-d3d9.dll   # the SCCT Fix (d3d9.dll), pinned
 echo "2f05d8e9e7aaf750eb2889c7ba57dd453820e3a794b9ba74c43730446a84cae9  $FIX" | sha256sum -c -
 sh build_windows.sh
 D=dist/SCCTLink-$VER

@@ -96,6 +96,6 @@ They cover: LAN discovery by broadcast in both directions; the game's real encry
 
 ## Credits
 
-By KaZ. The relay pattern comes from the [Co-op Anything](https://github.com/cranebeaker/coop-anything) playbook (Steam Spacewar networking) and CoFLink. Splinter Cell: Chaos Theory is by Ubisoft. This project is not affiliated with Ubisoft or Valve.
+By [Mhdshehri](https://github.com/Mhdshehri). The relay pattern comes from the [Co-op Anything](https://github.com/cranebeaker/coop-anything) playbook (Steam Spacewar networking) and CoFLink. Splinter Cell: Chaos Theory is by Ubisoft. This project is not affiliated with Ubisoft or Valve.
 
 SCCTLink's own code is released under the [MIT license](LICENSE). `steam_api.dll`, which ships in the release zip, is Valve Corporation's Steamworks redistributable (from Steamworks.NET 2025.164.1). It is not covered by the MIT license; it is distributed under the Steamworks SDK terms.
