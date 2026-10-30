@@ -38,7 +38,7 @@ mkdef ws2_32 WSAStartup@8 socket@12 bind@12 connect@12 listen@8 accept@12 send@1
     sendto@24 recvfrom@24 select@20 closesocket@4 ioctlsocket@12 getsockname@12 setsockopt@20 \
     gethostname@8 gethostbyname@4 WSAGetLastError@0 WSAIoctl@36
 mkdef msvcrt printf _vsnprintf strlen strcmp strncmp strchr strstr memcpy memmove memset memcmp \
-    atoi getenv remove rename malloc calloc realloc free fopen fread fwrite fclose fgets fflush exit __iob_func \
+    getenv remove rename malloc calloc realloc free fopen fread fwrite fclose fgets fflush exit __iob_func \
     _kbhit _getch _ui64toa _strtoui64 __getmainargs
 
 # icon, manifest (modern look, sharp text on high-DPI screens) and version info

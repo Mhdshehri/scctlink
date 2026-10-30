@@ -144,7 +144,6 @@ IMP void *WINAPI GetProcAddress(void *mod, const char *name);
 #define MB_YESNO 0x4
 #define MB_ICONQUESTION 0x20
 #define IDYES 6
-#define COLOR_BTNFACE 15
 #define LOGPIXELSY 90
 #define FW_NORMAL 400
 #define FW_BOLD 700
@@ -665,7 +664,7 @@ static void build_howto(const UiState *s, char *o, int n)
             "- Only people on your Steam friends list can link. Kick removes someone until you click Stop.\r\n"
             "- Game running as administrator? Then run SCCTLink as administrator too (both the same).\r\n"
             "- Same SCCTLink version, same game files and same mods on every PC (see the Mods tab).\r\n"
-            "- Cap the frame rate at 60 on every PC. Don't Alt+Tab during co-op.",
+            "- Co-op: click \"Install SCCT Fix\" in the Settings tab on every PC (60 FPS cap), or it disconnects.",
             s->versus ? "VERSUS" : "CO-OP",
             mark(s, 0, open), mark(s, 1, open), game, create, mark(s, 2, open), mark(s, 3, open));
     } else if (s->mode == MODE_JOIN) {
@@ -679,7 +678,7 @@ static void build_howto(const UiState *s, char *o, int n)
             "- Keep SCCTLink open the whole time you play.\r\n"
             "- Game running as administrator? Then run SCCTLink as administrator too (both the same).\r\n"
             "- Same SCCTLink version, same game files and same mods as the host (see the Mods tab).\r\n"
-            "- Cap the frame rate at 60. Don't Alt+Tab during co-op.\r\n"
+            "- Co-op: click \"Install SCCT Fix\" in the Settings tab (the host needs it too), or it disconnects.\r\n"
             "- Can't join? Click Details, then Log -> Copy log, and send it with the host's log.",
             s->versus ? "VERSUS" : "CO-OP",
             mark(s, 0, open), mark(s, 1, open), mark(s, 2, open), game, joinm, mark(s, 3, open));
@@ -693,7 +692,8 @@ static void build_howto(const UiState *s, char *o, int n)
             "Everyone needs: Steam running and online, Splinter Cell: Chaos Theory, the same\r\n"
             "SCCTLink version, and to be Steam friends with the host.\r\n\r\n"
             "Before your first game: Steam -> right-click the game -> Properties -> Installed Files\r\n"
-            "-> Verify integrity of game files. Use the same mods on every PC.\r\n\r\n"
+            "-> Verify integrity of game files. Use the same mods on every PC.\r\n"
+            "For co-op, everyone clicks \"Install SCCT Fix\" in the Settings tab (with the game closed).\r\n\r\n"
             "In the steps, [x] = done and [>] = what to do now.\r\n"
             "Everything SCCTLink does is in the Log (a dot on Log = something needs a look).\r\n"
             "The Mods tab compares your game files and mods with your friend's when you link.");
@@ -769,11 +769,11 @@ static void show_settings(const UiSettings *n)
     if (!n->have_fov && !n->friend_) set_text(ID_SF_FOV, "(not in the game's files)");
     EnableWindow(g_c[ID_SET_FOV], n->have_fov);
     EnableWindow(g_c[ID_SET_WS], n->have_ws);
-    set_text(ID_SET_FIX, n->fpsfix == 1 ? "Remove SCCT Fix" : "Install SCCT Fix");
+    set_text(ID_SET_FIX, n->scctfix == 1 ? "Remove SCCT Fix" : "Install SCCT Fix");
     g_set_warn = n->note_warn;
     if (n->note[0]) set_text(ID_SET_NOTE, n->note);
     else if (!n->found) set_text(ID_SET_NOTE, "The game's folder wasn't found (only Steam copies of the game can be changed).");
-    else if (n->fpsfix != 1) set_text(ID_SET_NOTE, "SCCT Fix: 60 FPS cap, borderless, Alt+Tab, crash log. Co-op needs it on both PCs (close the game first).");
+    else if (n->scctfix != 1) set_text(ID_SET_NOTE, "SCCT Fix: 60 FPS cap, borderless, Alt+Tab, crash log. Co-op needs it on both PCs (close the game first).");
     else set_text(ID_SET_NOTE, "SCCT Fix installed (60 FPS cap, borderless, Alt+Tab, crash log). Close the game before changing settings.");
     RedrawWindow(g_c[ID_SET_NOTE], 0, 0, 0x1 | 0x4);
 }
@@ -1019,7 +1019,7 @@ static void on_command(int id, int code)
     case ID_SET_FIX:
         g_set_warn = false;
         set_text(ID_SET_NOTE, "Working...");
-        push_cmd(CMD_FPSFIX, g_set.fpsfix == 1 ? 0 : 1);
+        push_cmd(CMD_SCCTFIX, g_set.scctfix == 1 ? 0 : 1);
         break;
     case ID_RECHECK: push_cmd(CMD_RECHECK, 0); break;
     case ID_COPYLOG:
@@ -1132,7 +1132,7 @@ int main(int argc, char **argv)
     AdjustWindowRectEx(&r, style, 0, 0);
     int ww = r.right - r.left, wh = r.bottom - r.top;
     int x = (GetSystemMetrics(0) - ww) / 2, y = (GetSystemMetrics(1) - wh) / 2;
-    g_wnd = CreateWindowExW(0, wc.className, WTEXT("SCCTLink 0.9.1 - Splinter Cell: Chaos Theory"), style, x < 0 ? 0 : x,
+    g_wnd = CreateWindowExW(0, wc.className, WTEXT("SCCTLink 0.9.2 - Splinter Cell: Chaos Theory"), style, x < 0 ? 0 : x,
                             y < 0 ? 0 : y, ww, wh, 0, 0, inst, 0);
     if (!g_wnd) return 1;
     build();

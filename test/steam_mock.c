@@ -38,13 +38,19 @@ static int ice_off = -1; /* SetGlobalConfigValueInt32(P2P_Transport_ICE_Enable) 
 static u64 next_call = 1000;
 
 typedef struct Msg { void *data; int size; u64 sender; int ch; u64 due; struct Msg *next; } Msg;
-static Msg *held, *ready[4], *delayed;
+static Msg *held, *ready[3], *delayed;
 static u64 mono_ms(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return (u64)t.tv_sec * 1000 + (u64)t.tv_nsec / 1000000; }
 
 typedef struct Cb { int id; uint8_t p[300]; int size; u64 call; struct Cb *next; } Cb;
 static Cb *cbq, *cur, *results;
 
-static void addr_of(u64 id, struct sockaddr_un *a) { memset(a, 0, sizeof *a); a->sun_family = AF_UNIX; snprintf(a->sun_path, sizeof a->sun_path, "%s/s%llu", dir, (unsigned long long)id); }
+static void addr_of(u64 id, struct sockaddr_un *a)
+{
+    memset(a, 0, sizeof *a);
+    a->sun_family = AF_UNIX;
+    int r = snprintf(a->sun_path, sizeof a->sun_path, "%s/s%llu", dir, (unsigned long long)id);
+    if (r < 0 || r >= (int)sizeof a->sun_path) { fprintf(stderr, "steam_mock: MOCK_DIR is too long\n"); exit(1); }
+}
 
 static void push_cb(int id, const void *p, int size, u64 call)
 {
@@ -224,7 +230,7 @@ static void poll_net(void)
     while ((r = recv(sock, b, sizeof b, 0)) > 0) {
         if (r < 18) continue;
         Msg *m = calloc(1, sizeof *m);
-        m->ch = b[0] < 4 ? b[0] : 0;
+        m->ch = b[0] < 3 ? b[0] : 0;
         memcpy(&m->sender, b + 2, 8);
         memcpy(&m->due, b + 10, 8);
         m->due += (u64)delay_ms;
@@ -484,6 +490,7 @@ static int m_ReceiveMessagesOnChannel(void *s, int ch, void **out, int max)
     (void)s;
     poll_net();
     int n = 0;
+    if (ch < 0 || ch > 2) return 0;
     while (ready[ch] && n < max) { out[n++] = ready[ch]; ready[ch] = ready[ch]->next; }
     return n;
 }

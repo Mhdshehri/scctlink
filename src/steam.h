@@ -82,8 +82,6 @@ u64 msg_sender(void *m);
 /* Callback ids */
 enum {
     CB_GameLobbyJoinRequested = 333,
-    CB_GameRichPresenceJoinRequested = 337,
-    CB_LobbyInvite = 503,
     CB_LobbyEnter = 504,
     CB_LobbyChatUpdate = 506,
     CB_LobbyCreated = 513,
