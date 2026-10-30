@@ -1,10 +1,10 @@
-# SCCTLink 0.9.3
+# SCCTLink 0.9.4
 
 Play **Splinter Cell: Chaos Theory** co-op (2 players) or Spies vs. Mercenaries / Versus (up to 4) with Steam friends: no VPN (no Hamachi, Radmin or ZeroTier), no port forwarding, no IP addresses.
 
 Chaos Theory's online servers are gone, so PC multiplayer only works in **LAN** mode. SCCTLink makes your friends' PCs look like they are on your LAN, and carries the game's traffic through Steam's relay network. The host invites the friend from Steam.
 
-**Download:** `SCCTLink-0.9.3.zip` from [Releases](../../releases). Both players unzip it and use the same version.
+**Download:** `SCCTLink-0.9.4.zip` from [Releases](../../releases). Both players unzip it and use the same version.
 
 ## How to play
 
@@ -16,6 +16,8 @@ Everyone double-clicks **SCCTLink.exe** (Windows asks for administrator rights: 
 4. **Friend:** click **Join a friend**, pick the host in the list and click **Join** (or **Refresh**, or paste the lobby code and click **Join this code**). When linked, start the game and join the host from its LAN list.
 
 Co-op lobbies hold 2 players, Versus lobbies 4. The **How to** tab ticks off the steps as they happen; **Log** shows everything (**Copy log** for bug reports). The host can **Kick** a friend.
+
+**Live stats** opens a small window that stays on top of the game: ping, packet loss and packets per second for each linked friend, so you can tell whether lag comes from the connection. Drag it anywhere; right-click it to close it.
 
 See [package/README.txt](package/README.txt) for the full guide, lag tips and troubleshooting.
 
@@ -31,13 +33,13 @@ Without it, co-op disconnects as soon as someone draws a weapon or does an actio
 
 ## Game files check (Mods tab)
 
-Co-op also disconnects when the two games differ (a mod on one PC only, another patch). Each SCCTLink lists its game folder (Steam copy): file names relative to the game folder, sizes, and SHA-256 of the program files (`System`, `scripts`, `Versus\System`). It sends the list to the other player and both see a checklist in the **Mods** tab (same settings, same game version, same mods, same game files) and the differences in the Log. The tab lists your own mods as soon as SCCTLink opens; the game doesn't have to be running. **Check again** redoes it after you change something.
+Co-op also disconnects when the two games differ (a mod on one PC only, another patch). Each SCCTLink lists its game folder (Steam copy): file names relative to the game folder, sizes, and SHA-256 of the program files (`System`, `scripts`, `Versus\System`). It sends the list to the other player and both see a checklist in the **Mods** tab (same settings, same game version, same mods, same game files) and the differences in the Log. The tab lists your own mods as soon as SCCTLink opens; the game doesn't have to be running. **Check again** redoes it after you change something. Checksums are kept in `scctlink_cache.txt` next to SCCTLink.exe (file name, size, modified time, checksum; no folder paths), so only files that changed are read again and SCCTLink opens quickly.
 
 Settings files (`.ini`), logs, saves, archives and SCCTLink's backups are left out as files. Instead the settings that matter are read and compared: resolution (shown only), FOV, FPS limits, the SCCT Fix and fullscreen (must match). They come from the game's `.ini` files (`System`, or `ProgramData\Ubisoft\...\SplinterCell3User.ini`) and the widescreen fix's `.ini`. Nothing else about the PC is sent.
 
 ## Settings tab
 
-Change resolution, FOV and FPS limit (and the widescreen fix's FOV factor, if it's installed) without editing `.ini` files. Your friend's values are shown beside yours; **Use friend's** copies them and **Apply** writes them. Only keys that already exist are changed and the rest of each file stays as it is. Close the game first (SCCTLink refuses while it runs, because the game writes its settings back when it exits). The first change to a file keeps the original next to it as `<name>.scctlink-backup`.
+Change resolution, FOV and FPS limit (and the widescreen fix's FOV factor, if it's installed) without editing `.ini` files. Your friend's values are shown beside yours; **Use friend's** copies them and **Apply** writes them. **Match friend** does it all in one click: your friend's resolution, FOV and FPS limits, plus the SCCT Fix if they have it. Only keys that already exist are changed and the rest of each file stays as it is. Close the game first (SCCTLink refuses while it runs, because the game writes its settings back when it exits). The first change to a file keeps the original next to it as `<name>.scctlink-backup`.
 
 ## How it works
 
@@ -66,7 +68,7 @@ The game's LAN protocol is not documented, so SCCTLink doesn't hard-code it:
 - The host only lets in players who are in the lobby **and** on the host's Steam friends list; the joiner only accepts the host it chose.
 - Only the game process can use the relay: packets from other programs, or from other PCs on your network, are dropped.
 - Oversized packets and floods are dropped.
-- SCCTLink doesn't inject anything into the game. It writes `steam_appid.txt` and `scctlink.log` (which never contains IP addresses) in its own folder. In the game folder it only writes when you click a button: **Apply** (the `.ini` files, with backups) and **Install/Remove SCCT Fix** (`System\d3d9.dll` and `StartupFullscreen`).
+- SCCTLink doesn't inject anything into the game. It writes `steam_appid.txt`, `scctlink.log` (which never contains IP addresses) and `scctlink_cache.txt` (game file checksums) in its own folder. In the game folder it only writes when you click a button: **Apply** (the `.ini` files, with backups) and **Install/Remove SCCT Fix** (`System\d3d9.dll` and `StartupFullscreen`).
 - `steam_api.dll` is Valve's signed redistributable from [Steamworks.NET 2025.164.1](https://github.com/rlabrecque/Steamworks.NET/releases/tag/2025.164.1). SCCTLink checks its SHA-256 (`fdafb7c65ec7d4182b42bf92cc8671c68e4dc547cc6e613899d2618a47eb65da`) and refuses any other file.
 - `SCCTLink.exe` imports only core Windows DLLs (kernel32, user32, gdi32, comctl32, shell32, ws2_32, msvcrt; winmm, iphlpapi, dwmapi and uxtheme are loaded from System32 only) plus the pinned `steam_api.dll`.
 
@@ -90,7 +92,7 @@ gcc -std=c11 -fsanitize=address,undefined -o build/scctlink_mock src/scctlink.c 
 sudo python3 test/run_tests.py   # prints ALL OK
 ```
 
-They cover: LAN discovery by broadcast in both directions; the game's real encrypted Net-Z discovery reply and joining at the address inside it; addresses swapped in checksummed game packets on both sides; a second network adapter's address inside an LZO-compressed message; message checksums; the host's address hidden in raw and text form; 2000 mixed-size packets exact and in order; a 300-packet level-load burst; relay delay; TCP streams with a 300 KB message; strangers blocked; programs other than the game blocked; quit and reconnect; invites; joining by short lobby code; Refresh; finding a host Steam shows in the game instead of Spacewar; foreign lobbies refused; join confirmation; kick; Versus with a host and two friends on three separate "PCs"; co-op/Versus lobbies kept apart; the game files check (a mod on one PC only, another patch, identical games, Check again); the settings comparison; the Settings tab (files written, backups kept, bad values refused); installing and removing the SCCT Fix (another d3d9.dll kept and put back); and 10% packet loss with 60 ms delay each way.
+They cover: LAN discovery by broadcast in both directions; the game's real encrypted Net-Z discovery reply and joining at the address inside it; addresses swapped in checksummed game packets on both sides; a second network adapter's address inside an LZO-compressed message; message checksums; the host's address hidden in raw and text form; 2000 mixed-size packets exact and in order; a 300-packet level-load burst; relay delay; TCP streams with a 300 KB message; strangers blocked; programs other than the game blocked; quit and reconnect; invites; joining by short lobby code; Refresh; finding a host Steam shows in the game instead of Spacewar; foreign lobbies refused; join confirmation; kick; Versus with a host and two friends on three separate "PCs"; co-op/Versus lobbies kept apart; the game files check (a mod on one PC only, another patch, identical games, Check again); the settings comparison; the Settings tab (files written, backups kept, bad values refused); installing and removing the SCCT Fix (another d3d9.dll kept and put back); Match friend (SCCT Fix and settings in one click); the live stats numbers; the checksum cache; and 10% packet loss with 60 ms delay each way.
 
 **Tested with the real game:** a host and a friend in different homes play co-op through SCCTLink with the SCCT Fix on both PCs: joining, shooting, jumping and changing maps without disconnects. `scctlink.log` shows where it stops if something goes wrong, including the last packets before a disconnect.
 

@@ -8,3 +8,4 @@ steam_appid.txt
 scctlink.log
 __pycache__/
 !package/SCCTFix-d3d9.dll
+scctlink_cache.txt

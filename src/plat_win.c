@@ -589,7 +589,7 @@ void dir_list(const char *dir, DirFn fn, void *ctx)
     if (h == (HANDLE)(intptr_t)-1) return;
     do {
         if (!strcmp(fd.name, ".") || !strcmp(fd.name, "..")) continue;
-        fn(ctx, fd.name, (fd.attr & 0x10) != 0, ((u64)fd.size_hi << 32) | fd.size_lo);
+        fn(ctx, fd.name, (fd.attr & 0x10) != 0, ((u64)fd.size_hi << 32) | fd.size_lo, ((u64)fd.t[5] << 32) | fd.t[4]); /* last write time */
     } while (FindNextFileA(h, &fd));
     FindClose(h);
 }

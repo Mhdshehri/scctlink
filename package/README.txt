@@ -1,4 +1,4 @@
-SCCTLink 0.9.3 - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
+SCCTLink 0.9.4 - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
 ==============================================================================
 
 No VPN (no Hamachi, Radmin or ZeroTier), no port forwarding, no IP addresses.
@@ -13,7 +13,7 @@ Both players need:
   * each other on their Steam friends list
   * this folder unzipped somewhere (Desktop is fine). Keep SCCTLink.exe,
     steam_api.dll and SCCTFix-d3d9.dll together.
-  * the SAME SCCTLink version (0.9.3).
+  * the SAME SCCTLink version (0.9.4).
 
 
 HOW TO PLAY
@@ -49,6 +49,9 @@ FRIEND(S)
        Co-op:  Co-op -> LAN -> Join game.    Versus: the LAN game list.
   3. Leave SCCTLink open while you play.
 
+Live stats = a small window that stays on top of the game with the ping,
+packet loss and packets per second for each linked friend. Drag it anywhere;
+right-click it (or click the button again) to close it.
 Other buttons: Details = ping, packet loss, ports (in the Log). Stop = back
 to the start. Host: pick a friend in the list and click Kick to remove them
 (they can't link again until you click Stop).
@@ -89,6 +92,8 @@ Settings = change resolution, FOV and FPS limit (and the widescreen fix's
            changed, the original is kept next to it as
            <name>.scctlink-backup - to undo, delete the changed file and
            remove ".scctlink-backup" from the backup's name.
+           "Match friend" does it all in one click: your friend's
+           resolution, FOV and FPS limits, plus the SCCT Fix if they have it.
            Also here: "Install SCCT Fix" / "Remove SCCT Fix".
 
 
@@ -154,7 +159,8 @@ SAFETY
     whatever Steam's own "IP sharing" setting is. If the game writes your
     LAN address into a packet, SCCTLink replaces it before it leaves your PC.
   * No ports are opened and no router settings change. SCCTLink writes
-    steam_appid.txt and scctlink.log in its own folder. In the game folder it
+    steam_appid.txt, scctlink.log and scctlink_cache.txt (checksums of the game
+    files, so it opens quickly) in its own folder. In the game folder it
     only writes when you click "Apply" (the .ini files, with backups) or
     "Install/Remove SCCT Fix" (System\d3d9.dll and StartupFullscreen).
   * Only the host's Steam friends who joined the lobby get through (others
@@ -224,6 +230,10 @@ StartupFullscreen when the DLL is already there, guides updated.
 0.9.3: security review: .ini files are written to a new file first and then
 swapped in (a failed write never leaves half a file), oversized .ini files
 are left alone, less memory for a stalled TCP stream.
+0.9.4: opens faster (game file checksums are cached and only changed files
+are read again), "Match friend" (the friend's settings and the SCCT Fix in
+one click), "Live stats" window (ping, packet loss, packets per second, on
+top of the game).
 
 Tested end to end on a simulated network: separate "PCs", a stand-in for the
 game that finds LAN games by broadcast (including the real game's encrypted

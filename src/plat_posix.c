@@ -28,7 +28,7 @@ void plat_init(void)
     setvbuf(stdout, 0, _IONBF, 0);
 }
 
-const char *exe_dir(void) { return "."; }
+const char *exe_dir(void) { const char *d = getenv("MOCK_EXE_DIR"); return d && *d ? d : "."; } /* tests: each "PC" has its own SCCTLink folder */
 
 u64 now_ms(void)
 {
@@ -361,7 +361,7 @@ void dir_list(const char *dir, DirFn fn, void *ctx)
         snprintf(path, sizeof path, "%s/%s", dir, e->d_name);
         struct stat st;
         if (stat(path, &st) != 0) continue;
-        fn(ctx, e->d_name, S_ISDIR(st.st_mode), (u64)st.st_size);
+        fn(ctx, e->d_name, S_ISDIR(st.st_mode), (u64)st.st_size, (u64)st.st_mtim.tv_sec * 1000000000u + (u64)st.st_mtim.tv_nsec);
     }
     closedir(d);
 }

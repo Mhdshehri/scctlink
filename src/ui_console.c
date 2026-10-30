@@ -6,7 +6,7 @@
  * Keys (one per line on stdin): L paste lobby code, ^V join the code on the
  * clipboard, S status, D details, G start game, R refresh, V/C switch to
  * Versus/Co-op, X stop, H host, J join, K kick, M check the game files again,
- * A apply settings (next line: width height fov fps wsfactor*100), F SCCT Fix
+ * W match friend, A apply settings (next line: width height fov fps wsfactor*100), F SCCT Fix
  * (next line: 1 install, 0 remove), Q quit - the window's buttons. */
 #include "ui.h"
 #include "plat.h"
@@ -19,7 +19,11 @@ void ui_log(const char *line)
     fflush(0);
 }
 
-void ui_state(const UiState *s) { (void)s; }
+void ui_state(const UiState *s)
+{
+    static u64 last;
+    if (s->stats[0] && now_ms() - last > 3000) { printf("[stats] %s\n", s->stats); fflush(0); last = now_ms(); }
+}
 void ui_settings(const UiSettings *s)
 {
     printf("[settings] scctfix %d mine %dx%d fov %d fps %d ws %d", s->scctfix, s->w, s->h, s->fov, s->fps, s->wsfov);
@@ -94,6 +98,7 @@ bool ui_poll(Cmd *c)
     case 'v': case 'V': c->kind = CMD_SET_VERSUS; c->arg = 1; break;
     case 'c': case 'C': c->kind = CMD_SET_VERSUS; c->arg = 0; break;
     case 'm': case 'M': c->kind = CMD_RECHECK; break;
+    case 'w': case 'W': c->kind = CMD_MATCH_FRIEND; break;
     case 'f': case 'F': /* the Settings tab's SCCT Fix button: then "1" (install) or "0" (remove) */
         c->kind = CMD_SCCTFIX;
         c->arg = read_line(line, sizeof line) && line[0] == '1';
