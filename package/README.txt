@@ -64,6 +64,9 @@ Co-op disconnects when the two games aren't the same: install the same mods
 (same versions) on both PCs, or remove them on both. Settings files (.ini)
 are not compared. Only file names relative to the game folder, sizes and
 checksums are sent - nothing about your PC.
+SCCTLink asks for administrator rights when it starts (Windows' "Do you want
+to allow..." prompt): the Settings tab writes the game's .ini files, which
+are inside Program Files.
 SETTINGS TAB: next to "Mods". Change the game's resolution, FOV and FPS
 limit (and the widescreen fix's FOV factor, if it's installed) without
 editing .ini files. Your friend's values are shown next to yours; "Use
