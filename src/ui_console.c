@@ -18,6 +18,13 @@ void ui_log(const char *line)
 }
 
 void ui_state(const UiState *s) { (void)s; }
+void ui_settings(const UiSettings *s)
+{
+    printf("[settings] mine %dx%d fov %d fps %d ws %d", s->w, s->h, s->fov, s->fps, s->wsfov);
+    if (s->friend_) printf(" | %s %dx%d fov %d fps %d ws %d", s->friend_name, s->fw, s->fh, s->ffov, s->ffps, s->fwsfov);
+    printf("\n");
+    fflush(0);
+}
 void ui_mods(const char *text, bool warn)
 {
     printf("[mods%s]\n", warn ? " !" : "");
@@ -85,6 +92,21 @@ bool ui_poll(Cmd *c)
     case 'v': case 'V': c->kind = CMD_SET_VERSUS; c->arg = 1; break;
     case 'c': case 'C': c->kind = CMD_SET_VERSUS; c->arg = 0; break;
     case 'm': case 'M': c->kind = CMD_RECHECK; break;
+    case 'a': case 'A': { /* the Settings tab's Apply: "width height fov fps wsfactor*100" */
+        int v[5] = { 0, 0, 0, 0, 0 };
+        if (read_line(line, sizeof line)) {
+            int k = 0;
+            for (char *p = line; *p && k < 5;) {
+                while (*p == ' ') p++;
+                if (!*p) break;
+                v[k++] = atoi(p);
+                while (*p && *p != ' ') p++;
+            }
+        }
+        c->kind = CMD_APPLY_SETTINGS;
+        c->arg = settings_pack(v[0], v[1], v[2], v[3], v[4]);
+        break;
+    }
     case KEY_PASTE:
         if (clipboard_get(line, sizeof line) > 0) {
             c->kind = CMD_JOIN_LOBBY;

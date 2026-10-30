@@ -1,4 +1,4 @@
-SCCTLink 0.8.4-vpn - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
+SCCTLink 0.8.5-vpn - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
 ==============================================================================
 
 No VPN (no Hamachi, Radmin or ZeroTier), no port forwarding, no IP addresses.
@@ -13,7 +13,7 @@ Both players need:
   * each other on their Steam friends list
   * this folder unzipped somewhere (Desktop is fine). Keep SCCTLink.exe and
     steam_api.dll together.
-  * the SAME SCCTLink version (0.8.4-vpn) - older versions can't link with it.
+  * the SAME SCCTLink version (0.8.5-vpn) - older versions can't link with it.
 
 
 VPN MODE (EXPERIMENTAL BUILD)
@@ -92,6 +92,15 @@ Co-op disconnects when the two games aren't the same: install the same mods
 (same versions) on both PCs, or remove them on both. Settings files (.ini)
 are not compared. Only file names relative to the game folder, sizes and
 checksums are sent - nothing about your PC.
+SETTINGS TAB: next to "Mods". Change the game's resolution, FOV and FPS
+limit (and the widescreen fix's FOV factor, if it's installed) without
+editing .ini files. Your friend's values are shown next to yours; "Use
+friend's" copies them into the fields, "Apply" saves. Close Splinter Cell
+first (it writes its settings back when it exits). The first time a file is
+changed, the original is kept next to it as <name>.scctlink-backup - to undo,
+delete the changed file and remove ".scctlink-backup" from the backup's name.
+After saving, the game files check runs again, so your friend sees the new
+values too.
 Other buttons: Details = ping, packet loss, ports (in the Log). Stop = back
 to the start. Host: pick a friend in the list and click Kick to remove them
 (they can't link again until you click Stop).
@@ -188,7 +197,7 @@ TROUBLESHOOTING
     SCCTLink as administrator too (right-click SCCTLink.exe).
 
 
-VERSION 0.8.4-vpn - WHAT IS TESTED
+VERSION 0.8.5-vpn - WHAT IS TESTED
 ----------------------------
 New in 0.6: the friend could see the host's game in the LAN list but not
 join. The game hides the host's real address inside an encrypted packet, so
@@ -221,6 +230,8 @@ own IPv6 chatter on the adapter is blocked without filling the log.
 0.8.4-vpn: the Mods tab shows and compares resolution, FOV and FPS limits. Tested on a
 simulated network (virtual adapters on two PCs, the game's discovery, Net-Z
 join, UDP and TCP, untouched); not yet with the real game on Windows.
+0.8.5-vpn: the Settings tab (change resolution, FOV and FPS limit, with
+backups of the original files).
 
 Tested end to end on a simulated network: two separate "PCs", a stand-in for
 the game that finds LAN games by broadcast (including the real game's

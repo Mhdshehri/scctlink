@@ -155,7 +155,11 @@ IMP void *WINAPI GetProcAddress(void *mod, const char *name);
 enum {
     ID_HOST = 101, ID_JOIN, ID_STOP, ID_STATUS, ID_LOBBY, ID_COPYID, ID_JOINID,
     ID_LISTLABEL, ID_LIST, ID_ACTION, ID_LAUNCH, ID_COPYCONN, ID_LOG, ID_TITLE, ID_REFRESH, ID_ACCENT, ID_THEME, ID_TAB_HOWTO, ID_TAB_LOG, ID_COPYLOG, ID_HOWTO,
-    ID_LOBBYLABEL, ID_TAB_MODS, ID_MODS, ID_RECHECK, ID_GAMEMODE,
+    ID_LOBBYLABEL, ID_TAB_MODS, ID_MODS, ID_RECHECK,
+    /* the Settings tab */
+    ID_TAB_SET, ID_SET_NOTE, ID_SL_RES, ID_SL_X, ID_SL_FOV, ID_SL_FPS, ID_SL_WS, ID_SET_W, ID_SET_H, ID_SET_FOV, ID_SET_FPS,
+    ID_SET_WS, ID_SF_RES, ID_SF_FOV, ID_SF_FPS, ID_SF_WS, ID_SET_FRIEND, ID_SET_APPLY,
+    ID_GAMEMODE, /* keep last */
 };
 
 typedef struct { UINT type, id, item, action, state; HWND hwnd; HDC dc; RECT rc; uintptr_t data; } DrawItem;
@@ -174,6 +178,8 @@ static bool g_list_dirty[2];
 static bool g_alert, g_warned; /* g_warned: a "!" line arrived */
 static char g_mods_text[16384];
 static bool g_mods_dirty, g_mods_warn;
+static UiSettings g_set_in;
+static bool g_set_dirty;
 static Cmd g_cmds[32];
 static int g_cmd_head, g_cmd_tail;
 
@@ -197,6 +203,14 @@ void ui_mods(const char *text, bool warn)
     sfmt(g_mods_text, sizeof g_mods_text, "%s", text);
     g_mods_dirty = true;
     g_mods_warn = warn;
+    LeaveCriticalSection(&g_cs);
+}
+
+void ui_settings(const UiSettings *s)
+{
+    EnterCriticalSection(&g_cs);
+    g_set_in = *s;
+    g_set_dirty = true;
     LeaveCriticalSection(&g_cs);
 }
 
@@ -276,10 +290,12 @@ static u64 g_close_ms;
 static UiPerson g_view[2][64]; /* what the list box shows (GUI thread copy) */
 static int g_nview[2];
 static int g_list_shown = -1;
-enum { TAB_HOWTO, TAB_LOG, TAB_MODS };
+enum { TAB_HOWTO, TAB_LOG, TAB_MODS, TAB_SET };
 static int g_tab;          /* what the box shows: "How to", the log or the mods checklist */
 static bool g_log_unseen;  /* a warning arrived while "How to" was shown: red dot on Log */
 static bool g_mods_unseen; /* the game files differ: dot on "Mods" */
+static UiSettings g_set;   /* what the Settings tab shows */
+static bool g_set_warn;    /* its note is a warning */
 
 static int S_(int v) { return v * g_dpi / 96; }
 
@@ -304,8 +320,8 @@ static const Theme LIGHT = { false,
 static Theme T;
 /* text boxes and the list sit inside rounded frames drawn in the theme's
    colors (Windows' own borders are black in both themes) */
-typedef struct { int id, x, y, w, h; } Frame;
-static Frame g_frames[3];
+typedef struct { int id, x, y, w, h, tab; } Frame; /* tab: drawn only on that tab (-1: always) */
+static Frame g_frames[12];
 static int g_nframes;
 static HBRUSH g_br_bg, g_br_panel, g_br_accent;
 
@@ -316,6 +332,7 @@ static void draw_frames(HDC dc)
     HANDLE ob = SelectObject(dc, b), op = SelectObject(dc, p);
     for (int i = 0; i < g_nframes; i++) {
         Frame *f = &g_frames[i];
+        if (f->tab >= 0 && f->tab != g_tab) continue;
         RoundRect(dc, S_(f->x), S_(f->y), S_(f->x + f->w), S_(f->y + f->h), S_(8), S_(8));
     }
     SelectObject(dc, ob);
@@ -384,8 +401,8 @@ static void set_theme(bool dark)
 }
 
 static bool is_primary(UINT id) { return id == ID_HOST || id == ID_JOIN || id == ID_ACTION; }
-static bool is_tab(UINT id) { return id == ID_TAB_HOWTO || id == ID_TAB_LOG || id == ID_TAB_MODS; }
-static int tab_of(UINT id) { return id == ID_TAB_LOG ? TAB_LOG : id == ID_TAB_MODS ? TAB_MODS : TAB_HOWTO; }
+static bool is_tab(UINT id) { return id == ID_TAB_HOWTO || id == ID_TAB_LOG || id == ID_TAB_MODS || id == ID_TAB_SET; }
+static int tab_of(UINT id) { return id == ID_TAB_LOG ? TAB_LOG : id == ID_TAB_MODS ? TAB_MODS : id == ID_TAB_SET ? TAB_SET : TAB_HOWTO; }
 
 /* "How to" / "Log": the chosen one looks like a raised tab with a green line under it */
 static void draw_tab(DrawItem *d)
@@ -482,8 +499,12 @@ static void draw_list_item(DrawItem *d)
 static LRESULT control_colors(UINT msg, HDC dc, HWND ctl_)
 {
     if (ctl_ == g_c[ID_ACCENT]) return (LRESULT)g_br_accent;
-    bool box = msg != WM_CTLCOLORSTATIC || ctl_ == g_c[ID_LOG] || ctl_ == g_c[ID_LOBBY] || ctl_ == g_c[ID_HOWTO] || ctl_ == g_c[ID_MODS];
-    SetTextColor(dc, (ctl_ == g_c[ID_LISTLABEL] || ctl_ == g_c[ID_LOBBYLABEL]) ? T.dim : T.text);
+    int sid = 0; /* a label on the Settings tab? */
+    for (int i = ID_SET_NOTE; i <= ID_SET_APPLY && !sid; i++) if (ctl_ == g_c[i]) sid = i;
+    bool box = msg != WM_CTLCOLORSTATIC || ctl_ == g_c[ID_LOG] || ctl_ == g_c[ID_LOBBY] || ctl_ == g_c[ID_HOWTO] || ctl_ == g_c[ID_MODS] || sid;
+    bool dim = ctl_ == g_c[ID_LISTLABEL] || ctl_ == g_c[ID_LOBBYLABEL] || (sid >= ID_SF_RES && sid <= ID_SF_WS) ||
+               (sid == ID_SET_NOTE && !g_set_warn);
+    SetTextColor(dc, sid == ID_SET_NOTE && g_set_warn ? T.status : dim ? T.dim : T.text);
     SetBkColor(dc, box ? T.panel : T.bg);
     return (LRESULT)(box ? g_br_panel : g_br_bg);
 }
@@ -523,9 +544,10 @@ static HWND ctl(int id, const WCHAR *cls, const WCHAR *text, DWORD style, DWORD 
 static HWND ctl(int id, const WCHAR *cls, const WCHAR *text, DWORD style, DWORD ex, int x, int y, int w, int h, HFONT f);
 
 /* a box (text box or list) inside a drawn frame; ix/iy = space inside the frame */
+static int g_frame_tab = -1; /* the tab the next framed() boxes belong to */
 static void framed(int id, const WCHAR *cls, DWORD style, int x, int y, int w, int h, int ix, int iy)
 {
-    if (g_nframes < 3) g_frames[g_nframes++] = (Frame){ id, x, y, w, h };
+    if (g_nframes < 12) g_frames[g_nframes++] = (Frame){ id, x, y, w, h, g_frame_tab };
     ctl(id, cls, WTEXT(""), style, 0, x + ix, y + iy, w - 2 * ix, h - 2 * iy, g_font);
 }
 
@@ -556,12 +578,35 @@ static void build(void)
     ctl(ID_TAB_LOG, B, WTEXT("Log"), OD, 0, 114, 350, 80, 28, g_font);
     ctl(ID_TAB_MODS, B, WTEXT("Mods"), OD, 0, 198, 350, 84, 28, g_font);
     ctl(ID_COPYLOG, B, WTEXT("Copy log"), OD, 0, 486, 350, 100, 26, g_font);
+    ctl(ID_TAB_SET, B, WTEXT("Settings"), OD, 0, 286, 350, 96, 28, g_font);
     ctl(ID_RECHECK, B, WTEXT("Check again"), OD, 0, 466, 350, 120, 26, g_font);
     /* one box: "How to" and the log take turns in it */
     framed(ID_LOG, E, WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY, 14, 384, 572, 180, 7, 5);
     ctl(ID_HOWTO, E, WTEXT(""), WS_VSCROLL | ES_MULTILINE | ES_READONLY, 0, 14 + 7, 384 + 5, 572 - 14, 180 - 10, g_font);
     ctl(ID_MODS, E, WTEXT("Checking the game files..."), WS_VSCROLL | ES_MULTILINE | ES_READONLY, 0, 14 + 7, 384 + 5, 572 - 14, 180 - 10, g_font);
     SendMessageW(g_c[ID_LOG], EM_SETLIMITTEXT, 0x7FFFFFFE, 0);
+    /* "Settings": the same box holds the game's resolution / FOV / FPS limit */
+    const DWORD NUM = WS_TABSTOP | ES_AUTOHSCROLL | 0x2000 /* ES_NUMBER */, ELL = 0x4000 /* SS_ENDELLIPSIS */;
+    ctl(ID_SET_NOTE, T_, WTEXT(""), ELL, 0, 28, 392, 548, 18, g_font);
+    static const struct { int label, fid; const WCHAR *text; } rows[4] = {
+        { ID_SL_RES, ID_SF_RES, WTEXT("Resolution") }, { ID_SL_FOV, ID_SF_FOV, WTEXT("FOV") },
+        { ID_SL_FPS, ID_SF_FPS, WTEXT("FPS limit") }, { ID_SL_WS, ID_SF_WS, WTEXT("Widescreen FOV factor") },
+    };
+    g_frame_tab = TAB_SET;
+    for (int i = 0; i < 4; i++) {
+        int y = 416 + i * 30;
+        ctl(rows[i].label, T_, rows[i].text, ELL, 0, 28, y + 5, 150, 18, g_font);
+        ctl(rows[i].fid, T_, WTEXT(""), ELL, 0, 350, y + 5, 226, 18, g_font);
+    }
+    framed(ID_SET_W, E, NUM, 180, 414, 64, 26, 6, 5);
+    ctl(ID_SL_X, T_, WTEXT("x"), 0, 0, 250, 419, 12, 18, g_font);
+    framed(ID_SET_H, E, NUM, 264, 414, 64, 26, 6, 5);
+    framed(ID_SET_FOV, E, NUM, 180, 444, 64, 26, 6, 5);
+    framed(ID_SET_FPS, E, NUM, 180, 474, 64, 26, 6, 5);
+    framed(ID_SET_WS, E, WS_TABSTOP | ES_AUTOHSCROLL, 180, 504, 64, 26, 6, 5);
+    g_frame_tab = -1;
+    ctl(ID_SET_FRIEND, B, WTEXT("Use friend's"), OD, 0, 346, 534, 112, 24, g_font);
+    ctl(ID_SET_APPLY, B, WTEXT("Apply"), OD, 0, 466, 534, 110, 24, g_bold);
 }
 
 static void append_log(const char *utf8)
@@ -664,6 +709,10 @@ static void show_tab(int tab)
     ShowWindow(g_c[ID_MODS], tab == TAB_MODS ? 5 : 0);
     ShowWindow(g_c[ID_COPYLOG], tab == TAB_LOG ? 5 : 0);
     ShowWindow(g_c[ID_RECHECK], tab == TAB_MODS ? 5 : 0);
+    for (int i = ID_SET_NOTE; i <= ID_SET_APPLY; i++) ShowWindow(g_c[i], tab == TAB_SET ? 5 : 0);
+    RedrawWindow(g_c[ID_TAB_SET], 0, 0, 0x1 | 0x4);
+    RECT box = { S_(14), S_(384), S_(586), S_(564) }; /* the box's frames */
+    RedrawWindow(g_wnd, &box, 0, 0x1 | 0x4 | 0x80);
     RedrawWindow(g_c[ID_TAB_HOWTO], 0, 0, 0x1 | 0x4);
     RedrawWindow(g_c[ID_TAB_LOG], 0, 0, 0x1 | 0x4);
     RedrawWindow(g_c[ID_TAB_MODS], 0, 0, 0x1 | 0x4);
@@ -680,6 +729,98 @@ static void update_howto(void)
     static WCHAR w[4096];
     build_howto(&g_shown, t, sizeof t);
     SetWindowTextW(g_c[ID_HOWTO], wide(t, w, 4096));
+}
+
+static void set_num(int id, int v)
+{
+    char b[16] = "";
+    if (v > 0) sfmt(b, sizeof b, "%d", v);
+    set_text(id, b);
+}
+static void set_ws(int id, int v)
+{
+    char b[16] = "";
+    if (v > 0) sfmt(b, sizeof b, "%d.%02d", v / 100, v % 100);
+    set_text(id, b);
+}
+
+/* new values from the engine: fill the fields only when this PC's values changed
+   (so what the player is typing isn't overwritten when a friend links) */
+static void show_settings(const UiSettings *n)
+{
+    UiSettings o = g_set;
+    bool first = !o.found && !o.w && !o.fov && !o.fps;
+    g_set = *n;
+    if (first || o.w != n->w || o.h != n->h) { set_num(ID_SET_W, n->w); set_num(ID_SET_H, n->h); }
+    if (first || o.fov != n->fov) set_num(ID_SET_FOV, n->fov);
+    if (first || o.fps != n->fps) set_num(ID_SET_FPS, n->fps);
+    if (first || o.wsfov != n->wsfov) set_ws(ID_SET_WS, n->wsfov);
+    char b[160];
+    const char *who = n->friend_name[0] ? n->friend_name : "friend";
+#define FR(id, have, ...) do { if (!n->friend_) b[0] = 0; else if (have) sfmt(b, sizeof b, __VA_ARGS__); \
+                               else sfmt(b, sizeof b, "%s: not set", who); set_text(id, b); } while (0)
+    FR(ID_SF_RES, n->fw && n->fh, "%s: %dx%d", who, n->fw, n->fh);
+    FR(ID_SF_FOV, n->ffov, "%s: %d%s", who, n->ffov, n->ffov != n->fov ? "  <- must match" : "");
+    FR(ID_SF_FPS, n->ffps, "%s: %d%s", who, n->ffps, n->ffps != n->fps ? "  <- must match" : "");
+    FR(ID_SF_WS, n->fwsfov, "%s: %d.%02d%s", who, n->fwsfov / 100, n->fwsfov % 100, n->fwsfov != n->wsfov ? "  <- must match" : "");
+#undef FR
+    if (!n->have_ws && !n->friend_) set_text(ID_SF_WS, "(widescreen fix not installed)");
+    if (!n->have_fov && !n->friend_) set_text(ID_SF_FOV, "(not in the game's files)");
+    EnableWindow(g_c[ID_SET_FOV], n->have_fov);
+    EnableWindow(g_c[ID_SET_WS], n->have_ws);
+    g_set_warn = n->note_warn;
+    if (n->note[0]) set_text(ID_SET_NOTE, n->note);
+    else if (!n->found) set_text(ID_SET_NOTE, "The game's folder wasn't found (only Steam copies of the game can be changed).");
+    else set_text(ID_SET_NOTE, "Close Splinter Cell first. FOV and the FPS limit must match your friend's.");
+    RedrawWindow(g_c[ID_SET_NOTE], 0, 0, 0x1 | 0x4);
+}
+
+static int edit_num(int id, bool ws)
+{
+    WCHAR w[16];
+    int n = GetWindowTextW(g_c[id], w, 16), v = 0, f = 0, d = 0;
+    int i = 0;
+    while (i < n && w[i] == ' ') i++;
+    for (; i < n && w[i] >= '0' && w[i] <= '9'; i++) if (v < 100000) v = v * 10 + (w[i] - '0');
+    if (!ws) return v;
+    if (i < n && (w[i] == '.' || w[i] == ',')) for (i++; i < n && w[i] >= '0' && w[i] <= '9'; i++) if (d < 2) { f = f * 10 + (w[i] - '0'); d++; }
+    while (d < 2) { f *= 10; d++; }
+    return v * 100 + f;
+}
+
+static void apply_clicked(void)
+{
+    int w = edit_num(ID_SET_W, false), h = edit_num(ID_SET_H, false), fov = edit_num(ID_SET_FOV, false),
+        fps = edit_num(ID_SET_FPS, false), ws = edit_num(ID_SET_WS, true);
+    /* only what changed (0 = leave it) */
+    if (w == g_set.w && h == g_set.h) w = h = 0;
+    if (fov == g_set.fov || !g_set.have_fov) fov = 0;
+    if (fps == g_set.fps) fps = 0;
+    if (ws == g_set.wsfov || !g_set.have_ws) ws = 0;
+    if (w > 8191 || h > 8191 || fov > 255 || fps > 1023 || ws > 4095) {
+        g_set_warn = true;
+        set_text(ID_SET_NOTE, "One of the values is too big.");
+        return;
+    }
+    if ((w && !h) || (h && !w)) {
+        g_set_warn = true;
+        set_text(ID_SET_NOTE, "Type both the width and the height.");
+        return;
+    }
+    g_set_warn = false;
+    set_text(ID_SET_NOTE, "Saving...");
+    push_cmd(CMD_APPLY_SETTINGS, settings_pack(w, h, fov, fps, ws));
+}
+
+static void use_friends(void)
+{
+    if (!g_set.friend_) return;
+    if (g_set.fw && g_set.fh) { set_num(ID_SET_W, g_set.fw); set_num(ID_SET_H, g_set.fh); }
+    if (g_set.ffov && g_set.have_fov) set_num(ID_SET_FOV, g_set.ffov);
+    if (g_set.ffps) set_num(ID_SET_FPS, g_set.ffps);
+    if (g_set.fwsfov && g_set.have_ws) set_ws(ID_SET_WS, g_set.fwsfov);
+    g_set_warn = false;
+    set_text(ID_SET_NOTE, "Your friend's values are in the fields. Click Apply to save them.");
 }
 
 static void copy_log(void)
@@ -704,6 +845,8 @@ static void refresh_controls(void)
     EnableWindow(g_c[ID_HOST], idle && !g_closing);
     EnableWindow(g_c[ID_JOIN], idle && !g_closing);
     EnableWindow(g_c[ID_STOP], !idle && !g_closing);
+    EnableWindow(g_c[ID_SET_APPLY], g_set.found && !g_closing);
+    EnableWindow(g_c[ID_SET_FRIEND], g_set.friend_ && !g_closing);
     static int ro = -1;
     int want_ro = host || (join && s->lobby);
     if (want_ro != ro) { SendMessageW(g_c[ID_LOBBY], EM_SETREADONLY, (WPARAM)want_ro, 0); ro = want_ro; }
@@ -743,6 +886,10 @@ static void on_timer(void)
     bool mods_dirty = g_mods_dirty, mods_warn = g_mods_warn;
     if (mods_dirty) memcpy(mods, g_mods_text, sizeof mods);
     g_mods_dirty = false;
+    static UiSettings set;
+    bool set_dirty = g_set_dirty;
+    if (set_dirty) set = g_set_in;
+    g_set_dirty = false;
     st = g_state;
     st_dirty = g_state_dirty;
     g_state_dirty = false;
@@ -763,6 +910,7 @@ static void on_timer(void)
         bool dot = mods_warn && g_tab != TAB_MODS;
         if (dot != g_mods_unseen) { g_mods_unseen = dot; RedrawWindow(g_c[ID_TAB_MODS], 0, 0, 0x1 | 0x4); }
     }
+    if (set_dirty) show_settings(&set);
     if (warned && g_tab != TAB_LOG && !g_log_unseen) { /* red dot on "Log" */
         g_log_unseen = true;
         RedrawWindow(g_c[ID_TAB_LOG], 0, 0, 0x1 | 0x4);
@@ -861,6 +1009,9 @@ static void on_command(int id, int code)
     case ID_TAB_HOWTO: show_tab(TAB_HOWTO); break;
     case ID_TAB_LOG: show_tab(TAB_LOG); break;
     case ID_TAB_MODS: show_tab(TAB_MODS); break;
+    case ID_TAB_SET: show_tab(TAB_SET); break;
+    case ID_SET_APPLY: apply_clicked(); break;
+    case ID_SET_FRIEND: use_friends(); break;
     case ID_RECHECK: push_cmd(CMD_RECHECK, 0); break;
     case ID_COPYLOG:
         copy_log();

@@ -603,7 +603,8 @@ def main():
         with open(os.path.join(pd, "SplinterCell3User.ini"), "wb") as f:  # the host's own settings live in ProgramData
             f.write(b"[Engine.PlayerController]\r\nDesiredFOV=75.000000\r\n")
         ga, gb, gc = game_dir("a", modded), game_dir("b", other), game_dir("c", base)
-        hm = relay(A, "HM", 1191, "1192", ["host"], d, {"MOCK_GAME_DIR": ga, "PROGRAMDATA": os.path.join(gd, "programdata_a")})
+        hm = relay(A, "HM", 1191, "1192", ["host"], d, {"MOCK_GAME_DIR": ga, "PROGRAMDATA": os.path.join(gd, "programdata_a")},
+                   stdin=subprocess.PIPE)
         procs.append(hm)
         check(hm.wait_for(r"\[mods\] Resolution: 2560x1440") is not None and hm.wait_for(r"\[mods\] FOV: 75\b") is not None
               and hm.wait_for(r"\[mods\] FPS limit \(widescreen fix\): 144") is not None,
@@ -633,6 +634,30 @@ def main():
         check(jm.wait_for(r"! FOV differs: you 90, user1191 75", timeout=3) is not None, "...and on the friend's side")
         check("splintercell3.ini" not in hm.log + jm.log, "settings files (.ini) are not compared")
         check(gd not in hm.log + jm.log and gd not in open(os.path.join(d, "log_HM.txt")).read(), "the game folder's path is never sent or logged")
+        # the Settings tab
+        check(hm.wait_for(r"\[settings\] mine 2560x1440 fov 75 fps 60 ws 120 \| user1192 1920x1080 fov 90 fps 60 ws 0", timeout=5) is not None,
+              "Settings tab: this PC's values and the friend's")
+        hm.p.stdin.write("A\n1920 1080 90 60 100\n"); hm.p.stdin.flush()  # "Use friend's", FOV factor 1.00, Apply
+        check(hm.wait_for(r"Settings: resolution set to 1920x1080", timeout=10) is not None
+              and hm.wait_for(r"Settings: FOV set to 90", timeout=3) is not None
+              and hm.wait_for(r"Settings: FPS limit set to 60", timeout=3) is not None
+              and hm.wait_for(r"Settings: the widescreen fix's FOV factor set to 1\.00", timeout=3) is not None,
+              "Apply: resolution, FOV, FPS limit and the widescreen fix's FOV factor written")
+        rd = lambda *p: open(os.path.join(*p), "rb").read()
+        uini = os.path.join(pd, "SplinterCell3User.ini")
+        check(rd(uini) == b"[Engine.PlayerController]\r\nDesiredFOV=90.000000\r\n"
+              and rd(uini + ".scctlink-backup") == b"[Engine.PlayerController]\r\nDesiredFOV=75.000000\r\n",
+              "...FOV in the user's settings (ProgramData), the original kept as a backup")
+        check(rd(ga, "System", "SplinterCell3.ini") == b"[WinDrv.WindowsClient]\r\nFullscreenViewportX=1920\r\nFullscreenViewportY=1080\r\n[SIMULATION]\r\nMAXFPS=60\r\n",
+              "...resolution in SplinterCell3.ini, the rest of the file unchanged")
+        check(rd(ga, "System", "scripts", "SplinterCellChaosTheory.WidescreenFix.ini") ==
+              b"[MAIN]\r\nResX = 0\r\nResY = 0\r\nFOVFactor = 1.00\r\nFPSLimit = 60 // frame rate cap\r\n",
+              "...the widescreen fix's .ini: FOV factor and FPS limit changed, its comment and ResX=0 (auto) kept")
+        check(hm.wait_for(r"\[settings\] mine 1920x1080 fov 90 fps 60 ws 100", timeout=10) is not None, "the Settings tab shows the new values")
+        check(hm.wait_for(r"FOV: you 90, user1192 90", timeout=10) is not None, "...and the check is done again: FOV now the same")
+        hm.p.stdin.write("A\n0 0 30 0 0\n"); hm.p.stdin.flush()
+        check(hm.wait_for(r"! Settings: FOV must be between 50 and 130", timeout=5) is not None, "a wrong value is refused")
+        check(rd(uini) == b"[Engine.PlayerController]\r\nDesiredFOV=90.000000\r\n", "...and nothing is written")
         hm.stop(); jm.stop()
         hs = relay(A, "HS", 1193, "1194", ["host"], d, {"MOCK_GAME_DIR": gc})
         procs.append(hs)
