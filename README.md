@@ -1,10 +1,10 @@
-# SCCTLink 0.7.1
+# SCCTLink 0.9.1
 
 Play **Splinter Cell: Chaos Theory** co-op (2 players) or Spies vs. Mercenaries / Versus (up to 4) with Steam friends: no VPN (no Hamachi, Radmin or ZeroTier), no port forwarding, no IP addresses.
 
 Chaos Theory's online servers are gone, so PC multiplayer only works in **LAN** mode. SCCTLink makes your friends' PCs look like they are on your LAN, and carries the game's traffic through Steam's relay network. The host invites the friend from Steam.
 
-**Download:** `SCCTLink-0.7.1.zip` from [Releases](../../releases). Both players unzip it.
+**Download:** `SCCTLink-0.9.1.zip` from [Releases](../../releases). Both players unzip it.
 
 ## How to play
 
@@ -20,7 +20,11 @@ See [package/README.txt](package/README.txt) for the full guide, FPS/lag tips an
 
 ## Game files check
 
-Co-op disconnects when the two games differ (a mod on one PC only, another patch). When two players link, each SCCTLink lists its game folder (Steam copy): file names relative to the game folder, sizes, and SHA-256 of the program files (`System`, `scripts`, `Versus\System`). It sends the list to the other player and both see what differs, in the **Mods** tab (a checklist: same game version, same mods, same game files) and in the Log. The Mods tab lists your own mods as soon as SCCTLink opens; the game doesn't need to be running. **Check again** redoes it after you change mods. Settings files (`.ini`), logs and saves are left out. Nothing else about the PC is sent.
+Co-op disconnects when the two games differ (a mod on one PC only, another patch). When two players link, each SCCTLink lists its game folder (Steam copy): file names relative to the game folder, sizes, and SHA-256 of the program files (`System`, `scripts`, `Versus\System`). It sends the list to the other player and both see what differs, in the **Mods** tab (a checklist: same game version, same mods, same game files) and in the Log. The Mods tab lists your own mods as soon as SCCTLink opens; the game doesn't need to be running. **Check again** redoes it after you change mods. Settings files (`.ini`), logs and saves are left out as files; instead the settings that matter are read from them and compared: resolution (shown), FOV and FPS limits (must match) from the game's `.ini` files (`System`, or `ProgramData\Ubisoft\...\SplinterCell3User.ini`) and the widescreen fix's `.ini`. Nothing else about the PC is sent.
+
+**SCCT Fix** (Settings tab): co-op used to disconnect as soon as someone drew a weapon. The game runs the same simulation on both PCs and ends the session when they drift apart. **Install SCCT Fix** copies `SCCTFix-d3d9.dll` (a small d3d9.dll: 60 FPS cap, borderless window, Alt+Tab fix, crash log) into the game's `System` folder as `d3d9.dll` and sets `StartupFullscreen=False` in `SplinterCell3.ini`; with both, co-op stopped disconnecting. Both players need it (it is compared like FOV and FPS limits). The file is copied only if its SHA-256 is `2f05d8e9e7aaf750eb2889c7ba57dd453820e3a794b9ba74c43730446a84cae9` (checked: imports no network functions, starts no programs). An existing `d3d9.dll` is kept as `d3d9.dll.scctlink-backup`; **Remove SCCT Fix** puts it back and sets fullscreen again.
+
+**Settings** tab (next to Mods): change resolution, FOV and FPS limit (and the widescreen fix's FOV factor) from SCCTLink. Your friend's values are shown beside yours; **Use friend's** copies them, **Apply** writes them into the same `.ini` files (only keys that already exist, the rest of each file untouched). Close the game first. The first change to a file keeps the original next to it as `<name>.scctlink-backup`.
 
 ## How it works
 

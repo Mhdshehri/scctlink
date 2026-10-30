@@ -38,7 +38,7 @@ static int ice_off = -1; /* SetGlobalConfigValueInt32(P2P_Transport_ICE_Enable) 
 static u64 next_call = 1000;
 
 typedef struct Msg { void *data; int size; u64 sender; int ch; u64 due; struct Msg *next; } Msg;
-static Msg *held, *ready[3], *delayed;
+static Msg *held, *ready[4], *delayed;
 static u64 mono_ms(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return (u64)t.tv_sec * 1000 + (u64)t.tv_nsec / 1000000; }
 
 typedef struct Cb { int id; uint8_t p[300]; int size; u64 call; struct Cb *next; } Cb;
@@ -205,14 +205,26 @@ static void take(Msg *m)
     }
 }
 
+typedef struct Out { struct sockaddr_un a; int n; struct Out *next; uint8_t b[]; } Out;
+static Out *outq;
+static int noutq;
+static void out_flush(void)
+{
+    while (outq) {
+        if (sendto(sock, outq->b, (size_t)outq->n, MSG_DONTWAIT, (void *)&outq->a, sizeof outq->a) < 0 && errno == EAGAIN) return;
+        Out *o = outq; outq = o->next; free(o); noutq--; /* sent (or the receiver is gone) */
+    }
+}
+
 static void poll_net(void)
 {
+    out_flush();
     static uint8_t b[70000];
     ssize_t r;
     while ((r = recv(sock, b, sizeof b, 0)) > 0) {
         if (r < 18) continue;
         Msg *m = calloc(1, sizeof *m);
-        m->ch = b[0] < 3 ? b[0] : 0;
+        m->ch = b[0] < 4 ? b[0] : 0;
         memcpy(&m->sender, b + 2, 8);
         memcpy(&m->due, b + 10, 8);
         m->due += (u64)delay_ms;
@@ -454,11 +466,17 @@ static int m_SendMessageToUser(void *s, const void *ident, const void *data, uin
     memcpy(b + 18, data, n);
     struct sockaddr_un a;
     addr_of(to, &a);
-    for (int i = 0; i < 2000; i++) { /* reliable: wait if the receiver is busy, like Steam's buffering */
-        if (sendto(sock, b, n + 18, MSG_DONTWAIT, (void *)&a, sizeof a) >= 0) break;
-        if (errno != EAGAIN) break; /* Steam buffers both kinds; loss comes only from MOCK_LOSS */
-        usleep(500);
-    }
+    /* Like Steam: messages wait in a send queue when the other side is busy,
+       instead of blocking the caller (two busy senders would lock each other
+       up). The queue is sent in order, on every later call. */
+    out_flush();
+    if (!outq && sendto(sock, b, n + 18, MSG_DONTWAIT, (void *)&a, sizeof a) >= 0) return 1;
+    if (noutq > 50000) return 25; /* k_EResultLimitExceeded, like a full Steam send buffer */
+    Out *o = malloc(sizeof *o + n + 18);
+    o->a = a; o->n = (int)n + 18; o->next = 0;
+    memcpy(o->b, b, (size_t)o->n);
+    Out **q = &outq; while (*q) q = &(*q)->next; *q = o;
+    noutq++;
     return 1;
 }
 static int m_ReceiveMessagesOnChannel(void *s, int ch, void **out, int max)

@@ -18,6 +18,8 @@ typedef enum {
     CMD_SET_VERSUS,  /* arg = 1: Versus (Spies vs. Mercenaries), 0: co-op. Only when stopped. */
     CMD_KICK,        /* host: arg = friend's Steam id */
     CMD_RECHECK,     /* list the game files again and compare with the friends again */
+    CMD_FPSFIX,      /* arg 1: put the SCCT Fix (d3d9.dll + StartupFullscreen=False) into the game's System folder, 0: take it out */
+    CMD_APPLY_SETTINGS, /* arg = settings_pack(): write resolution / FOV / FPS limit into the game's .ini files */
     CMD_STOP,        /* stop hosting/joining, back to the start screen */
     CMD_QUIT,
 } CmdKind;
@@ -49,6 +51,25 @@ void ui_state(const UiState *s);
 /* The "Mods" tab: the game files check as a checklist. warn: something differs
    (a dot on the tab). */
 void ui_mods(const char *text, bool warn);
+
+/* The "Settings" tab: this PC's values (0 = not found) and the linked friend's. */
+typedef struct {
+    bool found;                 /* the game's folder was found */
+    int w, h, fov, fps, wsfov;  /* wsfov: the widescreen fix's FOV factor x100 */
+    bool have_fov, have_ws;     /* there is a FOV setting / the widescreen fix to write to */
+    bool friend_;               /* a friend's values are known */
+    int fw, fh, ffov, ffps, fwsfov;
+    char friend_name[64];
+    int fpsfix;                 /* the SCCT Fix: 0 not there, 1 installed, 2 another d3d9.dll is there, -1 no game folder */
+    char note[200];             /* what the last Apply did */
+    bool note_warn;
+} UiSettings;
+void ui_settings(const UiSettings *s);
+/* width 13 bits, height 13, FOV 8, FPS 10, widescreen FOV factor x100 12; 0 = leave as it is */
+static inline u64 settings_pack(int w, int h, int fov, int fps, int ws)
+{
+    return (u64)(w & 8191) | (u64)(h & 8191) << 13 | (u64)(fov & 255) << 26 | (u64)(fps & 1023) << 34 | (u64)(ws & 4095) << 44;
+}
 void ui_list(int which, int n, const UiPerson *p);
 /* Friends found hosting. Return the lobby to join now, or 0. Set *reject to a
    lobby the user said no to (so it isn't offered again). */
