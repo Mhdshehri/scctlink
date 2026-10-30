@@ -1,10 +1,10 @@
-# SCCTLink 0.9.2
+# SCCTLink 0.9.3
 
 Play **Splinter Cell: Chaos Theory** co-op (2 players) or Spies vs. Mercenaries / Versus (up to 4) with Steam friends: no VPN (no Hamachi, Radmin or ZeroTier), no port forwarding, no IP addresses.
 
 Chaos Theory's online servers are gone, so PC multiplayer only works in **LAN** mode. SCCTLink makes your friends' PCs look like they are on your LAN, and carries the game's traffic through Steam's relay network. The host invites the friend from Steam.
 
-**Download:** `SCCTLink-0.9.2.zip` from [Releases](../../releases). Both players unzip it and use the same version.
+**Download:** `SCCTLink-0.9.3.zip` from [Releases](../../releases). Both players unzip it and use the same version.
 
 ## How to play
 

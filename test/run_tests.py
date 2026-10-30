@@ -654,6 +654,8 @@ def main():
               b"[MAIN]\r\nResX = 0\r\nResY = 0\r\nFOVFactor = 1.00\r\nFPSLimit = 60 // frame rate cap\r\n",
               "...the widescreen fix's .ini: FOV factor and FPS limit changed, its comment and ResX=0 (auto) kept")
         check(hm.wait_for(r"\[settings\] scctfix 0 mine 1920x1080 fov 90 fps 60 ws 100", timeout=10) is not None, "the Settings tab shows the new values")
+        leftovers = [os.path.join(r, f) for r, _, fs in os.walk(gd) for f in fs if f.endswith(".scctlink-new")]
+        check(not leftovers, "...each .ini was written in full and swapped in (no half-written files left) %s" % leftovers)
         check(hm.wait_for(r"FOV: you 90, user1192 90", timeout=10) is not None, "...and the check is done again: FOV now the same")
         hm.p.stdin.write("A\n0 0 30 0 0\n"); hm.p.stdin.flush()
         check(hm.wait_for(r"! Settings: FOV must be between 50 and 130", timeout=5) is not None, "a wrong value is refused")

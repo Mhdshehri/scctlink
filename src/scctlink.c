@@ -27,7 +27,7 @@
 #include "plat.h"
 #include "ui.h"
 
-#define VERSION "0.9.2"
+#define VERSION "0.9.3"
 #define SCCT_APPID 13570
 #define SPACEWAR_APPID 480
 #define MAX_PEERS 3
@@ -45,7 +45,7 @@
 #define MAX_CATCH 64
 #define MAX_STREAMS 32
 #define TCP_CHUNK 16000
-#define TCP_OUTBUF_MAX (8 << 20)
+#define TCP_OUTBUF_MAX (2 << 20)
 #define HDR 7 /* kind, src port, dst port, seq */
 
 static void *U, *F, *MM, *NM, *NU, *AP;
@@ -1837,7 +1837,7 @@ static bool mf_skip(const char *name)
     if (!dot) return false;
     static const char *const ext[] = { ".ini", ".log", ".txt", ".sav", ".bak", ".tmp", ".dmp", ".lnk", ".url",
                                        ".pdf", ".htm", ".html", ".rtf", ".old", ".crash", ".zip", ".rar", ".7z",
-                                       ".scctlink-backup" /* SCCTLink's own copies of changed .ini files */ };
+                                       ".scctlink-backup", ".scctlink-new" /* SCCTLink's own copies of changed files */ };
     for (unsigned i = 0; i < sizeof ext / sizeof *ext; i++) {
         const char *a = dot, *b = ext[i];
         while (*a && *b && ((*a | 32) == *b || *a == *b)) { a++; b++; }
@@ -2084,6 +2084,7 @@ static int ini_set(const char *path, const char *section, const char *key, const
     int len = (int)fread(in, 1, sizeof in - 1, f);
     fclose(f);
     if (len <= 0) return 0;
+    if (len == (int)sizeof in - 1) return -1; /* bigger than any game .ini: don't touch it */
     in[len] = 0;
     bool in_sec = !section;
     int kl = (int)strlen(key), vl = (int)strlen(value), o = 0, hits = 0;
@@ -2133,11 +2134,16 @@ static int ini_set(const char *path, const char *section, const char *key, const
         fwrite(in, 1, (size_t)len, bf);
         fclose(bf);
     }
-    FILE *w = fopen(path, "wb");
+    /* write a new file next to it first, so a failed write never leaves half a file */
+    char tmp[1000];
+    sfmt(tmp, sizeof tmp, "%s.scctlink-new", path);
+    FILE *w = fopen(tmp, "wb");
     if (!w) return -1;
     bool ok = fwrite(out, 1, (size_t)o, w) == (size_t)o;
-    fclose(w);
-    return ok ? hits : -1;
+    ok &= fclose(w) == 0;
+    if (!ok || remove(path) != 0) { remove(tmp); return -1; }
+    if (rename(tmp, path) != 0) return -1; /* the new file stays as <name>.scctlink-new, the original as the backup */
+    return hits;
 }
 
 /* ---------- the SCCT Fix ----------
