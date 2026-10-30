@@ -687,25 +687,6 @@ def main():
         check(hm.wait_for(r"SCCT Fix removed", timeout=10) is not None and rd(sysd3d) == b"MZanother-d3d9-mod"
               and not os.path.exists(sysd3d + ".scctlink-backup") and b"StartupFullscreen=True" in rd(ga, "System", "SplinterCell3.ini"),
               "Remove SCCT Fix: the earlier d3d9.dll is put back, fullscreen again")
-        # "Match friend": the friend takes the host's settings and the SCCT Fix in one click
-        at = hm.mark()
-        hm.p.stdin.write("F\n1\n"); hm.p.stdin.flush()
-        check(hm.wait_for(r"SCCT Fix installed", timeout=10, since=at) is not None, "the host installs the SCCT Fix again")
-        at = hm.mark()
-        hm.p.stdin.write("A\n0 0 80 0 0\n"); hm.p.stdin.flush()
-        check(hm.wait_for(r"Settings: FOV set to 80", timeout=10, since=at) is not None, "...and sets FOV 80")
-        check(jm.wait_for(r"! FOV differs: you 90, user1191 80", timeout=15) is not None, "the friend sees the new FOV")
-        at = jm.mark()
-        jm.p.stdin.write("W\n"); jm.p.stdin.flush()
-        check(jm.wait_for(r"SCCT Fix installed", timeout=10, since=at) is not None
-              and jm.wait_for(r"Settings: FOV set to 80", timeout=10, since=at) is not None,
-              "Match friend: the SCCT Fix installed and FOV 80, in one click")
-        check(rd(gb, "System", "d3d9.dll") == rd(fixsrc) and b"DesiredFOV=80.000000" in rd(gb, "System", "SplinterCell3User.ini")
-              and b"StartupFullscreen=False" in rd(gb, "System", "SplinterCell3.ini"),
-              "...the friend's files: d3d9.dll, DesiredFOV=80, StartupFullscreen=False")
-        check(jm.wait_for(r"FOV: you 80, user1191 80\r?\n", timeout=15, since=at) is not None
-              and jm.wait_for(r"SCCT Fix \(60 FPS cap, borderless\): you installed, user1191 installed", timeout=15, since=at) is not None,
-              "...and the Mods tab now shows the same FOV and SCCT Fix on both")
         # the live stats window's numbers
         check(jm.wait_for(r"\[stats\] user1191   ping \d+ ms   loss [\d.-]+%?   \d+/\d+ pkt/s", timeout=10) is not None,
               "live stats: ping, loss and packets per second for the linked friend")
@@ -735,6 +716,21 @@ def main():
         check(js.wait_for(r"only on your PC: system/d3d9\.dll", timeout=10) is not None, "...the new mod shows up on the friend's side")
         check(hs.wait_for(r"only on user1194's PC: system/d3d9\.dll", timeout=10) is not None, "...and on the host's side, without clicking anything")
         hs.stop(); js.stop()
+
+        print("[17] live stats: the game's frame rate, even playing alone; the SCCT Fix reminder")
+        solo = relay(A, "SO", 1195, "", ["idle"], d, {"MOCK_GAME_DIR": gc, "MOCK_FPS": "60"}, stdin=subprocess.PIPE)
+        procs.append(solo)
+        check(solo.wait_for(r"! The SCCT Fix isn't installed\. Co-op disconnects", timeout=10) is not None,
+              "without the SCCT Fix, co-op players are told to install it")
+        solo.p.stdin.write("T\n1\n"); solo.p.stdin.flush()  # "Live stats"
+        check(solo.wait_for(r"\[stats\] Splinter Cell: not running", timeout=10) is not None, "live stats with no game: 'not running'")
+        game = Proc("solo-game", A.cmd([sys.executable, "-I", "-c",
+                                        "import ctypes,time;ctypes.CDLL(None).prctl(15,b'splintercell3',0,0,0);time.sleep(12)"]))
+        procs.append(game)
+        check(solo.wait_for(r"\[stats\] Splinter Cell: 60 FPS$", timeout=12) is not None or "[stats] Splinter Cell: 60 FPS" in solo.log,
+              "live stats while playing alone: the game's frame rate")
+        game.stop()
+        solo.stop()
 
         print("[13] bad internet: 10% packet loss each way and 60 ms delay each way")
         h10, j10, hg10, jg10 = session("    (setup)", d, A, B, extra={"MOCK_LOSS": "10", "MOCK_DELAY_MS": "60"}, n_stream=1000)

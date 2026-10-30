@@ -830,6 +830,7 @@ static void ring_dump(const char *why);
 static void mods_forget(u64 id);
 static void mods_publish(void);
 static void settings_publish(void);
+static void scctfix_warn(void);
 static void mods_local_text(void);
 
 static void drop_peer(u64 id, const char *why)
@@ -2305,30 +2306,6 @@ static void scctfix_(bool install)
     set_say(st == 1 ? "SCCT Fix: already installed (StartupFullscreen=False checked)."
                     : "SCCT Fix installed: 60 FPS cap, borderless window (StartupFullscreen=False). Both players need it.");
 }
-/* "Match friend": the friend's resolution, FOV and FPS limits, and the SCCT Fix if they have it. */
-static void apply_settings_(u64 a);
-static void match_friend_(void)
-{
-    UiSettings u = g_uiset;
-    if (!u.friend_) { set_say("! Match friend: link with a friend first."); return; }
-    if (u.ffix == 1 && scctfix_state() != 1) scctfix_(true);
-    int w = u.fw && u.fh && (u.fw != u.w || u.fh != u.h) ? u.fw : 0, h = w ? u.fh : 0;
-    int fov = u.have_fov && u.ffov && u.ffov != u.fov ? u.ffov : 0;
-    int fps = u.ffps && u.ffps != u.fps ? u.ffps : 0;
-    int ws = u.have_ws && u.fwsfov && u.fwsfov != u.wsfov ? u.fwsfov : 0;
-    if (w || fov || fps || ws) apply_settings_(settings_pack(w, h, fov, fps, ws));
-    else if (!g_uiset.note_warn) set_say("Match friend: your settings are already the same as %s's.", u.friend_name);
-    if (!g_uiset.note_warn) sfmt(g_uiset.note, sizeof g_uiset.note, "Done: same settings as %s. They apply the next time the game starts.", u.friend_name);
-}
-static void match_friend(void)
-{
-    g_uiset.note[0] = 0;
-    g_uiset.note_warn = false;
-    match_friend_();
-    mf_recheck();
-    settings_publish();
-}
-
 static void scctfix(bool install)
 {
     g_uiset.note[0] = 0;
@@ -2662,10 +2639,6 @@ static void mf_report(Peer *p, bool they_found)
     g_uiset.friend_ = true;
     sfmt(g_uiset.friend_name, sizeof g_uiset.friend_name, "%s", them);
     set_numbers(theirs, nt, &g_uiset.fw, &g_uiset.fh, &g_uiset.ffov, &g_uiset.ffps, &g_uiset.fwsfov);
-    {
-        const char *fx = set_value(theirs, nt, "scctfix");
-        g_uiset.ffix = !fx ? -1 : !strcmp(fx, "installed") ? 1 : 0;
-    }
     settings_publish();
     mf_sort(theirs, nt);
     /* three groups: the game program, mods, everything else */
@@ -3054,12 +3027,34 @@ static void start_mode(int mode)
     g_is_host = mode == MODE_HOST;
     scan_game(2);
     say("");
+    scctfix_warn();
     if (g_is_host) {
         say("Creating a friends-only %s lobby for %d players...", MODE_NAME, g_max_players);
         S.MM_CreateLobby(MM, LOBBY_FRIENDS_ONLY, g_max_players);
     } else {
         say("Looking for a friend who is hosting %s...", MODE_NAME);
     }
+}
+
+/* the live stats window: is it open, and the game's frame rate */
+static bool g_stats_on;
+static int g_fps = -1;
+static u64 g_fps_at;
+static void stats_tick(u64 t)
+{
+    if (!g_stats_on || t - g_fps_at < 1000) return;
+    g_fps_at = t;
+    if (g_mode == MODE_IDLE) scan_game(0); /* (while linked, the relay keeps this up to date) */
+    int f = fps_get();
+    if (f != -2) g_fps = f;
+}
+
+/* Co-op without the SCCT Fix disconnects as soon as someone draws a weapon: say so. */
+static void scctfix_warn(void)
+{
+    if (g_versus || scctfix_state() == 1 || scctfix_state() < 0) return;
+    say("! The SCCT Fix isn't installed. Co-op disconnects as soon as someone draws a weapon without it.");
+    say("  Close the game, open the Settings tab and click \"Install SCCT Fix\" (both players).");
 }
 
 static void make_status(UiState *st)
@@ -3082,6 +3077,12 @@ static void make_status(UiState *st)
         st->done = (uint8_t)((linked ? 1 : 0) | (up ? 2 : 0) | (G.running && linked ? 4 : 0) | (playing ? 8 : 0));
     }
     size_t sk = 0;
+    if (g_stats_on) {
+        if (!G.running) sfmt(st->stats, sizeof st->stats, "%s: not running", g_versus ? "Versus" : "Splinter Cell");
+        else if (g_fps >= 0) sfmt(st->stats, sizeof st->stats, "%s: %d FPS", g_versus ? "Versus" : "Splinter Cell", g_fps);
+        else sfmt(st->stats, sizeof st->stats, "%s: running (FPS: Windows didn't allow measuring it)", g_versus ? "Versus" : "Splinter Cell");
+        sk = strlen(st->stats);
+    }
     for (int i = 0; i < g_npeers && sk < sizeof st->stats - 80; i++) {
         Peer *p = &g_peers[i];
         if (!p->welcomed) continue;
@@ -3146,12 +3147,23 @@ static void handle_cmd(const Cmd *c)
         break;
     case CMD_APPLY_SETTINGS: apply_settings(c->arg); break;
     case CMD_SCCTFIX: scctfix(c->arg != 0); break;
-    case CMD_MATCH_FRIEND: match_friend(); break;
+    case CMD_STATS:
+        if (c->arg && !g_stats_on) {
+            g_stats_on = true;
+            g_fps = -1;
+            scan_game(2);
+            if (!fps_start()) note("frame rate: Windows didn't start the measuring (ETW)");
+        } else if (!c->arg && g_stats_on) {
+            g_stats_on = false;
+            fps_stop();
+        }
+        break;
     case CMD_SET_VERSUS:
         if (g_mode != MODE_IDLE) { say("Click Stop first, then switch between Co-op and Versus."); break; }
         if ((c->arg != 0) != g_versus) {
             set_versus(c->arg != 0);
             say("Mode: %s (%s, up to %d players).", MODE_NAME, g_versus ? "SCCT_Versus.exe" : "the co-op campaign", g_max_players);
+            scctfix_warn();
         }
         break;
     case CMD_STOP: stop_mode(false); break;
@@ -3180,7 +3192,7 @@ void engine_run(const EngineOpts *o, Cmd first)
     /* Connect to Steam right away, so an invite accepted on the start screen
        reaches SCCTLink. If Steam isn't running yet, Host/Join retries. */
     g_steam_ok = steam_start();
-    if (g_steam_ok) mf_make(); /* the "Mods" tab shows this PC's game right away, game running or not */
+    if (g_steam_ok) { mf_make(); scctfix_warn(); } /* the "Mods" tab shows this PC's game right away, game running or not */
     if (first.kind != CMD_NONE) handle_cmd(&first);
 
     u64 last_scan = 0, last_friends = 0, last_state = 0;
@@ -3245,6 +3257,7 @@ void engine_run(const EngineOpts *o, Cmd first)
             }
             if (g_lobby || g_joining) g_refresh = 0;
         }
+        stats_tick(t);
         Cmd c;
         while (ui_poll(&c)) handle_cmd(&c);
 
@@ -3267,6 +3280,7 @@ void engine_run(const EngineOpts *o, Cmd first)
             for (int j = 0; j < g_catch[i].ns && ns < 256; j++) socks[ns++] = g_catch[i].s[j];
         wait_socks(socks, ns, g_mode == MODE_IDLE ? 20 : 1);
     }
+    if (g_stats_on) fps_stop();
     if (g_steam_ok) {
         stop_mode(true);
         S.Shutdown();

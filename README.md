@@ -55,8 +55,9 @@ Chaos Theory's co-op runs the same simulation on both PCs (Quazal's *SyncSim*) a
 ## Features
 
 - **Mods tab:** compares both games when you link: same game version, same mods, same files, and the settings that must match (FOV, FPS limits, the SCCT Fix, fullscreen). Shows exactly what differs, like `only on your PC: system/dinput8.dll`. **Check again** after you change something.
-- **Settings tab:** change resolution, FOV and FPS limit (and the widescreen fix's FOV factor) without editing `.ini` files. Your friend's values are shown beside yours. **Match friend** takes their settings and the SCCT Fix in one click. Every changed file is backed up first.
-- **Live stats:** a small window that stays on top of the game with ping, packet loss and packets per second for each friend, so you can tell whether lag comes from the connection.
+- **Settings tab:** change resolution, FOV and FPS limit (and the widescreen fix's FOV factor) without editing `.ini` files. Your friend's values are shown beside yours; **Use friend's** copies them into the fields. Every changed file is backed up first.
+- **Live stats:** a small window that stays on top of the game with the game's **frame rate**, even when you play the story alone or sit in the menu, and while linked the ping, packet loss and packets per second for each friend. The frame rate comes from Windows' own performance events (the same ones PresentMon and Xbox Game Bar read), so nothing is put into the game, and only while the window is open.
+- **SCCT Fix reminder:** in co-op, SCCTLink tells you (in the Log) when the SCCT Fix isn't installed.
 - **How to** shows your steps as you go (`[x]` done, `[>]` do this now). **Log** shows everything that happened, with a red dot when something needs a look, and a **Copy log** button.
 - Finds friends who are hosting automatically, with a **Refresh** button and short lobby codes.
 - Alerts when a friend links, or when the host's game is up. **Kick** for the host.
@@ -93,8 +94,8 @@ Chaos Theory's co-op runs the same simulation on both PCs (Quazal's *SyncSim*) a
 | 🎮 **Only the game** | Packets from other programs, or from other PCs on your network, are dropped. |
 | 📦 **Packets checked** | Oversized packets and floods are dropped; compressed and encrypted data is bounds-checked before it is read. |
 | ✅ **Pinned DLLs** | `steam_api.dll` is Valve's signed file from [Steamworks.NET 2025.164.1](https://github.com/rlabrecque/Steamworks.NET/releases/tag/2025.164.1); SCCTLink checks its SHA-256 (`fdafb7c6…eb65da`) and refuses anything else. The SCCT Fix DLL is pinned the same way. |
-| 🧩 **No third-party code** | `SCCTLink.exe` uses only core Windows DLLs (kernel32, user32, gdi32, comctl32, shell32, ws2_32, msvcrt). A few more (winmm, iphlpapi, dwmapi, uxtheme) are loaded from System32 only. |
-| ✍️ **Writes only when you click** | In its own folder: `steam_appid.txt`, `scctlink.log` (never contains IP addresses), `scctlink_cache.txt` (game file checksums) and `scctlink_theme.txt`. In the game folder only when you click **Apply**, **Match friend** or **Install/Remove SCCT Fix**, always with backups. To remove SCCTLink, click **Remove SCCT Fix** and delete its folder. |
+| 🧩 **No third-party code** | `SCCTLink.exe` uses only core Windows DLLs (kernel32, advapi32, user32, gdi32, comctl32, shell32, ws2_32, msvcrt). advapi32 is used only to read the game's frame rate for Live stats. A few more (winmm, iphlpapi, dwmapi, uxtheme) are loaded from System32 only. |
+| ✍️ **Writes only when you click** | In its own folder: `steam_appid.txt`, `scctlink.log` (never contains IP addresses), `scctlink_cache.txt` (game file checksums) and `scctlink_theme.txt`. In the game folder only when you click **Apply** or **Install/Remove SCCT Fix**, always with backups. To remove SCCTLink, click **Remove SCCT Fix** and delete its folder. |
 | 🛡️ **No ban risk** | Chaos Theory's LAN mode has no anti-cheat and its online servers are gone. SCCTLink doesn't inject anything into the game. |
 
 Windows SmartScreen may warn you because SCCTLink is new and not code-signed. Check the files first if you like: open a command prompt in the folder and compare `certutil -hashfile SCCTLink.exe SHA256` with `SHA256SUMS.txt`.
@@ -127,7 +128,7 @@ The tests cover:
 - **Privacy:** the host's address hidden in raw, text and LZO-compressed form, with every checksum redone; a second network adapter's address; Steam's direct connections turned off.
 - **Safety:** strangers blocked; programs other than the game blocked; foreign lobbies refused; kicking.
 - **Finding the host:** every discovery path, including a host Steam shows in the game instead of Spacewar; lobby codes; Refresh; invites; join confirmation.
-- **Game check and settings:** a mod on one PC only, another patch, identical games, Check again; the settings comparison; the Settings tab (files written in full, backups kept, bad values refused); installing and removing the SCCT Fix; Match friend; live stats; the checksum cache.
+- **Game check and settings:** a mod on one PC only, another patch, identical games, Check again; the settings comparison; the Settings tab (files written in full, backups kept, bad values refused); installing and removing the SCCT Fix and its reminder; live stats (frame rate alone, ping and loss while linked); the checksum cache.
 
 **Tested with the real game:** a host and a friend in different homes play co-op with the SCCT Fix on both PCs: joining, shooting, jumping and changing maps without disconnects.
 
@@ -139,7 +140,7 @@ The tests cover:
 | `src/ui_win.c` | The Windows window and the live stats window |
 | `src/ui_console.c` | A text front end that the tests drive |
 | `src/steam_win.c` | Loads the pinned `steam_api.dll` |
-| `src/plat_win.c` | Windows sockets, the game's open ports, clipboard and file helpers |
+| `src/plat_win.c` | Windows sockets, the game's open ports and frame rate, clipboard and file helpers |
 | `src/lobbycode.c` | Short lobby codes like `1MCE-2B2` |
 | `src/sha256.c` | Checks the pinned DLLs and game files |
 | `src/crt0_win.c`, `src/*.h` | Program start-up and the small headers |

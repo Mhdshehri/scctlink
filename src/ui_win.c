@@ -158,7 +158,7 @@ enum {
     ID_LOBBYLABEL, ID_TAB_MODS, ID_MODS, ID_RECHECK,
     /* the Settings tab */
     ID_TAB_SET, ID_SET_NOTE, ID_SL_RES, ID_SL_X, ID_SL_FOV, ID_SL_FPS, ID_SL_WS, ID_SET_W, ID_SET_H, ID_SET_FOV, ID_SET_FPS,
-    ID_SET_WS, ID_SF_RES, ID_SF_FOV, ID_SF_FPS, ID_SF_WS, ID_SET_FRIEND, ID_SET_FIX, ID_SET_MATCH, ID_SET_APPLY, ID_STATS,
+    ID_SET_WS, ID_SF_RES, ID_SF_FOV, ID_SF_FPS, ID_SF_WS, ID_SET_FRIEND, ID_SET_FIX, ID_SET_APPLY, ID_STATS,
     ID_GAMEMODE, /* keep last */
 };
 
@@ -607,7 +607,6 @@ static void build(void)
     framed(ID_SET_WS, E, WS_TABSTOP | ES_AUTOHSCROLL, 180, 504, 64, 26, 6, 5);
     g_frame_tab = -1;
     ctl(ID_SET_FIX, B, WTEXT("Install SCCT Fix"), OD, 0, 28, 534, 170, 24, g_font);
-    ctl(ID_SET_MATCH, B, WTEXT("Match friend"), OD, 0, 206, 534, 132, 24, g_font);
     ctl(ID_SET_FRIEND, B, WTEXT("Use friend's"), OD, 0, 346, 534, 112, 24, g_font);
     ctl(ID_SET_APPLY, B, WTEXT("Apply"), OD, 0, 466, 534, 110, 24, g_bold);
 }
@@ -854,7 +853,6 @@ static void refresh_controls(void)
     EnableWindow(g_c[ID_SET_APPLY], g_set.found && !g_closing);
     EnableWindow(g_c[ID_SET_FRIEND], g_set.friend_ && !g_closing);
     EnableWindow(g_c[ID_SET_FIX], g_set.found && !g_closing);
-    EnableWindow(g_c[ID_SET_MATCH], g_set.friend_ && g_set.found && !g_closing);
     static int ro = -1;
     int want_ro = host || (join && s->lobby);
     if (want_ro != ro) { SendMessageW(g_c[ID_LOBBY], EM_SETREADONLY, (WPARAM)want_ro, 0); ro = want_ro; }
@@ -881,7 +879,8 @@ static void refresh_controls(void)
 /* ---------- the live stats window ----------
    A small window that stays on top of the game (the SCCT Fix runs it
    borderless, so it shows over it): ping, packet loss and packets per second
-   for each linked friend. Drag it anywhere; right-click or "Live stats" closes it. */
+   for each linked friend, and the game's frame rate (even playing alone).
+   Drag it anywhere; right-click or "Live stats" closes it. */
 static HWND g_stats;
 static char g_stats_text[400];
 #define WM_NCHITTEST 0x84
@@ -917,7 +916,7 @@ static LRESULT WINAPI stats_proc(HWND w, UINT m, WPARAM wp, LPARAM lp)
         SelectObject(dc, g_font);
         SetTextColor(dc, T.text);
         static WCHAR wl[200];
-        const char *l = g_stats_text[0] ? g_stats_text : "Not linked to a friend yet.";
+        const char *l = g_stats_text[0] ? g_stats_text : "Starting...";
         for (int i = 0; *l; i++) {
             const char *e = strchr(l, '\n');
             int n = e ? (int)(e - l) : (int)strlen(l);
@@ -936,6 +935,7 @@ static LRESULT WINAPI stats_proc(HWND w, UINT m, WPARAM wp, LPARAM lp)
     case WM_NCRBUTTONUP: DestroyWindow(w); return 0;
     case WM_DESTROY:
         g_stats = 0;
+        push_cmd(CMD_STATS, 0);
         set_text(ID_STATS, "Live stats");
         return 0;
     default:
@@ -945,11 +945,12 @@ static LRESULT WINAPI stats_proc(HWND w, UINT m, WPARAM wp, LPARAM lp)
 
 static void stats_toggle(void)
 {
-    if (g_stats) { DestroyWindow(g_stats); return; }
+    if (g_stats) { DestroyWindow(g_stats); return; } /* WM_DESTROY tells the engine */
     g_stats = CreateWindowExW(0x8 | 0x80 | 0x08000000 /* topmost, tool window, doesn't take focus */,
                               WTEXT("SCCTLinkStats"), WTEXT("SCCTLink live stats"), 0x80000000 | 0x800000 /* popup, thin border */,
                               S_(16), S_(16), S_(420), S_(50), 0, 0, GetModuleHandleW(0), 0);
     if (!g_stats) return;
+    push_cmd(CMD_STATS, 1); /* start measuring the game's frame rate */
     stats_layout();
     ShowWindow(g_stats, 4 /* SW_SHOWNOACTIVATE */);
     set_text(ID_STATS, "Hide live stats");
@@ -1108,11 +1109,6 @@ static void on_command(int id, int code)
     case ID_TAB_SET: show_tab(TAB_SET); break;
     case ID_SET_APPLY: apply_clicked(); break;
     case ID_SET_FRIEND: use_friends(); break;
-    case ID_SET_MATCH:
-        g_set_warn = false;
-        set_text(ID_SET_NOTE, "Matching your friend...");
-        push_cmd(CMD_MATCH_FRIEND, 0);
-        break;
     case ID_STATS: stats_toggle(); break;
     case ID_SET_FIX:
         g_set_warn = false;

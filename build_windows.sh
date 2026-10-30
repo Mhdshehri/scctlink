@@ -32,6 +32,7 @@ mkdef user32 OpenClipboard@4 EmptyClipboard@0 SetClipboardData@8 GetClipboardDat
     FlashWindowEx@4 GetForegroundWindow@0 MessageBeep@4
 mkdef gdi32 CreateFontW@56 GetDeviceCaps@8 CreateSolidBrush@4 CreatePen@12 SelectObject@8 DeleteObject@4 \
     GetStockObject@4 SetTextColor@8 SetBkColor@8 SetBkMode@8 RoundRect@28
+mkdef advapi32 StartTraceW@12 ControlTraceW@20 EnableTraceEx2@44 OpenTraceW@4 ProcessTrace@16 CloseTrace@8
 mkdef comctl32 InitCommonControls@0
 mkdef shell32 ShellExecuteA@24
 mkdef ws2_32 WSAStartup@8 socket@12 bind@12 connect@12 listen@8 accept@12 send@16 recv@16 \
@@ -55,6 +56,6 @@ clang $CFLAGS -fuse-ld=lld -nostdlib -nostartfiles \
     -Wl,-e,mainCRTStartup -Wl,--subsystem,windows:6.0 -Wl,--dynamicbase -Wl,--nxcompat \
     -Wl,--no-insert-timestamp -Wl,--build-id=none \
     -o "$OUT/SCCTLink.exe" $SRC "$OUT/scctlink_res.obj" \
-    -L"$OUT/lib" -lkernel32 -luser32 -lgdi32 -lcomctl32 -lshell32 -lws2_32 -lmsvcrt
+    -L"$OUT/lib" -lkernel32 -ladvapi32 -luser32 -lgdi32 -lcomctl32 -lshell32 -lws2_32 -lmsvcrt
 echo "built $OUT/SCCTLink.exe"
 sha256sum "$OUT/SCCTLink.exe"

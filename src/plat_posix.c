@@ -325,6 +325,11 @@ bool run_program(const char *exe, const char *args, const char *dir)
     return true;
 }
 bool game_is_running(const char *prefix) { GameNet g; game_scan(prefix, &g); return g.running; }
+/* tests: the "measured" frame rate comes from MOCK_FPS */
+static bool g_fps_on;
+bool fps_start(void) { g_fps_on = true; return getenv("MOCK_FPS") != 0; }
+void fps_stop(void) { g_fps_on = false; }
+int fps_get(void) { const char *f = getenv("MOCK_FPS"); return g_fps_on && f ? atoi(f) : -1; }
 void set_title(const char *t) { (void)t; }
 void u64_to_str(u64 v, char out[24]) { snprintf(out, 24, "%llu", (unsigned long long)v); }
 u64 str_to_u64(const char *s) { return strtoull(s, 0, 10); }

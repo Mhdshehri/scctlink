@@ -18,7 +18,7 @@ typedef enum {
     CMD_SET_VERSUS,  /* arg = 1: Versus (Spies vs. Mercenaries), 0: co-op. Only when stopped. */
     CMD_KICK,        /* host: arg = friend's Steam id */
     CMD_RECHECK,     /* list the game files again and compare with the friends again */
-    CMD_MATCH_FRIEND, /* Settings tab: take the friend's settings and the SCCT Fix if they have it */
+    CMD_STATS,       /* arg 1: the live stats window is open (measure the game's frame rate), 0: closed */
     CMD_SCCTFIX,      /* arg 1: put the SCCT Fix (d3d9.dll + StartupFullscreen=False) into the game's System folder, 0: take it out */
     CMD_APPLY_SETTINGS, /* arg = settings_pack(): write resolution / FOV / FPS limit into the game's .ini files */
     CMD_STOP,        /* stop hosting/joining, back to the start screen */
@@ -35,7 +35,7 @@ typedef struct {
     u64 lobby;            /* host: own lobby; join: lobby joined */
     uint8_t done;         /* "How to" steps finished, one bit each (see make_status) */
     char status[160];     /* one-line summary for the big status label */
-    char stats[400];      /* the live stats window: one line per linked friend ("" = nobody linked) */
+    char stats[400];      /* the live stats window: the game's frame rate, then one line per linked friend */
 } UiState;
 
 #define UI_NAME 72
@@ -59,7 +59,6 @@ typedef struct {
     bool have_fov, have_ws;     /* there is a FOV setting / the widescreen fix to write to */
     bool friend_;               /* a friend's values are known */
     int fw, fh, ffov, ffps, fwsfov;
-    int ffix;                   /* the friend's SCCT Fix: 1 installed, 0 not, -1 unknown */
     char friend_name[64];
     int scctfix;                 /* the SCCT Fix: 0 not there, 1 installed, 2 another d3d9.dll is there, -1 no game folder */
     char note[200];             /* what the last Apply did */

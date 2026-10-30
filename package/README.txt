@@ -49,9 +49,13 @@ FRIEND(S)
        Co-op:  Co-op -> LAN -> Join game.    Versus: the LAN game list.
   3. Leave SCCTLink open while you play.
 
-Live stats = a small window that stays on top of the game with the ping,
-packet loss and packets per second for each linked friend. Drag it anywhere;
-right-click it (or click the button again) to close it.
+Live stats = a small window that stays on top of the game. It shows the
+game's frame rate (FPS) all the time - playing the story alone, in the menu,
+or online - and while you're linked the ping, packet loss and packets per
+second for each friend. The FPS comes from Windows' own performance events
+(like PresentMon / Xbox Game Bar): nothing is put into the game, and it is
+only measured while the window is open. Drag it anywhere; right-click it (or
+click the button again) to close it.
 Other buttons: Details = ping, packet loss, ports (in the Log). Stop = back
 to the start. Host: pick a friend in the list and click Kick to remove them
 (they can't link again until you click Stop).
@@ -92,8 +96,6 @@ Settings = change resolution, FOV and FPS limit (and the widescreen fix's
            changed, the original is kept next to it as
            <name>.scctlink-backup - to undo, delete the changed file and
            remove ".scctlink-backup" from the backup's name.
-           "Match friend" does it all in one click: your friend's
-           resolution, FOV and FPS limits, plus the SCCT Fix if they have it.
            Also here: "Install SCCT Fix" / "Remove SCCT Fix".
 
 
@@ -231,9 +233,9 @@ StartupFullscreen when the DLL is already there, guides updated.
 swapped in (a failed write never leaves half a file), oversized .ini files
 are left alone, less memory for a stalled TCP stream.
 0.9.4: opens faster (game file checksums are cached and only changed files
-are read again), "Match friend" (the friend's settings and the SCCT Fix in
-one click), "Live stats" window (ping, packet loss, packets per second, on
-top of the game).
+are read again), "Live stats" window on top of the game (the game's FPS
+even playing alone; ping, packet loss and packets per second while linked),
+a reminder in co-op when the SCCT Fix isn't installed.
 
 Tested end to end on a simulated network: separate "PCs", a stand-in for the
 game that finds LAN games by broadcast (including the real game's encrypted

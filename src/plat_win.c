@@ -337,6 +337,139 @@ static bool pid_is_game(DWORD pid)
     return false;
 }
 
+/* ---- the game's frame rate: ETW "Present" events (what PresentMon reads) ----
+   A private real-time trace session gets the Microsoft-Windows-D3D9 and
+   Microsoft-Windows-DXGI providers' Present events of every program; the
+   ones from the game's process are counted. Needs administrator rights
+   (SCCTLink has them). The game itself is not touched. */
+typedef uint64_t TRACEHANDLE;
+typedef uint16_t WCHAR_T_;
+typedef unsigned long ULONG_T_;
+typedef struct { uint32_t a; uint16_t b, c; uint8_t d[8]; } EtwGuid;
+typedef struct { /* EVENT_TRACE_PROPERTIES (32-bit), followed by the session name */
+    uint32_t buffer_size, provider_id; uint64_t historical; int64_t timestamp; EtwGuid guid; uint32_t client_context, flags;
+    uint32_t size_kb, min_buffers, max_buffers, max_file, log_file_mode, flush_timer, enable_flags;
+    int32_t age_limit;
+    uint32_t n_buffers, free_buffers, events_lost, buffers_written, log_buffers_lost, rt_buffers_lost;
+    HANDLE logger_thread;
+    uint32_t log_file_name_offset, logger_name_offset;
+} EtwProps;
+typedef struct { /* EVENT_TRACE (32-bit) */
+    uint16_t size, field_type; uint32_t version, thread_id, process_id; int64_t timestamp; EtwGuid guid; uint64_t processor_time;
+    uint32_t instance_id, parent_instance_id; EtwGuid parent_guid; void *mof_data; uint32_t mof_length, client_context;
+} EtwEventTrace;
+typedef struct { uint16_t st[8]; } EtwSystemTime;
+typedef struct { /* TRACE_LOGFILE_HEADER (32-bit) */
+    uint32_t buffer_size, version, provider_version, n_processors; int64_t end_time;
+    uint32_t timer_resolution, max_file_size, log_file_mode, buffers_written;
+    EtwGuid log_instance_guid; WCHAR_T_ *logger_name, *log_file_name;
+    int32_t bias; uint16_t std_name[32]; EtwSystemTime std_date; int32_t std_bias;
+    uint16_t dst_name[32]; EtwSystemTime dst_date; int32_t dst_bias;
+    int64_t boot_time, perf_freq, start_time; uint32_t reserved_flags, buffers_lost;
+} EtwLogfileHeader;
+typedef struct { /* EVENT_TRACE_LOGFILEW (32-bit) */
+    WCHAR_T_ *log_file_name, *logger_name; int64_t current_time; uint32_t buffers_read, process_trace_mode;
+    EtwEventTrace current_event; EtwLogfileHeader header;
+    void *buffer_callback; uint32_t buffer_size, filled, events_lost;
+    void(WINAPI *event_record_callback)(const uint8_t *record);
+    uint32_t is_kernel_trace; void *context;
+} EtwLogfile;
+IMP ULONG_T_ WINAPI StartTraceW(TRACEHANDLE *h, const WCHAR_T_ *name, EtwProps *p);
+IMP ULONG_T_ WINAPI ControlTraceW(TRACEHANDLE h, const WCHAR_T_ *name, EtwProps *p, ULONG_T_ code);
+IMP ULONG_T_ WINAPI EnableTraceEx2(TRACEHANDLE h, const EtwGuid *provider, ULONG_T_ code, uint8_t level, uint64_t any,
+                                   uint64_t all, ULONG_T_ timeout, void *params);
+IMP TRACEHANDLE WINAPI OpenTraceW(EtwLogfile *l);
+IMP ULONG_T_ WINAPI ProcessTrace(TRACEHANDLE *h, ULONG_T_ n, void *start, void *end);
+IMP ULONG_T_ WINAPI CloseTrace(TRACEHANDLE h);
+IMP HANDLE WINAPI CreateThread(void *sa, size_t stack, DWORD(WINAPI *fn)(void *), void *arg, DWORD flags, DWORD *tid);
+
+static const EtwGuid D3D9_PROVIDER = { 0x783aca0a, 0x790e, 0x4d7f, { 0x84, 0x51, 0xaa, 0x85, 0x05, 0x11, 0xc6, 0xb9 } };
+static const EtwGuid DXGI_PROVIDER = { 0xca11c036, 0x0102, 0x4a2d, { 0xa6, 0xad, 0xf0, 0x3c, 0xfe, 0xd5, 0xd3, 0xc9 } };
+static const WCHAR_T_ FPS_SESSION[] = { 'S', 'C', 'C', 'T', 'L', 'i', 'n', 'k', ' ', 'F', 'P', 'S', 0 };
+static struct { EtwProps p; WCHAR_T_ name[32]; } g_etw;
+static TRACEHANDLE g_etw_session, g_etw_trace;
+static volatile long g_frames_d3d9, g_frames_dxgi;
+static volatile bool g_fps_on;
+static u64 g_fps_at;
+static long g_fps_last9, g_fps_lastx;
+
+static void WINAPI fps_event(const uint8_t *r)
+{
+    /* EVENT_HEADER: ProcessId at 12, ProviderId at 24, EventDescriptor.Id at 40 */
+    uint32_t pid; uint16_t id;
+    memcpy(&pid, r + 12, 4);
+    memcpy(&id, r + 40, 2);
+    if (!pid_is_game(pid)) return;
+    if (id == 1 && !memcmp(r + 24, &D3D9_PROVIDER, 16)) g_frames_d3d9++;       /* Present start */
+    else if (id == 42 && !memcmp(r + 24, &DXGI_PROVIDER, 16)) g_frames_dxgi++;  /* Present start */
+}
+
+static DWORD WINAPI fps_thread(void *arg)
+{
+    (void)arg;
+    ProcessTrace(&g_etw_trace, 1, 0, 0); /* returns when the session stops */
+    CloseTrace(g_etw_trace);
+    return 0;
+}
+
+static void etw_props(void)
+{
+    memset(&g_etw, 0, sizeof g_etw);
+    g_etw.p.buffer_size = sizeof g_etw;
+    g_etw.p.flags = 0x00020000;        /* WNODE_FLAG_TRACED_GUID */
+    g_etw.p.client_context = 1;        /* QPC time stamps */
+    g_etw.p.log_file_mode = 0x100;     /* EVENT_TRACE_REAL_TIME_MODE */
+    g_etw.p.flush_timer = 1;
+    g_etw.p.logger_name_offset = sizeof g_etw.p;
+}
+
+bool fps_start(void)
+{
+    if (g_fps_on) return true;
+    etw_props();
+    ControlTraceW(0, FPS_SESSION, &g_etw.p, 1 /* stop a session left over from a crash */);
+    etw_props();
+    if (StartTraceW(&g_etw_session, FPS_SESSION, &g_etw.p) != 0) return false;
+    EnableTraceEx2(g_etw_session, &D3D9_PROVIDER, 1, 4, ~0ull, 0, 0, 0);
+    EnableTraceEx2(g_etw_session, &DXGI_PROVIDER, 1, 4, ~0ull, 0, 0, 0);
+    static EtwLogfile lf;
+    memset(&lf, 0, sizeof lf);
+    lf.logger_name = (WCHAR_T_ *)FPS_SESSION;
+    lf.process_trace_mode = 0x100 | 0x10000000; /* real time, EVENT_RECORD callback */
+    lf.event_record_callback = fps_event;
+    g_etw_trace = OpenTraceW(&lf);
+    if (g_etw_trace == (TRACEHANDLE)-1 || g_etw_trace == 0xFFFFFFFFull) { fps_stop(); return false; }
+    HANDLE t = CreateThread(0, 0, fps_thread, 0, 0, 0);
+    if (!t) { CloseTrace(g_etw_trace); fps_stop(); return false; }
+    CloseHandle(t);
+    g_fps_on = true;
+    g_fps_at = GetTickCount64();
+    g_fps_last9 = g_frames_d3d9;
+    g_fps_lastx = g_frames_dxgi;
+    return true;
+}
+
+void fps_stop(void)
+{
+    etw_props();
+    ControlTraceW(g_etw_session, 0, &g_etw.p, 1 /* EVENT_TRACE_CONTROL_STOP: ProcessTrace returns */);
+    g_etw_session = 0;
+    g_fps_on = false;
+}
+
+int fps_get(void)
+{
+    if (!g_fps_on) return -1;
+    u64 t = GetTickCount64();
+    if (t - g_fps_at < 250) return -2; /* too soon: keep the last value */
+    long f9 = g_frames_d3d9, fx = g_frames_dxgi;
+    long d9 = f9 - g_fps_last9, dx = fx - g_fps_lastx;
+    unsigned ms = (unsigned)(t - g_fps_at);
+    g_fps_at = t; g_fps_last9 = f9; g_fps_lastx = fx;
+    long frames = d9 > dx ? d9 : dx; /* the game's own API; the other may be an overlay */
+    return (int)((unsigned)frames * 1000u / ms);
+}
+
 static void *get_table(GetTable_t fn, int cls)
 {
     static uint8_t *buf[2];
