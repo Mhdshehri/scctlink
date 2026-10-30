@@ -25,7 +25,7 @@
 #include "plat.h"
 #include "ui.h"
 
-#define VERSION "0.9"
+#define VERSION "0.9.1"
 #define SCCT_APPID 13570
 #define SPACEWAR_APPID 480
 #define MAX_PEERS 3
@@ -1976,7 +1976,8 @@ static const SetDef SETS[] = {
     { "ws_res", "Resolution (widescreen fix)", false },
     { "ws_fov", "FOV (widescreen fix)", true },
     { "ws_fps", "FPS limit (widescreen fix)", true },
-    { "fpsfix", "FPS fix (60 FPS cap)", true },
+    { "fpsfix", "SCCT Fix (60 FPS cap, borderless)", true },
+    { "fullscreen", "Starts in fullscreen", true },
 };
 #define NSETS ((int)(sizeof SETS / sizeof *SETS))
 
@@ -2076,6 +2077,8 @@ static void settings_collect(void)
     sfmt(path, sizeof path, "%s" PATHSEP "scripts", g_mf_dir);
     dir_list(path, ws_ini_cb, path);
     set_add("fpsfix", fpsfix_state() == 1 ? "installed" : "not installed");
+    sfmt(path, sizeof path, "%s" PATHSEP "SplinterCell3.ini", sys);
+    if (ini_get(path, "WinDrv.WindowsClient", "StartupFullscreen", v, sizeof v)) set_add("fullscreen", (v[0] | 32) == 't' ? "yes" : "no");
 }
 
 /* Write value for key (in section, or anywhere if section is 0) into an .ini
@@ -2146,7 +2149,7 @@ static int ini_set(const char *path, const char *section, const char *key, const
     return ok ? hits : -1;
 }
 
-/* ---------- the FPS fix ----------
+/* ---------- the SCCT Fix ----------
    A small d3d9.dll that caps the game at 60 FPS, plus
    borderless window / Alt+Tab fixes. Chaos Theory's co-op runs the same
    simulation on both PCs and ends the session when they drift apart; a high
@@ -2191,31 +2194,37 @@ static UiSettings g_uiset;
 static void fpsfix_(bool install)
 {
     char src[900], dst[900], bak[920], hex[65];
-    if (fpsfix_state() < 0) { set_say("! FPS fix: the game's folder wasn't found (only Steam copies)."); return; }
-    if (game_is_running(g_exe)) { set_say("! FPS fix: close Splinter Cell first."); return; }
+    if (fpsfix_state() < 0) { set_say("! SCCT Fix: the game's folder wasn't found (only Steam copies)."); return; }
+    if (game_is_running(g_exe)) { set_say("! SCCT Fix: close Splinter Cell first."); return; }
     fpsfix_paths(src, dst, bak, sizeof src);
     int st = fpsfix_state();
     if (install) {
-        if (st == 1) { set_say("FPS fix: already installed."); return; }
-        if (!sha256_file(src, hex)) { set_say("! FPS fix: " FPSFIX_FILE " is missing (it must be next to SCCTLink.exe)."); return; }
-        if (strcmp(hex, fpsfix_sha())) { set_say("! FPS fix: " FPSFIX_FILE " is not the expected file, so it was NOT installed."); return; }
+        if (st == 1) { set_say("SCCT Fix: already installed."); return; }
+        if (!sha256_file(src, hex)) { set_say("! SCCT Fix: " FPSFIX_FILE " is missing (it must be next to SCCTLink.exe)."); return; }
+        if (strcmp(hex, fpsfix_sha())) { set_say("! SCCT Fix: " FPSFIX_FILE " is not the expected file, so it was NOT installed."); return; }
         if (st == 2) { /* another d3d9.dll (another mod): keep it */
-            if (file_exists(bak)) { set_say("! FPS fix: there is another d3d9.dll in System and already a backup - move it out yourself first."); return; }
-            if (rename(dst, bak) != 0) { set_say("! FPS fix: couldn't move the other d3d9.dll aside."); return; }
-            say("FPS fix: the other d3d9.dll was renamed to d3d9.dll.scctlink-backup.");
+            if (file_exists(bak)) { set_say("! SCCT Fix: there is another d3d9.dll in System and already a backup - move it out yourself first."); return; }
+            if (rename(dst, bak) != 0) { set_say("! SCCT Fix: couldn't move the other d3d9.dll aside."); return; }
+            say("SCCT Fix: the other d3d9.dll was renamed to d3d9.dll.scctlink-backup.");
         }
         if (!copy_file(src, dst) || !sha256_file(dst, hex) || strcmp(hex, fpsfix_sha())) {
             remove(dst);
             if (st == 2) rename(bak, dst);
-            set_say("! FPS fix: couldn't copy it into the game's System folder.");
+            set_say("! SCCT Fix: couldn't copy it into the game's System folder.");
             return;
         }
-        set_say("FPS fix installed: the game is capped at 60 FPS. Both players need it.");
+        char ini[900];
+        sfmt(ini, sizeof ini, "%s" PATHSEP "System" PATHSEP "SplinterCell3.ini", g_mf_dir);
+        if (ini_set(ini, "WinDrv.WindowsClient", "StartupFullscreen", "False") < 0) say("! SCCT Fix: couldn't set StartupFullscreen=False in SplinterCell3.ini.");
+        set_say("SCCT Fix installed: 60 FPS cap, borderless window (StartupFullscreen=False). Both players need it.");
     } else {
-        if (st != 1) { set_say(st == 2 ? "! FPS fix: the d3d9.dll in System is another mod, not the FPS fix - left alone." : "FPS fix: not installed."); return; }
-        if (remove(dst) != 0) { set_say("! FPS fix: couldn't remove it."); return; }
-        if (file_exists(bak) && rename(bak, dst) == 0) say("FPS fix: the earlier d3d9.dll was put back.");
-        set_say("FPS fix removed.");
+        if (st != 1) { set_say(st == 2 ? "! SCCT Fix: the d3d9.dll in System is another mod, not the SCCT Fix - left alone." : "SCCT Fix: not installed."); return; }
+        if (remove(dst) != 0) { set_say("! SCCT Fix: couldn't remove it."); return; }
+        if (file_exists(bak) && rename(bak, dst) == 0) say("SCCT Fix: the earlier d3d9.dll was put back.");
+        char ini[900];
+        sfmt(ini, sizeof ini, "%s" PATHSEP "System" PATHSEP "SplinterCell3.ini", g_mf_dir);
+        ini_set(ini, "WinDrv.WindowsClient", "StartupFullscreen", "True");
+        set_say("SCCT Fix removed (the game starts in fullscreen again).");
     }
 }
 static void fpsfix(bool install)

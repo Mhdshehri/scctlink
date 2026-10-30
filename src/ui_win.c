@@ -605,7 +605,7 @@ static void build(void)
     framed(ID_SET_FPS, E, NUM, 180, 474, 64, 26, 6, 5);
     framed(ID_SET_WS, E, WS_TABSTOP | ES_AUTOHSCROLL, 180, 504, 64, 26, 6, 5);
     g_frame_tab = -1;
-    ctl(ID_SET_FIX, B, WTEXT("Install FPS fix"), OD, 0, 28, 534, 170, 24, g_font);
+    ctl(ID_SET_FIX, B, WTEXT("Install SCCT Fix"), OD, 0, 28, 534, 170, 24, g_font);
     ctl(ID_SET_FRIEND, B, WTEXT("Use friend's"), OD, 0, 346, 534, 112, 24, g_font);
     ctl(ID_SET_APPLY, B, WTEXT("Apply"), OD, 0, 466, 534, 110, 24, g_bold);
 }
@@ -769,12 +769,12 @@ static void show_settings(const UiSettings *n)
     if (!n->have_fov && !n->friend_) set_text(ID_SF_FOV, "(not in the game's files)");
     EnableWindow(g_c[ID_SET_FOV], n->have_fov);
     EnableWindow(g_c[ID_SET_WS], n->have_ws);
-    set_text(ID_SET_FIX, n->fpsfix == 1 ? "Remove FPS fix" : "Install FPS fix (60 FPS)");
+    set_text(ID_SET_FIX, n->fpsfix == 1 ? "Remove SCCT Fix" : "Install SCCT Fix");
     g_set_warn = n->note_warn;
     if (n->note[0]) set_text(ID_SET_NOTE, n->note);
     else if (!n->found) set_text(ID_SET_NOTE, "The game's folder wasn't found (only Steam copies of the game can be changed).");
-    else if (n->fpsfix != 1) set_text(ID_SET_NOTE, "Co-op disconnects at high frame rates: install the FPS fix on both PCs (close the game first).");
-    else set_text(ID_SET_NOTE, "FPS fix installed. Close Splinter Cell before changing settings.");
+    else if (n->fpsfix != 1) set_text(ID_SET_NOTE, "SCCT Fix: 60 FPS cap, borderless, Alt+Tab, crash log. Co-op needs it on both PCs (close the game first).");
+    else set_text(ID_SET_NOTE, "SCCT Fix installed (60 FPS cap, borderless, Alt+Tab, crash log). Close the game before changing settings.");
     RedrawWindow(g_c[ID_SET_NOTE], 0, 0, 0x1 | 0x4);
 }
 
@@ -1132,7 +1132,7 @@ int main(int argc, char **argv)
     AdjustWindowRectEx(&r, style, 0, 0);
     int ww = r.right - r.left, wh = r.bottom - r.top;
     int x = (GetSystemMetrics(0) - ww) / 2, y = (GetSystemMetrics(1) - wh) / 2;
-    g_wnd = CreateWindowExW(0, wc.className, WTEXT("SCCTLink 0.9 - Splinter Cell: Chaos Theory"), style, x < 0 ? 0 : x,
+    g_wnd = CreateWindowExW(0, wc.className, WTEXT("SCCTLink 0.9.1 - Splinter Cell: Chaos Theory"), style, x < 0 ? 0 : x,
                             y < 0 ? 0 : y, ww, wh, 0, 0, inst, 0);
     if (!g_wnd) return 1;
     build();
