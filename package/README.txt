@@ -1,4 +1,4 @@
-SCCTLink 0.9.6 - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
+SCCTLink 0.9.7 - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
 ==============================================================================
 
 No VPN (no Hamachi, Radmin or ZeroTier), no port forwarding, no IP addresses.
@@ -13,7 +13,7 @@ Both players need:
   * each other on their Steam friends list
   * this folder unzipped somewhere (Desktop is fine). Keep SCCTLink.exe,
     steam_api.dll and SCCTFix-d3d9.dll together.
-  * the SAME SCCTLink version (0.9.6).
+  * the SAME SCCTLink version (0.9.7).
 
 
 HOW TO PLAY
@@ -99,6 +99,10 @@ Settings = change resolution, FOV and FPS limit (and the widescreen fix's
            changed, the original is kept next to it as
            <name>.scctlink-backup - to undo, delete the changed file and
            remove ".scctlink-backup" from the backup's name.
+           FOV for your screen: the 4:3 / 16:10 / 16:9 buttons fill in 75 /
+           85 / 91 (the game's default 75 is made for old 4:3 screens and
+           looks cut off on wide ones). Then Apply. In co-op both players
+           need the SAME FOV, so agree on one number.
            Also here: "Install SCCT Fix" / "Remove SCCT Fix".
 
 
@@ -241,6 +245,8 @@ even playing alone; ping, packet loss and packets per second while linked),
 a reminder in co-op when the SCCT Fix isn't installed.
 0.9.6: "Report" button in the Log tab (a GitHub problem report, filled in,
 plus the log file to drag into it).
+0.9.7: FOV buttons for the screen's shape in the Settings tab (4:3 = 75,
+16:10 = 85, 16:9 = 91).
 
 Tested end to end on a simulated network: separate "PCs", a stand-in for the
 game that finds LAN games by broadcast (including the real game's encrypted

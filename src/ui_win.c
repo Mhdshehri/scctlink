@@ -158,7 +158,7 @@ enum {
     ID_LOBBYLABEL, ID_TAB_MODS, ID_MODS, ID_RECHECK,
     /* the Settings tab */
     ID_TAB_SET, ID_SET_NOTE, ID_SL_RES, ID_SL_X, ID_SL_FOV, ID_SL_FPS, ID_SL_WS, ID_SET_W, ID_SET_H, ID_SET_FOV, ID_SET_FPS,
-    ID_SET_WS, ID_SF_RES, ID_SF_FOV, ID_SF_FPS, ID_SF_WS, ID_SET_FRIEND, ID_SET_FIX, ID_SET_APPLY, ID_STATS,
+    ID_SET_WS, ID_SF_RES, ID_SF_FOV, ID_SF_FPS, ID_SF_WS, ID_SET_FRIEND, ID_SET_FIX, ID_FOV43, ID_FOV1610, ID_FOV169, ID_SET_APPLY, ID_STATS,
     ID_GAMEMODE, /* keep last */
 };
 
@@ -598,12 +598,17 @@ static void build(void)
     for (int i = 0; i < 4; i++) {
         int y = 416 + i * 30;
         ctl(rows[i].label, T_, rows[i].text, ELL, 0, 28, y + 5, 150, 18, g_font);
-        ctl(rows[i].fid, T_, WTEXT(""), ELL, 0, 350, y + 5, 226, 18, g_font);
+        ctl(rows[i].fid, T_, WTEXT(""), ELL, 0, 366, y + 5, 210, 18, g_font);
     }
     framed(ID_SET_W, E, NUM, 180, 414, 64, 26, 6, 5);
     ctl(ID_SL_X, T_, WTEXT("x"), 0, 0, 250, 419, 12, 18, g_font);
     framed(ID_SET_H, E, NUM, 264, 414, 64, 26, 6, 5);
     framed(ID_SET_FOV, E, NUM, 180, 444, 64, 26, 6, 5);
+    /* FOV for the screen's shape (the game's default 75 is for 4:3). Co-op
+       needs the same number on both PCs, so it's a choice, never automatic. */
+    ctl(ID_FOV43, B, WTEXT("4:3"), OD, 0, 250, 445, 32, 24, g_font);
+    ctl(ID_FOV1610, B, WTEXT("16:10"), OD, 0, 285, 445, 40, 24, g_font);
+    ctl(ID_FOV169, B, WTEXT("16:9"), OD, 0, 328, 445, 34, 24, g_font);
     framed(ID_SET_FPS, E, NUM, 180, 474, 64, 26, 6, 5);
     framed(ID_SET_WS, E, WS_TABSTOP | ES_AUTOHSCROLL, 180, 504, 64, 26, 6, 5);
     g_frame_tab = -1;
@@ -772,6 +777,7 @@ static void show_settings(const UiSettings *n)
     if (!n->have_ws && !n->friend_) set_text(ID_SF_WS, "(widescreen fix not installed)");
     if (!n->have_fov && !n->friend_) set_text(ID_SF_FOV, "(not in the game's files)");
     EnableWindow(g_c[ID_SET_FOV], n->have_fov);
+    for (int i = ID_FOV43; i <= ID_FOV169; i++) EnableWindow(g_c[i], n->have_fov);
     EnableWindow(g_c[ID_SET_WS], n->have_ws);
     set_text(ID_SET_FIX, n->scctfix == 1 ? "Remove SCCT Fix" : "Install SCCT Fix");
     g_set_warn = n->note_warn;
@@ -1161,6 +1167,13 @@ static void on_command(int id, int code)
     case ID_TAB_SET: show_tab(TAB_SET); break;
     case ID_SET_APPLY: apply_clicked(); break;
     case ID_SET_FRIEND: use_friends(); break;
+    case ID_FOV43: case ID_FOV1610: case ID_FOV169:
+        set_text(ID_SET_FOV, id == ID_FOV43 ? "75" : id == ID_FOV1610 ? "85" : "91");
+        g_set_warn = false;
+        set_text(ID_SET_NOTE, id == ID_FOV43 ? "FOV 75 (4:3, the game's default). Click Apply. In co-op your friend needs the same FOV."
+                              : id == ID_FOV1610 ? "FOV 85 (16:10 screens). Click Apply. In co-op your friend needs the same FOV."
+                                                 : "FOV 91 (16:9 screens). Click Apply. In co-op your friend needs the same FOV.");
+        break;
     case ID_STATS: stats_toggle(); break;
     case ID_SET_FIX:
         g_set_warn = false;
