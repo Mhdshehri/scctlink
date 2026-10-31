@@ -27,7 +27,7 @@
 #include "plat.h"
 #include "ui.h"
 
-#define VERSION "0.9.2"
+#define VERSION "0.9.5"
 #define SCCT_APPID 13570
 #define SPACEWAR_APPID 480
 #define MAX_PEERS 3
@@ -45,7 +45,7 @@
 #define MAX_CATCH 64
 #define MAX_STREAMS 32
 #define TCP_CHUNK 16000
-#define TCP_OUTBUF_MAX (8 << 20)
+#define TCP_OUTBUF_MAX (2 << 20)
 #define HDR 7 /* kind, src port, dst port, seq */
 
 static void *U, *F, *MM, *NM, *NU, *AP;
@@ -758,6 +758,8 @@ typedef struct {
     u64 up, down, lost, reordered, swapped, dropped_noport, cap_in, cap_out;
     uint16_t tx_seq, rx_seq; bool rx_started;
     double rtt; bool have_rtt;
+    u64 st_at, st_down, st_up, st_lost; /* live stats: counts at the last sample */
+    int pps_in, pps_out; double loss_avg; bool have_loss;
     Rate rate;
     char *mf; int nmf;        /* the peer's game file list, as it arrives */
     bool mf_sent, mf_done, mf_found;
@@ -828,6 +830,7 @@ static void ring_dump(const char *why);
 static void mods_forget(u64 id);
 static void mods_publish(void);
 static void settings_publish(void);
+static void scctfix_warn(void);
 static void mods_local_text(void);
 
 static void drop_peer(u64 id, const char *why)
@@ -1821,7 +1824,7 @@ static int scan_for_host(bool verbose)
    about the PC (user name, drive) is sent. */
 #define MF_MAX 2000
 #define MF_HASH_MAX (64u << 20) /* bigger files: compared by size only */
-typedef struct { char path[100]; u64 size; char hash[17]; } MFile;
+typedef struct { char path[100]; u64 size, mtime; char hash[17]; } MFile; /* mtime: only for the local cache, never sent */
 static MFile g_mfs[MF_MAX];
 static int g_nmfs = -1;           /* -1: not made yet; 0: game folder not found */
 static char *g_mf_text;
@@ -1830,6 +1833,80 @@ static char g_mf_dir[700];
 
 bool sha256_file(const char *path, char hex[65]);
 
+/* Hashing the program files takes seconds, so the checksums are kept in
+   scctlink_cache.txt next to SCCTLink.exe (file name, size, modified time,
+   checksum) and a file is only hashed again when its size or time changed. */
+#define CACHE_FILE "scctlink_cache.txt"
+static MFile *g_cache;
+static int g_ncache, g_hashed, g_cached;
+/* which game folder the cache is for, without writing the folder's path down */
+static const char *cache_tag(void)
+{
+    static char t[24];
+    u64 h = 1469598103934665603ULL;
+    for (const char *c = g_mf_dir; *c; c++) h = (h ^ (uint8_t)(*c | 32)) * 1099511628211ULL;
+    u64_to_str(h, t);
+    return t;
+}
+static void cache_load(void)
+{
+    g_ncache = 0;
+    if (!g_cache && !(g_cache = calloc(MF_MAX, sizeof *g_cache))) return;
+    char path[800];
+    sfmt(path, sizeof path, "%s" PATHSEP CACHE_FILE, exe_dir());
+    FILE *f = fopen(path, "rb");
+    if (!f) return;
+    char line[300];
+    bool ok = fgets(line, sizeof line, f) && !strncmp(line, "SCCTLINK-CACHE 1\t", 17);
+    if (ok) { /* only for the same game folder */
+        char want[64];
+        sfmt(want, sizeof want, "SCCTLINK-CACHE 1\t%s\n", cache_tag());
+        ok = !strcmp(line, want);
+    }
+    while (ok && g_ncache < MF_MAX && fgets(line, sizeof line, f)) {
+        char *t1 = strchr(line, '\t'), *t2 = t1 ? strchr(t1 + 1, '\t') : 0, *t3 = t2 ? strchr(t2 + 1, '\t') : 0;
+        if (!t3 || t1 - line >= (int)sizeof g_cache[0].path) continue;
+        MFile *c = &g_cache[g_ncache];
+        memcpy(c->path, line, (size_t)(t1 - line)); c->path[t1 - line] = 0;
+        *t2 = *t3 = 0;
+        c->size = str_to_u64(t1 + 1);
+        c->mtime = str_to_u64(t2 + 1);
+        int hl = 0;
+        while (hl < 16 && ((t3[1 + hl] >= '0' && t3[1 + hl] <= '9') || (t3[1 + hl] >= 'a' && t3[1 + hl] <= 'f'))) hl++;
+        if (hl != 16) continue;
+        memcpy(c->hash, t3 + 1, 16); c->hash[16] = 0;
+        g_ncache++;
+    }
+    fclose(f);
+}
+static const char *cache_hash(const char *key, u64 size, u64 mtime)
+{
+    for (int i = 0; i < g_ncache; i++)
+        if (g_cache[i].size == size && g_cache[i].mtime == mtime && !strcmp(g_cache[i].path, key)) return g_cache[i].hash;
+    return 0;
+}
+static void cache_save(void)
+{
+    size_t cap = (size_t)g_nmfs * 160 + 800, k = 0;
+    char *t = malloc(cap);
+    if (!t) return;
+    sfmt(t, cap, "SCCTLINK-CACHE 1\t%s\n", cache_tag());
+    k = strlen(t);
+    for (int i = 0; i < g_nmfs; i++) {
+        MFile *f = &g_mfs[i];
+        if (f->path[0] == '@' || f->hash[0] == '-') continue;
+        char sz[24], mt[24];
+        u64_to_str(f->size, sz);
+        u64_to_str(f->mtime, mt);
+        sfmt(t + k, cap - k, "%s\t%s\t%s\t%s\n", f->path, sz, mt, f->hash);
+        k += strlen(t + k);
+    }
+    char path[800];
+    sfmt(path, sizeof path, "%s" PATHSEP CACHE_FILE, exe_dir());
+    file_write_text(path, t);
+    free(t);
+}
+
 static bool mf_skip(const char *name)
 {
     const char *dot = 0;
@@ -1837,7 +1914,7 @@ static bool mf_skip(const char *name)
     if (!dot) return false;
     static const char *const ext[] = { ".ini", ".log", ".txt", ".sav", ".bak", ".tmp", ".dmp", ".lnk", ".url",
                                        ".pdf", ".htm", ".html", ".rtf", ".old", ".crash", ".zip", ".rar", ".7z",
-                                       ".scctlink-backup" /* SCCTLink's own copies of changed .ini files */ };
+                                       ".scctlink-backup", ".scctlink-new" /* SCCTLink's own copies of changed files */ };
     for (unsigned i = 0; i < sizeof ext / sizeof *ext; i++) {
         const char *a = dot, *b = ext[i];
         while (*a && *b && ((*a | 32) == *b || *a == *b)) { a++; b++; }
@@ -1849,7 +1926,7 @@ static bool mf_skip(const char *name)
 typedef struct { const char *rel; bool hash; int depth; } MfWalk; /* rel: path as on disk */
 static void mf_walk(const char *rel, bool hash, int depth);
 
-static void mf_add(void *ctx, const char *name, bool is_dir, u64 size)
+static void mf_add(void *ctx, const char *name, bool is_dir, u64 size, u64 mtime)
 {
     MfWalk *w = ctx;
     char rel[200], key[200];
@@ -1869,8 +1946,12 @@ static void mf_add(void *ctx, const char *name, bool is_dir, u64 size)
     MFile *f = &g_mfs[g_nmfs++];
     memcpy(f->path, key, strlen(key) + 1);
     f->size = size;
+    f->mtime = mtime;
     memcpy(f->hash, "-", 2);
     if (w->hash && size <= MF_HASH_MAX) {
+        const char *c = cache_hash(key, size, mtime);
+        if (c) { memcpy(f->hash, c, 17); g_cached++; return; }
+        g_hashed++;
         char full[1000], hex[65];
         sfmt(full, sizeof full, "%s" PATHSEP "%s", g_mf_dir, rel);
 #ifdef _WIN32
@@ -1986,9 +2067,9 @@ static void set_add(const char *key, const char *value)
 /* the user settings file can also live in ProgramData\Ubisoft\... */
 static char g_user_ini[800], g_ws_ini[900];
 static void find_user_ini(const char *dir, int depth);
-static void user_ini_cb(void *ctx, const char *name, bool is_dir, u64 size)
+static void user_ini_cb(void *ctx, const char *name, bool is_dir, u64 size, u64 mtime)
 {
-    (void)size;
+    (void)size; (void)mtime;
     const char *dir = ctx;
     char path[800], low[64];
     sfmt(path, sizeof path, "%s" PATHSEP "%s", dir, name);
@@ -2005,9 +2086,9 @@ static void find_user_ini(const char *dir, int depth)
     if (depth < 0) left++;
 }
 
-static void ws_ini_cb(void *ctx, const char *name, bool is_dir, u64 size)
+static void ws_ini_cb(void *ctx, const char *name, bool is_dir, u64 size, u64 mtime)
 {
-    (void)size;
+    (void)size; (void)mtime;
     if (is_dir) return;
     const char *dir = ctx;
     char low[128];
@@ -2084,6 +2165,7 @@ static int ini_set(const char *path, const char *section, const char *key, const
     int len = (int)fread(in, 1, sizeof in - 1, f);
     fclose(f);
     if (len <= 0) return 0;
+    if (len == (int)sizeof in - 1) return -1; /* bigger than any game .ini: don't touch it */
     in[len] = 0;
     bool in_sec = !section;
     int kl = (int)strlen(key), vl = (int)strlen(value), o = 0, hits = 0;
@@ -2133,11 +2215,16 @@ static int ini_set(const char *path, const char *section, const char *key, const
         fwrite(in, 1, (size_t)len, bf);
         fclose(bf);
     }
-    FILE *w = fopen(path, "wb");
+    /* write a new file next to it first, so a failed write never leaves half a file */
+    char tmp[1000];
+    sfmt(tmp, sizeof tmp, "%s.scctlink-new", path);
+    FILE *w = fopen(tmp, "wb");
     if (!w) return -1;
     bool ok = fwrite(out, 1, (size_t)o, w) == (size_t)o;
-    fclose(w);
-    return ok ? hits : -1;
+    ok &= fclose(w) == 0;
+    if (!ok || remove(path) != 0) { remove(tmp); return -1; }
+    if (rename(tmp, path) != 0) return -1; /* the new file stays as <name>.scctlink-new, the original as the backup */
+    return hits;
 }
 
 /* ---------- the SCCT Fix ----------
@@ -2348,10 +2435,14 @@ static void mf_make(void)
         note("game files check: the game's folder wasn't found (not a Steam copy?)");
     } else {
         u64 t = now_ms();
+        cache_load();
+        g_hashed = g_cached = 0;
         mf_walk("", false, 3);
         settings_collect();
         mf_sort(g_mfs, g_nmfs);
-        note("game files check: %d files listed in %d ms", files_count(), (int)(now_ms() - t));
+        cache_save();
+        note("game files check: %d files listed in %d ms (%d checksums made, %d from the cache)", files_count(),
+             (int)(now_ms() - t), g_hashed, g_cached);
     }
     mods_local_text();
     mods_publish();
@@ -2815,9 +2906,28 @@ static void drain_steam(void)
     }
 }
 
+/* Live stats, once a second: packets per second each way and packet loss
+   (an average over the last few seconds). */
+static void stats_sample(Peer *p, u64 t)
+{
+    if (!p->st_at) { p->st_at = t; p->st_down = p->down; p->st_up = p->up; p->st_lost = p->lost; return; }
+    if (t - p->st_at < 1000) return;
+    unsigned ms = (unsigned)(t - p->st_at);
+    u64 din = p->down - p->st_down, dout = p->up - p->st_up, dlost = p->lost - p->st_lost;
+    p->pps_in = (int)((unsigned)din * 1000u / ms);
+    p->pps_out = (int)((unsigned)dout * 1000u / ms);
+    if (din + dlost) {
+        double l = 100.0 * (double)dlost / (double)(din + dlost);
+        p->loss_avg = p->have_loss ? p->loss_avg * 0.7 + l * 0.3 : l;
+        p->have_loss = true;
+    }
+    p->st_at = t; p->st_down = p->down; p->st_up = p->up; p->st_lost = p->lost;
+}
+
 static void peer_tick(Peer *p, u64 t)
 {
     if (!p->welcomed) return;
+    stats_sample(p, t);
     poll_aliases(p);
     poll_tcp(p);
     if (t - p->last_ka >= KEEPALIVE_MS) {
@@ -2917,12 +3027,34 @@ static void start_mode(int mode)
     g_is_host = mode == MODE_HOST;
     scan_game(2);
     say("");
+    scctfix_warn();
     if (g_is_host) {
         say("Creating a friends-only %s lobby for %d players...", MODE_NAME, g_max_players);
         S.MM_CreateLobby(MM, LOBBY_FRIENDS_ONLY, g_max_players);
     } else {
         say("Looking for a friend who is hosting %s...", MODE_NAME);
     }
+}
+
+/* the live stats window: is it open, and the game's frame rate */
+static bool g_stats_on;
+static int g_fps = -1;
+static u64 g_fps_at;
+static void stats_tick(u64 t)
+{
+    if (!g_stats_on || t - g_fps_at < 1000) return;
+    g_fps_at = t;
+    if (g_mode == MODE_IDLE) scan_game(0); /* (while linked, the relay keeps this up to date) */
+    int f = fps_get();
+    if (f != -2) g_fps = f;
+}
+
+/* Co-op without the SCCT Fix disconnects as soon as someone draws a weapon: say so. */
+static void scctfix_warn(void)
+{
+    if (g_versus || scctfix_state() == 1 || scctfix_state() < 0) return;
+    say("! The SCCT Fix isn't installed. Co-op disconnects as soon as someone draws a weapon without it.");
+    say("  Close the game, open the Settings tab and click \"Install SCCT Fix\" (both players).");
 }
 
 static void make_status(UiState *st)
@@ -2943,6 +3075,23 @@ static void make_status(UiState *st)
         Peer *h = host_peer();
         bool linked = h && h->welcomed, up = linked && h->rrunning && h->nrudp, playing = h && h->down > 50 && h->up > 50;
         st->done = (uint8_t)((linked ? 1 : 0) | (up ? 2 : 0) | (G.running && linked ? 4 : 0) | (playing ? 8 : 0));
+    }
+    size_t sk = 0;
+    if (g_stats_on) {
+        if (!G.running) sfmt(st->stats, sizeof st->stats, "%s: not running", g_versus ? "Versus" : "Splinter Cell");
+        else if (g_fps >= 0) sfmt(st->stats, sizeof st->stats, "%s: %d FPS", g_versus ? "Versus" : "Splinter Cell", g_fps);
+        else sfmt(st->stats, sizeof st->stats, "%s: running (FPS: Windows didn't allow measuring it)", g_versus ? "Versus" : "Splinter Cell");
+        sk = strlen(st->stats);
+    }
+    for (int i = 0; i < g_npeers && sk < sizeof st->stats - 80; i++) {
+        Peer *p = &g_peers[i];
+        if (!p->welcomed) continue;
+        char ping[16] = "-", loss[16] = "-";
+        if (p->have_rtt) sfmt(ping, sizeof ping, "%d ms", (int)(p->rtt + 0.5));
+        if (p->have_loss) { int l = (int)(p->loss_avg * 10 + 0.5); sfmt(loss, sizeof loss, "%d.%d%%", l / 10, l % 10); }
+        sfmt(st->stats + sk, sizeof st->stats - sk, "%s%s   ping %s   loss %s   %d/%d pkt/s", sk ? "\n" : "",
+             who(p->id), ping, loss, p->pps_in, p->pps_out);
+        sk += strlen(st->stats + sk);
     }
     if (g_mode == MODE_IDLE) {
         sfmt(st->status, sizeof st->status, "Ready (%s). Host a game, or join a friend.", MODE_NAME);
@@ -2998,11 +3147,23 @@ static void handle_cmd(const Cmd *c)
         break;
     case CMD_APPLY_SETTINGS: apply_settings(c->arg); break;
     case CMD_SCCTFIX: scctfix(c->arg != 0); break;
+    case CMD_STATS:
+        if (c->arg && !g_stats_on) {
+            g_stats_on = true;
+            g_fps = -1;
+            scan_game(2);
+            if (!fps_start()) note("frame rate: Windows didn't start the measuring (ETW)");
+        } else if (!c->arg && g_stats_on) {
+            g_stats_on = false;
+            fps_stop();
+        }
+        break;
     case CMD_SET_VERSUS:
         if (g_mode != MODE_IDLE) { say("Click Stop first, then switch between Co-op and Versus."); break; }
         if ((c->arg != 0) != g_versus) {
             set_versus(c->arg != 0);
             say("Mode: %s (%s, up to %d players).", MODE_NAME, g_versus ? "SCCT_Versus.exe" : "the co-op campaign", g_max_players);
+            scctfix_warn();
         }
         break;
     case CMD_STOP: stop_mode(false); break;
@@ -3031,7 +3192,7 @@ void engine_run(const EngineOpts *o, Cmd first)
     /* Connect to Steam right away, so an invite accepted on the start screen
        reaches SCCTLink. If Steam isn't running yet, Host/Join retries. */
     g_steam_ok = steam_start();
-    if (g_steam_ok) mf_make(); /* the "Mods" tab shows this PC's game right away, game running or not */
+    if (g_steam_ok) { mf_make(); scctfix_warn(); } /* the "Mods" tab shows this PC's game right away, game running or not */
     if (first.kind != CMD_NONE) handle_cmd(&first);
 
     u64 last_scan = 0, last_friends = 0, last_state = 0;
@@ -3096,6 +3257,7 @@ void engine_run(const EngineOpts *o, Cmd first)
             }
             if (g_lobby || g_joining) g_refresh = 0;
         }
+        stats_tick(t);
         Cmd c;
         while (ui_poll(&c)) handle_cmd(&c);
 
@@ -3118,6 +3280,7 @@ void engine_run(const EngineOpts *o, Cmd first)
             for (int j = 0; j < g_catch[i].ns && ns < 256; j++) socks[ns++] = g_catch[i].s[j];
         wait_socks(socks, ns, g_mode == MODE_IDLE ? 20 : 1);
     }
+    if (g_stats_on) fps_stop();
     if (g_steam_ok) {
         stop_mode(true);
         S.Shutdown();

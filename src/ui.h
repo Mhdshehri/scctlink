@@ -18,6 +18,7 @@ typedef enum {
     CMD_SET_VERSUS,  /* arg = 1: Versus (Spies vs. Mercenaries), 0: co-op. Only when stopped. */
     CMD_KICK,        /* host: arg = friend's Steam id */
     CMD_RECHECK,     /* list the game files again and compare with the friends again */
+    CMD_STATS,       /* arg 1: the live stats window is open (measure the game's frame rate), 0: closed */
     CMD_SCCTFIX,      /* arg 1: put the SCCT Fix (d3d9.dll + StartupFullscreen=False) into the game's System folder, 0: take it out */
     CMD_APPLY_SETTINGS, /* arg = settings_pack(): write resolution / FOV / FPS limit into the game's .ini files */
     CMD_STOP,        /* stop hosting/joining, back to the start screen */
@@ -34,6 +35,7 @@ typedef struct {
     u64 lobby;            /* host: own lobby; join: lobby joined */
     uint8_t done;         /* "How to" steps finished, one bit each (see make_status) */
     char status[160];     /* one-line summary for the big status label */
+    char stats[400];      /* the live stats window: the game's frame rate, then one line per linked friend */
 } UiState;
 
 #define UI_NAME 72

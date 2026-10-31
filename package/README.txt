@@ -1,4 +1,4 @@
-SCCTLink 0.9.2 - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
+SCCTLink 0.9.5 - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
 ==============================================================================
 
 No VPN (no Hamachi, Radmin or ZeroTier), no port forwarding, no IP addresses.
@@ -13,7 +13,7 @@ Both players need:
   * each other on their Steam friends list
   * this folder unzipped somewhere (Desktop is fine). Keep SCCTLink.exe,
     steam_api.dll and SCCTFix-d3d9.dll together.
-  * the SAME SCCTLink version (0.9.2).
+  * the SAME SCCTLink version (0.9.5).
 
 
 HOW TO PLAY
@@ -49,6 +49,13 @@ FRIEND(S)
        Co-op:  Co-op -> LAN -> Join game.    Versus: the LAN game list.
   3. Leave SCCTLink open while you play.
 
+Live stats = a small window that stays on top of the game. It shows the
+game's frame rate (FPS) all the time - playing the story alone, in the menu,
+or online - and while you're linked the ping, packet loss and packets per
+second for each friend. The FPS comes from Windows' own performance events
+(like PresentMon / Xbox Game Bar): nothing is put into the game, and it is
+only measured while the window is open. Drag it anywhere; right-click it (or
+click the button again) to close it.
 Other buttons: Details = ping, packet loss, ports (in the Log). Stop = back
 to the start. Host: pick a friend in the list and click Kick to remove them
 (they can't link again until you click Stop).
@@ -154,7 +161,8 @@ SAFETY
     whatever Steam's own "IP sharing" setting is. If the game writes your
     LAN address into a packet, SCCTLink replaces it before it leaves your PC.
   * No ports are opened and no router settings change. SCCTLink writes
-    steam_appid.txt and scctlink.log in its own folder. In the game folder it
+    steam_appid.txt, scctlink.log and scctlink_cache.txt (checksums of the game
+    files, so it opens quickly) in its own folder. In the game folder it
     only writes when you click "Apply" (the .ini files, with backups) or
     "Install/Remove SCCT Fix" (System\d3d9.dll and StartupFullscreen).
   * Only the host's Steam friends who joined the lobby get through (others
@@ -221,6 +229,13 @@ real game: shooting, jumping, changing maps, no disconnects.
 StartupFullscreen=False, like the setup that was tested.
 0.9.2: code clean-up (unused code removed), the SCCT Fix button also checks
 StartupFullscreen when the DLL is already there, guides updated.
+0.9.3: security review: .ini files are written to a new file first and then
+swapped in (a failed write never leaves half a file), oversized .ini files
+are left alone, less memory for a stalled TCP stream.
+0.9.5: opens faster (game file checksums are cached and only changed files
+are read again), "Live stats" window on top of the game (the game's FPS
+even playing alone; ping, packet loss and packets per second while linked),
+a reminder in co-op when the SCCT Fix isn't installed.
 
 Tested end to end on a simulated network: separate "PCs", a stand-in for the
 game that finds LAN games by broadcast (including the real game's encrypted

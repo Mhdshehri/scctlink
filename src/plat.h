@@ -60,10 +60,17 @@ int clipboard_get(char *out, int n); /* text on the clipboard, 0 if none */
 void open_url(const char *url);
 bool file_exists(const char *path);
 /* Files and folders directly inside dir (not recursive, no "." / ".."). */
-typedef void (*DirFn)(void *ctx, const char *name, bool is_dir, u64 size);
+typedef void (*DirFn)(void *ctx, const char *name, bool is_dir, u64 size, u64 mtime); /* mtime: any number that changes when the file does */
 void dir_list(const char *dir, DirFn fn, void *ctx);
 bool run_program(const char *exe, const char *args, const char *dir); /* start it, don't wait */
 bool game_is_running(const char *exe_prefix);
+/* The game's frame rate, measured by Windows (ETW present events, like
+   PresentMon): nothing is put into the game. fps_start/fps_stop turn the
+   measuring on and off; fps_get gives frames per second of the process(es)
+   found by the last game_scan since the previous call, -1 if unavailable. */
+bool fps_start(void);
+void fps_stop(void);
+int fps_get(void);
 #ifdef _WIN32
 #define PATHSEP "\\"
 #else

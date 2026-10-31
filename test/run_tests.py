@@ -93,10 +93,14 @@ class Proc:
         for line in self.p.stdout:
             self.log += line
 
-    def wait_for(self, pattern, timeout=15):
+    def mark(self):
+        """wait_for(..., since=p.mark()) only looks at output after this point"""
+        return len(self.log)
+
+    def wait_for(self, pattern, timeout=15, since=0):
         end = time.time() + timeout
         while time.time() < end:
-            m = re.search(pattern, self.log)
+            m = re.search(pattern, self.log[since:])
             if m:
                 return m
             time.sleep(0.05)
@@ -603,8 +607,10 @@ def main():
         with open(os.path.join(pd, "SplinterCell3User.ini"), "wb") as f:  # the host's own settings live in ProgramData
             f.write(b"[Engine.PlayerController]\r\nDesiredFOV=75.000000\r\n")
         ga, gb, gc = game_dir("a", modded), game_dir("b", other), game_dir("c", base)
-        hm = relay(A, "HM", 1191, "1192", ["host"], d, {"MOCK_GAME_DIR": ga, "PROGRAMDATA": os.path.join(gd, "programdata_a")},
-                   stdin=subprocess.PIPE)
+        exe_a, exe_b = os.path.join(d, "exe_a"), os.path.join(d, "exe_b")  # each PC's SCCTLink folder
+        os.makedirs(exe_a, exist_ok=True); os.makedirs(exe_b, exist_ok=True)
+        hm = relay(A, "HM", 1191, "1192", ["host"], d, {"MOCK_GAME_DIR": ga, "PROGRAMDATA": os.path.join(gd, "programdata_a"),
+                                                         "MOCK_EXE_DIR": exe_a}, stdin=subprocess.PIPE)
         procs.append(hm)
         check(hm.wait_for(r"\[mods\] Resolution: 2560x1440") is not None and hm.wait_for(r"\[mods\] FOV: 75\b") is not None
               and hm.wait_for(r"\[mods\] FPS limit \(widescreen fix\): 144") is not None,
@@ -612,7 +618,8 @@ def main():
         check(hm.wait_for(r"\[mods\] Mod files found \(2\)") is not None,
               "Mods tab: the host's own mods are listed right away (no friend, no game running)")
         check(hm.wait_for(r"Lobby is ready") is not None, "host ready")
-        jm = relay(B, "JM", 1192, "1191", ["join", "--no-launch", "--yes"], d, {"MOCK_GAME_DIR": gb})
+        jm = relay(B, "JM", 1192, "1191", ["join", "--no-launch", "--yes"], d, {"MOCK_GAME_DIR": gb, "MOCK_EXE_DIR": exe_b},
+                   stdin=subprocess.PIPE)
         procs.append(jm)
         check(jm.wait_for(r"Connected to user1191 through Steam") is not None, "friend linked")
         check(hm.wait_for(r"Game files differ from user1192's", timeout=15) is not None, "host is told the games differ")
@@ -654,14 +661,17 @@ def main():
               b"[MAIN]\r\nResX = 0\r\nResY = 0\r\nFOVFactor = 1.00\r\nFPSLimit = 60 // frame rate cap\r\n",
               "...the widescreen fix's .ini: FOV factor and FPS limit changed, its comment and ResX=0 (auto) kept")
         check(hm.wait_for(r"\[settings\] scctfix 0 mine 1920x1080 fov 90 fps 60 ws 100", timeout=10) is not None, "the Settings tab shows the new values")
+        leftovers = [os.path.join(r, f) for r, _, fs in os.walk(gd) for f in fs if f.endswith(".scctlink-new")]
+        check(not leftovers, "...each .ini was written in full and swapped in (no half-written files left) %s" % leftovers)
         check(hm.wait_for(r"FOV: you 90, user1192 90", timeout=10) is not None, "...and the check is done again: FOV now the same")
         hm.p.stdin.write("A\n0 0 30 0 0\n"); hm.p.stdin.flush()
         check(hm.wait_for(r"! Settings: FOV must be between 50 and 130", timeout=5) is not None, "a wrong value is refused")
         check(rd(uini) == b"[Engine.PlayerController]\r\nDesiredFOV=90.000000\r\n", "...and nothing is written")
         # the SCCT Fix button
         fixsrc = os.path.join(ROOT, "package", "SCCTFix-d3d9.dll")
-        fixhere = os.path.join(os.getcwd(), "SCCTFix-d3d9.dll")  # next to SCCTLink (its working folder in the tests)
+        fixhere = os.path.join(exe_a, "SCCTFix-d3d9.dll")  # next to SCCTLink
         shutil.copy(fixsrc, fixhere)
+        shutil.copy(fixsrc, os.path.join(exe_b, "SCCTFix-d3d9.dll"))
         sysd3d = os.path.join(ga, "System", "d3d9.dll")
         with open(sysd3d, "wb") as f:
             f.write(b"MZanother-d3d9-mod")
@@ -677,7 +687,18 @@ def main():
         check(hm.wait_for(r"SCCT Fix removed", timeout=10) is not None and rd(sysd3d) == b"MZanother-d3d9-mod"
               and not os.path.exists(sysd3d + ".scctlink-backup") and b"StartupFullscreen=True" in rd(ga, "System", "SplinterCell3.ini"),
               "Remove SCCT Fix: the earlier d3d9.dll is put back, fullscreen again")
-        os.unlink(fixhere)
+        # the live stats window's numbers
+        check(jm.wait_for(r"\[stats\] user1191   ping \d+ ms   loss [\d.-]+%?   \d+/\d+ pkt/s", timeout=10) is not None,
+              "live stats: ping, loss and packets per second for the linked friend")
+        # the checksum cache: "Check again" hashes nothing that didn't change
+        at = hm.mark()
+        hm.p.stdin.write("M\n"); hm.p.stdin.flush()
+        check(hm.wait_for(r"Game files checked again", timeout=10, since=at) is not None, "Check again")
+        time.sleep(0.5)
+        logm = open(os.path.join(d, "log_HM.txt"), errors="replace").read()
+        cached = re.findall(r"\((\d+) checksums made, (\d+) from the cache\)", logm)
+        check(len(cached) >= 2 and int(cached[0][0]) > 0 and int(cached[-1][1]) > 0 and int(cached[-1][0]) <= 2,
+              "checksum cache: first start hashes the files, later checks reuse them %s" % cached[-2:])
         hm.stop(); jm.stop()
         hs = relay(A, "HS", 1193, "1194", ["host"], d, {"MOCK_GAME_DIR": gc})
         procs.append(hs)
@@ -695,6 +716,21 @@ def main():
         check(js.wait_for(r"only on your PC: system/d3d9\.dll", timeout=10) is not None, "...the new mod shows up on the friend's side")
         check(hs.wait_for(r"only on user1194's PC: system/d3d9\.dll", timeout=10) is not None, "...and on the host's side, without clicking anything")
         hs.stop(); js.stop()
+
+        print("[17] live stats: the game's frame rate, even playing alone; the SCCT Fix reminder")
+        solo = relay(A, "SO", 1195, "", ["idle"], d, {"MOCK_GAME_DIR": gc, "MOCK_FPS": "60"}, stdin=subprocess.PIPE)
+        procs.append(solo)
+        check(solo.wait_for(r"! The SCCT Fix isn't installed\. Co-op disconnects", timeout=10) is not None,
+              "without the SCCT Fix, co-op players are told to install it")
+        solo.p.stdin.write("T\n1\n"); solo.p.stdin.flush()  # "Live stats"
+        check(solo.wait_for(r"\[stats\] Splinter Cell: not running", timeout=10) is not None, "live stats with no game: 'not running'")
+        game = Proc("solo-game", A.cmd([sys.executable, "-I", "-c",
+                                        "import ctypes,time;ctypes.CDLL(None).prctl(15,b'splintercell3',0,0,0);time.sleep(12)"]))
+        procs.append(game)
+        check(solo.wait_for(r"\[stats\] Splinter Cell: 60 FPS$", timeout=12) is not None or "[stats] Splinter Cell: 60 FPS" in solo.log,
+              "live stats while playing alone: the game's frame rate")
+        game.stop()
+        solo.stop()
 
         print("[13] bad internet: 10% packet loss each way and 60 ms delay each way")
         h10, j10, hg10, jg10 = session("    (setup)", d, A, B, extra={"MOCK_LOSS": "10", "MOCK_DELAY_MS": "60"}, n_stream=1000)
