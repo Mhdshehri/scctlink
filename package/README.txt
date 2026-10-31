@@ -136,6 +136,9 @@ VERSUS NOTES
     (console: listed false) so it doesn't appear on the public master
     server - that would share your IP, which is what SCCTLink avoids.
     You don't need their port forwarding/UPnP when using SCCTLink.
+  * The Mods tab in Versus compares only the Versus folder (and in co-op
+    only the co-op files), and shows who has SCCT Versus Reloaded (also in
+    Enhanced SCCT Versus) installed and who doesn't.
 
 
 BEFORE YOU PLAY (avoids disconnects)

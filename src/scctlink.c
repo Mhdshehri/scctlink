@@ -2417,10 +2417,34 @@ static const char *set_value(const MFile *f, int n, const char *key)
     return 0;
 }
 
+/* Co-op and Versus are two programs in one folder: co-op compares everything
+   but Versus\, Versus only Versus\ (a Versus mod never shows up in co-op). */
+static bool mf_in_mode(const char *path)
+{
+    bool v = !strncmp(path, "versus/", 7);
+    return g_versus ? v : !v;
+}
+
+/* SCCT Versus Reloaded (also inside Enhanced SCCT Versus) replaces the
+   launcher Versus\System\SCCT_Versus.exe: 1 a Versus mod is installed,
+   0 plain Versus, -1 no Versus. */
+#define VERSUS_EXE "versus/system/scct_versus.exe"
+#define VERSUS_PLAIN "d457e8eb9c5247dd" /* SHA-256 (first 16) of the Steam copy's SCCT_Versus.exe */
+static int versus_mod(const MFile *f, int n)
+{
+    const char *plain = VERSUS_PLAIN;
+#ifndef _WIN32
+    if (getenv("MOCK_VERSUS_PLAIN")) plain = getenv("MOCK_VERSUS_PLAIN"); /* tests: their stand-in for the Steam copy */
+#endif
+    for (int i = 0; i < n; i++)
+        if (!strcmp(f[i].path, VERSUS_EXE)) return strcmp(f[i].hash, plain) ? 1 : 0;
+    return -1;
+}
+
 static int files_count(void)
 {
     int k = 0;
-    for (int i = 0; i < g_nmfs; i++) k += g_mfs[i].path[0] != '@';
+    for (int i = 0; i < g_nmfs; i++) k += g_mfs[i].path[0] != '@' && mf_in_mode(g_mfs[i].path);
     return k;
 }
 
@@ -2548,10 +2572,10 @@ static size_t mods_list(char *o, size_t n, const MFile *f, int nf)
 {
     size_t k = strlen(o);
     int nm = 0, shown = 0;
-    for (int i = 0; i < nf; i++) nm += f[i].path[0] != '@' && mf_is_mod(f[i].path);
+    for (int i = 0; i < nf; i++) nm += f[i].path[0] != '@' && mf_in_mode(f[i].path) && mf_is_mod(f[i].path);
     if (!nm) { sfmt(o + k, n - k, " No mods (plain game files)\n"); return strlen(o); }
     for (int i = 0; i < nf && k < n - 120; i++)
-        if (f[i].path[0] != '@' && mf_is_mod(f[i].path) && shown++ < 20) {
+        if (f[i].path[0] != '@' && mf_in_mode(f[i].path) && mf_is_mod(f[i].path) && shown++ < 20) {
             sfmt(o + k, n - k, " %s\n", f[i].path);
             k = strlen(o);
         }
@@ -2570,7 +2594,11 @@ static void mods_local_text(void)
         return;
     }
     k = mods_list(o, n, g_mfs, g_nmfs);
-    if (!g_versus) {
+    if (g_versus) {
+        int vm = versus_mod(g_mfs, g_nmfs);
+        sfmt(o + k, n - k, vm == 1 ? "+SCCT Versus Reloaded installed (modded SCCT_Versus.exe)\n"
+                           : vm == 0 ? " No Versus mod (plain Versus)\n" : "!Versus wasn't found in the game's folder\n");
+    } else {
         int fx = scctfix_state();
         sfmt(o + k, n - k, fx == 1 ? "+SCCT Fix installed\n" : "!SCCT Fix not installed - co-op needs it (Settings tab)\n");
     }
@@ -2645,7 +2673,12 @@ static void mf_report(Peer *p, bool they_found)
     mf_sort(theirs, nt);
     /* their block: their mods (and the SCCT Fix in co-op) */
     k = mods_list(o, on, theirs, nt);
-    if (!g_versus) {
+    if (g_versus) {
+        int vm = versus_mod(theirs, nt);
+        sfmt(o + k, on - k, vm == 1 ? "+SCCT Versus Reloaded installed (modded SCCT_Versus.exe)\n"
+                            : vm == 0 ? " No Versus mod (plain Versus)\n" : "!Versus wasn't found in the game's folder\n");
+        k = strlen(o);
+    } else {
         const char *fx = set_value(theirs, nt, "scctfix");
         sfmt(o + k, on - k, fx && !strcmp(fx, "installed") ? "+SCCT Fix installed\n" : "!SCCT Fix not installed - co-op needs it (Settings tab)\n");
         k = strlen(o);
@@ -2658,8 +2691,8 @@ static void mf_report(Peer *p, bool they_found)
     char line[300];
     int i = 0, j = 0;
     while (i < g_nmfs || j < nt) {
-        if (i < g_nmfs && g_mfs[i].path[0] == '@') { i++; continue; } /* settings: compared below */
-        if (j < nt && theirs[j].path[0] == '@') { j++; continue; }
+        if (i < g_nmfs && (g_mfs[i].path[0] == '@' || !mf_in_mode(g_mfs[i].path))) { i++; continue; } /* settings: below */
+        if (j < nt && (theirs[j].path[0] == '@' || !mf_in_mode(theirs[j].path))) { j++; continue; }
         int c = i >= g_nmfs ? 1 : j >= nt ? -1 : strcmp(g_mfs[i].path, theirs[j].path);
         const char *path = 0;
         char what[140];
@@ -2671,7 +2704,8 @@ static void mf_report(Peer *p, bool they_found)
             i++; j++;
         }
         if (!path) continue;
-        if (!diffs++) say("! Game files differ from %s's. Co-op can disconnect when the games aren't the same:", them);
+        if (!diffs++) say("! Game files differ from %s's. %s", them, g_versus ? "Versus can fail to join or desync when the games aren't the same:"
+                                                                         : "Co-op can disconnect when the games aren't the same:");
         sfmt(line, sizeof line, "    %s: %s", what, path);
         if (shown < 25) { say("%s", line); shown++; }
         else log_line(line);
@@ -2682,6 +2716,21 @@ static void mf_report(Peer *p, bool they_found)
     }
     if (diffs > shown) say("    ...and %d more (all in scctlink.log)", diffs - shown);
     if (diffs > 12) { sfmt(diffl + dl, sizeof diffl - dl, "!...and %d more (all in the Log)\n", diffs - 12); dl = strlen(diffl); }
+    if (g_versus) { /* the Versus mod, said plainly (its files are listed above) */
+        bool mine = versus_mod(g_mfs, g_nmfs) == 1, their = versus_mod(theirs, nt) == 1;
+        if (mine != their) {
+            if (mine) say("! SCCT Versus Reloaded: you have it, %s doesn't. Install the same version on every PC.", them);
+            else say("! SCCT Versus Reloaded: %s has it, you don't. Install the same version on every PC.", them);
+            char l2[200];
+            sfmt(l2, sizeof l2, mine ? "!SCCT Versus Reloaded: you have it, %s doesn't - install the same version on every PC\n"
+                                     : "!SCCT Versus Reloaded: %s has it, you don't - install the same version on every PC\n", them);
+            size_t n2 = strlen(l2); /* first, before the file lines */
+            if (dl + n2 >= sizeof diffl) { dl = sizeof diffl - n2 - 1; diffl[dl] = 0; }
+            memmove(diffl + n2, diffl, dl + 1);
+            memcpy(diffl, l2, n2);
+            dl = strlen(diffl);
+        }
+    }
     /* settings that must match: co-op only (Versus has its own settings) */
     int setdiff = 0;
     for (int d = 0; d < NSETS && !g_versus; d++) {

@@ -8,6 +8,7 @@ Prints ALL OK or FAIL.
 """
 import fcntl
 import json
+import hashlib
 import os
 import re
 import shutil
@@ -732,6 +733,41 @@ def main():
               "live stats while playing alone: the game's frame rate")
         game.stop()
         solo.stop()
+
+        print("[18] Versus: only Versus files are compared; who has SCCT Versus Reloaded")
+        plain_exe = b"MZ" + b"v" * 4000  # stands in for the Steam copy's SCCT_Versus.exe
+        vbase = dict(base)
+        vbase["Versus/System/SCCT_Versus.exe"] = plain_exe
+        vbase["Versus/System/Engine.u"] = b"veng" * 200
+        vmod = dict(vbase)
+        vmod["Versus/System/SCCT_Versus.exe"] = b"MZ" + b"R" * 4100  # Reloaded replaces the launcher
+        vmod["Versus/System/dinput8.dll"] = b"MZreloaded"
+        vmod["System/d3d9.dll"] = b"MZcoop-only"  # a co-op file: not compared in Versus
+        gva, gvb = game_dir("va", vmod), game_dir("vb", vbase)
+        vplain = {"MOCK_VERSUS_PLAIN": hashlib.sha256(plain_exe).hexdigest()[:16]}
+        exe_va, exe_vb = os.path.join(d, "exe_va"), os.path.join(d, "exe_vb")
+        os.makedirs(exe_va, exist_ok=True); os.makedirs(exe_vb, exist_ok=True)
+        hv = relay(A, "HVM", 1196, "1197", ["host", "--versus"], d, dict(vplain, MOCK_GAME_DIR=gva, MOCK_EXE_DIR=exe_va), stdin=subprocess.PIPE)
+        procs.append(hv)
+        check(hv.wait_for(r"\[mods\] \+SCCT Versus Reloaded installed", timeout=10) is not None,
+              "Versus: the host sees it has SCCT Versus Reloaded")
+        check("SCCT Fix" not in "\n".join(l for l in hv.log.splitlines() if l.startswith("[mods]")),
+              "Versus: no SCCT Fix line (that's for co-op)")
+        check(hv.wait_for(r"Lobby is ready") is not None, "Versus host ready")
+        jv = relay(B, "JVM", 1197, "1196", ["join", "--versus", "--no-launch", "--yes"], d,
+                   dict(vplain, MOCK_GAME_DIR=gvb, MOCK_EXE_DIR=exe_vb), stdin=subprocess.PIPE)
+        procs.append(jv)
+        check(jv.wait_for(r"\[mods\]  No Versus mod \(plain Versus\)", timeout=15) is not None, "the friend sees they have plain Versus")
+        check(hv.wait_for(r"\[mods\]  No Versus mod \(plain Versus\)", timeout=15) is not None, "...and the host sees it too")
+        check(hv.wait_for(r"\[mods\] !SCCT Versus Reloaded: you have it, user1197 doesn't", timeout=5) is not None,
+              "the host: 'you have it, your friend doesn't', in red")
+        check(jv.wait_for(r"\[mods\] !SCCT Versus Reloaded: user1196 has it, you don't", timeout=5) is not None,
+              "the friend: 'the host has it, you don't'")
+        check(hv.wait_for(r"different version: versus/system/scct_versus\.exe", timeout=5) is not None
+              and hv.wait_for(r"only on your PC: versus/system/dinput8\.dll", timeout=5) is not None, "the Versus files that differ are listed")
+        check("system/d3d9.dll" not in hv.log and "system/d3d9.dll" not in jv.log,
+              "a co-op file (System\\d3d9.dll) is not compared in Versus")
+        hv.stop(); jv.stop()
 
         print("[13] bad internet: 10% packet loss each way and 60 ms delay each way")
         h10, j10, hg10, jg10 = session("    (setup)", d, A, B, extra={"MOCK_LOSS": "10", "MOCK_DELAY_MS": "60"}, n_stream=1000)
