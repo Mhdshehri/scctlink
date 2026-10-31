@@ -612,11 +612,11 @@ def main():
         hm = relay(A, "HM", 1191, "1192", ["host"], d, {"MOCK_GAME_DIR": ga, "PROGRAMDATA": os.path.join(gd, "programdata_a"),
                                                          "MOCK_EXE_DIR": exe_a}, stdin=subprocess.PIPE)
         procs.append(hm)
-        check(hm.wait_for(r"\[mods\] Resolution: 2560x1440") is not None and hm.wait_for(r"\[mods\] FOV: 75\b") is not None
-              and hm.wait_for(r"\[mods\] FPS limit \(widescreen fix\): 144") is not None,
-              "Mods tab: the host's resolution, FOV (from ProgramData) and FPS limit, before anyone links")
-        check(hm.wait_for(r"\[mods\] Mod files found \(2\)") is not None,
-              "Mods tab: the host's own mods are listed right away (no friend, no game running)")
+        check(hm.wait_for(r"\[settings\] scctfix 0 mine 2560x1440 fov 75 fps 60 ws 120") is not None,
+              "the host's resolution, FOV (from ProgramData) and FPS limit, before anyone links")
+        check(hm.wait_for(r"\[mods\] #user1191 \(you\)") is not None and hm.wait_for(r"\[mods\]  system/dinput8\.dll") is not None
+              and hm.wait_for(r"\[mods\] !SCCT Fix not installed") is not None,
+              "Mods tab: your name, your mods and the SCCT Fix right away (no friend, no game running)")
         check(hm.wait_for(r"Lobby is ready") is not None, "host ready")
         jm = relay(B, "JM", 1192, "1191", ["join", "--no-launch", "--yes"], d, {"MOCK_GAME_DIR": gb, "MOCK_EXE_DIR": exe_b},
                    stdin=subprocess.PIPE)
@@ -628,16 +628,14 @@ def main():
               "...the widescreen fix only on the host's PC")
         check(hm.wait_for(r"different version: system/core\.u", timeout=3) is not None, "...a game file with the same size but other content")
         check(jm.wait_for(r"only on user1191's PC: system/dinput8\.dll", timeout=15) is not None, "the friend sees the same, from their side")
-        check(hm.wait_for(r"\[mods\] \[x\] Same game version", timeout=3) is not None, "Mods tab: [x] same game version")
-        check(hm.wait_for(r"\[mods\] \[  \] Same mods - 2 differences", timeout=3) is not None, "Mods tab: [  ] same mods, 2 differences")
-        check(hm.wait_for(r"\[mods\] \[  \] Same game files - 1 difference", timeout=3) is not None, "Mods tab: [  ] same game files, 1 difference")
-        check(hm.wait_for(r"! FOV differs: you 75, user1192 90", timeout=3) is not None, "a different FOV is flagged")
-        check(hm.wait_for(r"\[mods\] \[  \] Same settings - 3 differences", timeout=3) is not None,
-              "Mods tab: [  ] same settings - FOV, the widescreen fix's FOV and FPS limit")
-        check(hm.wait_for(r"Resolution: you 2560x1440, user1192 1920x1080  \(doesn't need to match\)", timeout=3) is not None,
-              "a different resolution is shown, not flagged")
-        check(hm.wait_for(r"FPS limit \(game\): you 60, user1192 60\r?$", timeout=3) is not None or "FPS limit (game): you 60, user1192 60" in hm.log,
-              "the same FPS limit is shown as the same")
+        check(hm.wait_for(r"\[mods\] #user1192", timeout=3) is not None and hm.wait_for(r"\[mods\] !Only on your PC: system/dinput8\.dll", timeout=3) is not None
+              and hm.wait_for(r"\[mods\] !Different version: system/core\.u", timeout=3) is not None,
+              "Mods tab: the friend's name, then each difference in red")
+        check(hm.wait_for(r"! FOV differs: you 75, user1192 90", timeout=3) is not None
+              and hm.wait_for(r"\[mods\] !FOV: you 75, user1192 90 - must be the same", timeout=3) is not None, "a different FOV is flagged")
+        modlines = "\n".join(l for l in hm.log.splitlines() if l.startswith("[mods]"))
+        check("Resolution" not in modlines and "FPS limit (game)" not in modlines,
+              "a different resolution and the same FPS limit are not flagged")
         check(jm.wait_for(r"! FOV differs: you 90, user1191 75", timeout=3) is not None, "...and on the friend's side")
         check("splintercell3.ini" not in hm.log + jm.log, "settings files (.ini) are not compared")
         check(gd not in hm.log + jm.log and gd not in open(os.path.join(d, "log_HM.txt")).read(), "the game folder's path is never sent or logged")
@@ -663,7 +661,9 @@ def main():
         check(hm.wait_for(r"\[settings\] scctfix 0 mine 1920x1080 fov 90 fps 60 ws 100", timeout=10) is not None, "the Settings tab shows the new values")
         leftovers = [os.path.join(r, f) for r, _, fs in os.walk(gd) for f in fs if f.endswith(".scctlink-new")]
         check(not leftovers, "...each .ini was written in full and swapped in (no half-written files left) %s" % leftovers)
-        check(hm.wait_for(r"FOV: you 90, user1192 90", timeout=10) is not None, "...and the check is done again: FOV now the same")
+        time.sleep(1)
+        last = hm.log[hm.log.rfind("[mods] #user1192"):]
+        check(hm.log.count("[mods] #user1192") >= 2 and "!FOV:" not in last, "...and the check is done again: FOV now the same (no longer flagged)")
         hm.p.stdin.write("A\n0 0 30 0 0\n"); hm.p.stdin.flush()
         check(hm.wait_for(r"! Settings: FOV must be between 50 and 130", timeout=5) is not None, "a wrong value is refused")
         check(rd(uini) == b"[Engine.PlayerController]\r\nDesiredFOV=90.000000\r\n", "...and nothing is written")
@@ -708,7 +708,8 @@ def main():
         procs.append(js)
         check(js.wait_for(r"Game files check: same as user1193's \(1503 files\)", timeout=15) is not None, "identical games: 'same' on the friend's side")
         check(hs.wait_for(r"Game files check: same as user1194's", timeout=15) is not None, "...and on the host's side")
-        check(hs.wait_for(r"\[mods\] All 1503 files are the same", timeout=3) is not None, "Mods tab: all the same")
+        check(hs.wait_for(r"\[mods\] \+Everything matches: same game version, same mods, same files \(1503\)", timeout=3) is not None,
+              "Mods tab: everything matches, in green")
         with open(os.path.join(gdd, "System", "d3d9.dll"), "wb") as f:  # the friend installs a mod...
             f.write(b"MZreshade")
         js.p.stdin.write("M\n"); js.p.stdin.flush()  # ...and clicks "Check again"

@@ -332,7 +332,7 @@ static void draw_frames(HDC dc)
     HANDLE ob = SelectObject(dc, b), op = SelectObject(dc, p);
     for (int i = 0; i < g_nframes; i++) {
         Frame *f = &g_frames[i];
-        if (f->tab >= 0 && f->tab != g_tab) continue;
+        if (f->tab >= 0 && (f->tab != g_tab || (f->tab == TAB_SET && g_shown.versus))) continue;
         RoundRect(dc, S_(f->x), S_(f->y), S_(f->x + f->w), S_(f->y + f->h), S_(8), S_(8));
     }
     SelectObject(dc, ob);
@@ -495,6 +495,46 @@ static void draw_list_item(DrawItem *d)
     SelectObject(d->dc, of);
 }
 
+/* A Mods tab row. Its first character says how: '#' a name (bold), '+' good
+   (green), '!' a problem (red), '-' a divider, '.' a hint (grey), ' ' plain. */
+static void draw_mods_item(DrawItem *d)
+{
+    FillRect(d->dc, &d->rc, g_br_panel);
+    if (d->item == (UINT)-1) return;
+    WCHAR w[320];
+    int n = (int)SendMessageW(d->hwnd, LB_GETTEXT, d->item, (LPARAM)w);
+    if (n <= 0) return;
+    WCHAR kind = w[0];
+    if (kind == '-') { /* divider */
+        RECT line = { d->rc.left + S_(6), (d->rc.top + d->rc.bottom) / 2, d->rc.right - S_(6), (d->rc.top + d->rc.bottom) / 2 + 1 };
+        HBRUSH b = CreateSolidBrush(T.border);
+        FillRect(d->dc, &line, b);
+        DeleteObject(b);
+        return;
+    }
+    DWORD color = kind == '+' ? T.status : kind == '!' ? (T.dark ? RGBC(240, 98, 98) : RGBC(196, 40, 40)) : kind == '.' ? T.dim : T.text;
+    HANDLE of = SelectObject(d->dc, kind == '#' ? g_bold : g_font);
+    SetBkMode(d->dc, TRANSPARENT_BK);
+    SetTextColor(d->dc, color);
+    RECT tr = d->rc;
+    tr.left += S_(kind == ' ' ? 18 : 6);
+    const WCHAR *t = w + 1;
+    if (kind == '+' || kind == '!') { /* a green or red dot in front */
+        HBRUSH b = CreateSolidBrush(color);
+        HANDLE p = CreatePen(0, 1, color);
+        HANDLE ob = SelectObject(d->dc, b), op = SelectObject(d->dc, p);
+        int r = S_(8), y = (d->rc.top + d->rc.bottom - r) / 2;
+        RoundRect(d->dc, tr.left, y, tr.left + r, y + r, r, r);
+        SelectObject(d->dc, ob);
+        SelectObject(d->dc, op);
+        DeleteObject(b);
+        DeleteObject(p);
+        tr.left += S_(16);
+    }
+    DrawTextW(d->dc, t, n - 1, &tr, DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    SelectObject(d->dc, of);
+}
+
 /* colors for labels and text boxes; returns the background brush */
 static LRESULT control_colors(UINT msg, HDC dc, HWND ctl_)
 {
@@ -585,7 +625,10 @@ static void build(void)
     /* one box: "How to" and the log take turns in it */
     framed(ID_LOG, E, WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY, 14, 384, 572, 180, 7, 5);
     ctl(ID_HOWTO, E, WTEXT(""), WS_VSCROLL | ES_MULTILINE | ES_READONLY, 0, 14 + 7, 384 + 5, 572 - 14, 180 - 10, g_font);
-    ctl(ID_MODS, E, WTEXT("Checking the game files..."), WS_VSCROLL | ES_MULTILINE | ES_READONLY, 0, 14 + 7, 384 + 5, 572 - 14, 180 - 10, g_font);
+    /* the Mods tab: one line per row, drawn in colors (see draw_mods_item) */
+    ctl(ID_MODS, L, WTEXT(""), WS_VSCROLL | LBS_NOINTEGRALHEIGHT | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | 0x4000 /* LBS_NOSEL */,
+        0, 14 + 7, 384 + 5, 572 - 14, 180 - 10, g_font);
+    SendMessageW(g_c[ID_MODS], LB_ADDSTRING, 0, (LPARAM)WTEXT(".Checking the game files..."));
     SendMessageW(g_c[ID_LOG], EM_SETLIMITTEXT, 0x7FFFFFFE, 0);
     /* "Settings": the same box holds the game's resolution / FOV / FPS limit */
     const DWORD NUM = WS_TABSTOP | ES_AUTOHSCROLL | 0x2000 /* ES_NUMBER */, ELL = 0x4000 /* SS_ENDELLIPSIS */;
@@ -719,7 +762,8 @@ static void show_tab(int tab)
     ShowWindow(g_c[ID_COPYLOG], tab == TAB_LOG ? 5 : 0);
     ShowWindow(g_c[ID_REPORT], tab == TAB_LOG ? 5 : 0);
     ShowWindow(g_c[ID_RECHECK], tab == TAB_MODS ? 5 : 0);
-    for (int i = ID_SET_NOTE; i <= ID_SET_APPLY; i++) ShowWindow(g_c[i], tab == TAB_SET ? 5 : 0);
+    for (int i = ID_SET_NOTE; i <= ID_SET_APPLY; i++) /* Versus: only the note (its settings are in the game, F12) */
+        ShowWindow(g_c[i], tab == TAB_SET && (i == ID_SET_NOTE || !g_shown.versus) ? 5 : 0);
     RedrawWindow(g_c[ID_TAB_SET], 0, 0, 0x1 | 0x4);
     RECT box = { S_(14), S_(384), S_(586), S_(564) }; /* the box's frames */
     RedrawWindow(g_wnd, &box, 0, 0x1 | 0x4 | 0x80);
@@ -781,7 +825,8 @@ static void show_settings(const UiSettings *n)
     EnableWindow(g_c[ID_SET_WS], n->have_ws);
     set_text(ID_SET_FIX, n->scctfix == 1 ? "Remove SCCT Fix" : "Install SCCT Fix");
     g_set_warn = n->note_warn;
-    if (n->note[0]) set_text(ID_SET_NOTE, n->note);
+    if (g_shown.versus) set_text(ID_SET_NOTE, "Versus has its own settings: press F12 in the game (SCCT Versus Reloaded). This tab is for co-op.");
+    else if (n->note[0]) set_text(ID_SET_NOTE, n->note);
     else if (!n->found) set_text(ID_SET_NOTE, "The game's folder wasn't found (only Steam copies of the game can be changed).");
     else if (n->scctfix != 1) set_text(ID_SET_NOTE, "SCCT Fix: 60 FPS cap, borderless, Alt+Tab, crash log. Co-op needs it on both PCs (close the game first).");
     else set_text(ID_SET_NOTE, "SCCT Fix installed (60 FPS cap, borderless, Alt+Tab, crash log). Close the game before changing settings.");
@@ -904,6 +949,12 @@ static void copy_log(void)
 static void refresh_controls(void)
 {
     const UiState *s = &g_shown;
+    static int last_versus = -1;
+    if (last_versus != (int)s->versus) { /* Co-op <-> Versus: the Settings tab changes */
+        last_versus = s->versus;
+        if (g_tab == TAB_SET) show_tab(TAB_SET);
+        show_settings(&g_set);
+    }
     bool idle = s->mode == MODE_IDLE, host = s->mode == MODE_HOST, join = s->mode == MODE_JOIN;
     EnableWindow(g_c[ID_HOST], idle && !g_closing);
     EnableWindow(g_c[ID_JOIN], idle && !g_closing);
@@ -1059,8 +1110,25 @@ static void on_timer(void)
 
     if (n) { pend[n] = 0; append_log(pend); }
     if (mods_dirty) {
-        static WCHAR w[16384];
-        SetWindowTextW(g_c[ID_MODS], wide(mods, w, 16384));
+        HWND lb = g_c[ID_MODS];
+        SendMessageW(lb, 0x000B /* WM_SETREDRAW */, 0, 0);
+        SendMessageW(lb, LB_RESETCONTENT, 0, 0);
+        for (const char *l = mods; *l;) {
+            const char *e = strchr(l, '\n');
+            int len = e ? (int)(e - l) : (int)strlen(l);
+            char line[300];
+            if (len > 299) len = 299;
+            memcpy(line, l, (size_t)len);
+            line[len] = 0;
+            if (len && line[len - 1] == '\r') line[len - 1] = 0;
+            if (line[0]) {
+                static WCHAR w[320];
+                SendMessageW(lb, LB_ADDSTRING, 0, (LPARAM)wide(line, w, 320));
+            }
+            l = e ? e + 1 : l + len;
+        }
+        SendMessageW(lb, 0x000B /* WM_SETREDRAW */, 1, 0);
+        RedrawWindow(lb, 0, 0, 0x1 | 0x4);
         bool dot = mods_warn && g_tab != TAB_MODS;
         if (dot != g_mods_unseen) { g_mods_unseen = dot; RedrawWindow(g_c[ID_TAB_MODS], 0, 0, 0x1 | 0x4); }
     }
@@ -1215,12 +1283,13 @@ static LRESULT WINAPI wndproc(HWND w, UINT m, WPARAM wp, LPARAM lp)
         return control_colors(m, (HDC)wp, (HWND)lp);
     case WM_MEASUREITEM: {
         MeasureItem *mi = (MeasureItem *)lp;
-        if (mi->type == ODT_LISTBOX) mi->height = (UINT)S_(24);
+        if (mi->type == ODT_LISTBOX) mi->height = (UINT)S_(mi->id == ID_MODS ? 19 : 24);
         return 1;
     }
     case WM_DRAWITEM: {
         DrawItem *d = (DrawItem *)lp;
-        if (d->type == ODT_LISTBOX) draw_list_item(d);
+        if (d->type == ODT_LISTBOX && d->id == ID_MODS) draw_mods_item(d);
+        else if (d->type == ODT_LISTBOX) draw_list_item(d);
         else draw_button(d);
         return 1;
     }

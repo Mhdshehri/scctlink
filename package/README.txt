@@ -1,4 +1,4 @@
-SCCTLink 0.9.7 - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
+SCCTLink 0.9.8 - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
 ==============================================================================
 
 No VPN (no Hamachi, Radmin or ZeroTier), no port forwarding, no IP addresses.
@@ -13,7 +13,7 @@ Both players need:
   * each other on their Steam friends list
   * this folder unzipped somewhere (Desktop is fine). Keep SCCTLink.exe,
     steam_api.dll and SCCTFix-d3d9.dll together.
-  * the SAME SCCTLink version (0.9.7).
+  * the SAME SCCTLink version (0.9.8).
 
 
 HOW TO PLAY
@@ -79,18 +79,18 @@ Log      = everything SCCTLink did. A dot on "Log" means a warning arrived.
            the folder with scctlink.log: drag the log into the report (and
            your friend's too). Reports are public; the log has no IP
            addresses, but it has your Steam friends' names.
-Mods     = the game files check. As soon as SCCTLink opens it lists your
-           game's mods (the game doesn't have to be running). When you link,
-           it compares your game with your friend's as a checklist - same
-           settings / same game version / same mods / same game files - and
-           lists what differs (also in the Log), for example
-               only on your PC: system/dinput8.dll
-               different version: system/core.u
-           Settings compared: resolution (shown only), FOV, FPS limits (the
-           game's own and the widescreen fix's), the SCCT Fix and fullscreen
-           (these must match). "Check again" after you change something.
-           Only file names relative to the game folder, sizes, checksums and
-           those settings are sent - nothing about your PC.
+Mods     = the game files check, kept simple: your name and your mods, then
+           your friend's name and their mods, then a green "Everything
+           matches" - or each difference in red, for example
+               Only on your PC: system/dinput8.dll
+               Different version: system/core.u
+               FOV: you 90, Friend 75 - must be the same   (co-op only)
+           In co-op FOV, FPS limits, the SCCT Fix and fullscreen must match;
+           the resolution doesn't have to. As soon as SCCTLink opens it lists
+           your own mods (the game doesn't have to be running). "Check again"
+           after you change something; the Log has every detail. Only file
+           names relative to the game folder, sizes, checksums and those
+           settings are sent - nothing about your PC.
 Settings = change resolution, FOV and FPS limit (and the widescreen fix's
            FOV factor, if it's installed) without editing .ini files. Your
            friend's values are shown next to yours; "Use friend's" copies
@@ -104,6 +104,8 @@ Settings = change resolution, FOV and FPS limit (and the widescreen fix's
            looks cut off on wide ones). Then Apply. In co-op both players
            need the SAME FOV, so agree on one number.
            Also here: "Install SCCT Fix" / "Remove SCCT Fix".
+           In Versus this tab only shows a note: Versus has its own settings
+           (press F12 in the game with SCCT Versus Reloaded).
 
 
 SCCT FIX (needed for co-op)
@@ -247,6 +249,9 @@ a reminder in co-op when the SCCT Fix isn't installed.
 plus the log file to drag into it).
 0.9.7: FOV buttons for the screen's shape in the Settings tab (4:3 = 75,
 16:10 = 85, 16:9 = 91).
+0.9.8: the Mods tab is simpler and in colors (names, mods, green when
+everything matches, red for each difference); in Versus the co-op settings
+and the SCCT Fix are hidden.
 
 Tested end to end on a simulated network: separate "PCs", a stand-in for the
 game that finds LAN games by broadcast (including the real game's encrypted

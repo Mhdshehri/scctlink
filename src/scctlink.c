@@ -2485,19 +2485,15 @@ static int g_ncmp;
 static void mods_publish(void)
 {
     static char t[16384];
-    int k = 0;
     bool warn = false;
     sfmt(t, sizeof t, "%s", g_mods_local);
-    k = (int)strlen(t);
-    for (int i = 0; i < g_ncmp && k < (int)sizeof t - 10; i++) {
-        sfmt(t + k, sizeof t - (size_t)k, "\r\n%s", g_cmp[i].text);
-        k += (int)strlen(t + k);
+    size_t k = strlen(t);
+    for (int i = 0; i < g_ncmp && k < sizeof t - 10; i++) {
+        sfmt(t + k, sizeof t - k, "-\n%s", g_cmp[i].text);
+        k = strlen(t);
         warn |= g_cmp[i].warn;
     }
-    if (!g_ncmp) {
-        sfmt(t + k, sizeof t - (size_t)k, "\r\nWhen a friend links, their game is compared with yours here.\r\n"
-             "(The game doesn't have to be running.)");
-    }
+    if (!g_ncmp) sfmt(t + k, sizeof t - k, "-\n.When a friend links, their game and mods show up here (the game doesn't have to be running).\n");
     ui_mods(t, warn);
 }
 
@@ -2545,35 +2541,39 @@ static void mods_forget(u64 id)
         }
 }
 
+/* The Mods tab, one line each. The first character says how it is shown:
+   '#' a name (bold), '+' good (green), '!' a problem (red), '-' a divider,
+   '.' a hint (grey), ' ' a plain line. */
+static size_t mods_list(char *o, size_t n, const MFile *f, int nf)
+{
+    size_t k = strlen(o);
+    int nm = 0, shown = 0;
+    for (int i = 0; i < nf; i++) nm += f[i].path[0] != '@' && mf_is_mod(f[i].path);
+    if (!nm) { sfmt(o + k, n - k, " No mods (plain game files)\n"); return strlen(o); }
+    for (int i = 0; i < nf && k < n - 120; i++)
+        if (f[i].path[0] != '@' && mf_is_mod(f[i].path) && shown++ < 20) {
+            sfmt(o + k, n - k, " %s\n", f[i].path);
+            k = strlen(o);
+        }
+    if (nm > shown) sfmt(o + k, n - k, " ...and %d more\n", nm - shown);
+    return strlen(o);
+}
+
 static void mods_local_text(void)
 {
     char *o = g_mods_local;
     size_t n = sizeof g_mods_local;
+    sfmt(o, n, "#%s (you)\n", g_steam_ok ? who(g_me) : "You");
+    size_t k = strlen(o);
     if (g_nmfs <= 0) {
-        sfmt(o, n, "YOUR GAME\r\n[?] The game's folder wasn't found. Only Steam copies of Splinter Cell:\r\n"
-                   "    Chaos Theory can be checked.\r\n");
+        sfmt(o + k, n - k, "!The game's folder wasn't found. Only Steam copies of the game can be checked.\n");
         return;
     }
-    int nm = 0;
-    for (int i = 0; i < g_nmfs; i++) nm += g_mfs[i].path[0] != '@' && mf_is_mod(g_mfs[i].path);
-    sfmt(o, n, "YOUR GAME (Steam folder, %d files checked)\r\n", files_count());
-    size_t k = strlen(o);
-    for (int d = 0; d < NSETS; d++) { /* the settings that matter for co-op */
-        const char *v = set_value(g_mfs, g_nmfs, SETS[d].key);
-        if (!v) continue;
-        sfmt(o + k, n - k, "%s: %s\r\n", SETS[d].label, v);
-        k = strlen(o);
+    k = mods_list(o, n, g_mfs, g_nmfs);
+    if (!g_versus) {
+        int fx = scctfix_state();
+        sfmt(o + k, n - k, fx == 1 ? "+SCCT Fix installed\n" : "!SCCT Fix not installed - co-op needs it (Settings tab)\n");
     }
-    if (!nm) { sfmt(o + k, n - k, "No mods found: plain game files.\r\n"); return; }
-    sfmt(o + k, n - k, "Mod files found (%d):\r\n", nm);
-    k = strlen(o);
-    int shown = 0;
-    for (int i = 0; i < g_nmfs && k < n - 120; i++)
-        if (g_mfs[i].path[0] != '@' && mf_is_mod(g_mfs[i].path) && shown++ < 30) {
-            sfmt(o + k, n - k, "    %s\r\n", g_mfs[i].path);
-            k = strlen(o);
-        }
-    if (nm > shown) sfmt(o + k, n - k, "    ...and %d more\r\n", nm - shown);
 }
 
 /* Send the list in pieces: 'M' PROTO index count bytes... (index from 0). */
@@ -2620,10 +2620,12 @@ static void mf_report(Peer *p, bool they_found)
     g_cmp[ci].warn = false;
     char *o = g_cmp[ci].text;
     size_t on = sizeof g_cmp[ci].text;
+    sfmt(o, on, "#%s\n", them);
+    size_t k = strlen(o);
     if (g_nmfs <= 0 || !they_found) {
         const char *where = g_nmfs <= 0 && !they_found ? "either PC" : g_nmfs <= 0 ? "your PC" : "their PC";
         say("Game files check: skipped - the game's folder wasn't found on %s (only Steam copies can be checked).", where);
-        sfmt(o, on, "COMPARED WITH %s\r\n[?] Skipped: the game's folder wasn't found on %s.\r\n", them, where);
+        sfmt(o + k, on - k, ".Not compared: the game's folder wasn't found on %s (only Steam copies can be checked).\n", where);
         mods_publish();
         return;
     }
@@ -2641,84 +2643,69 @@ static void mf_report(Peer *p, bool they_found)
     set_numbers(theirs, nt, &g_uiset.fw, &g_uiset.fh, &g_uiset.ffov, &g_uiset.ffps, &g_uiset.fwsfov);
     settings_publish();
     mf_sort(theirs, nt);
-    /* three groups: the game program, mods, everything else */
-    static char lines[3][4096];
-    int cnt[3] = { 0, 0, 0 };
-    size_t ln[3] = { 0, 0, 0 };
-    lines[0][0] = lines[1][0] = lines[2][0] = 0;
+    /* their block: their mods (and the SCCT Fix in co-op) */
+    k = mods_list(o, on, theirs, nt);
+    if (!g_versus) {
+        const char *fx = set_value(theirs, nt, "scctfix");
+        sfmt(o + k, on - k, fx && !strcmp(fx, "installed") ? "+SCCT Fix installed\n" : "!SCCT Fix not installed - co-op needs it (Settings tab)\n");
+        k = strlen(o);
+    }
+    /* the differences: files first (the full list goes to the Log) */
+    static char diffl[4096];
+    size_t dl = 0;
+    diffl[0] = 0;
     int diffs = 0, shown = 0;
-    char line[300], their_pc[120];
-    sfmt(their_pc, sizeof their_pc, "only on %s's PC", them);
+    char line[300];
     int i = 0, j = 0;
     while (i < g_nmfs || j < nt) {
         if (i < g_nmfs && g_mfs[i].path[0] == '@') { i++; continue; } /* settings: compared below */
         if (j < nt && theirs[j].path[0] == '@') { j++; continue; }
         int c = i >= g_nmfs ? 1 : j >= nt ? -1 : strcmp(g_mfs[i].path, theirs[j].path);
-        const char *what = 0, *path = 0;
-        if (c < 0) { what = "only on your PC"; path = g_mfs[i++].path; }
-        else if (c > 0) { what = their_pc; path = theirs[j++].path; }
+        const char *path = 0;
+        char what[140];
+        if (c < 0) { sfmt(what, sizeof what, "only on your PC"); path = g_mfs[i++].path; }
+        else if (c > 0) { sfmt(what, sizeof what, "only on %s's PC", them); path = theirs[j++].path; }
         else {
             bool same = g_mfs[i].size == theirs[j].size && !strcmp(g_mfs[i].hash, theirs[j].hash);
-            if (!same) { what = "different version"; path = g_mfs[i].path; }
+            if (!same) { sfmt(what, sizeof what, "different version"); path = g_mfs[i].path; }
             i++; j++;
         }
-        if (!what) continue;
+        if (!path) continue;
         if (!diffs++) say("! Game files differ from %s's. Co-op can disconnect when the games aren't the same:", them);
         sfmt(line, sizeof line, "    %s: %s", what, path);
         if (shown < 25) { say("%s", line); shown++; }
         else log_line(line);
-        int g = (strstr(path, "splintercell3.exe") || strstr(path, "scct_versus.exe")) ? 0 : mf_is_mod(path) ? 1 : 2;
-        if (cnt[g]++ < 12 && ln[g] < sizeof lines[g] - 300) {
-            sfmt(lines[g] + ln[g], sizeof lines[g] - ln[g], "%s\r\n", line);
-            ln[g] += strlen(lines[g] + ln[g]);
+        if (diffs <= 12 && dl < sizeof diffl - 300) {
+            sfmt(diffl + dl, sizeof diffl - dl, "!%c%s: %s\n", what[0] - 32, what + 1, path); /* "Only on ..." */
+            dl = strlen(diffl);
         }
     }
     if (diffs > shown) say("    ...and %d more (all in scctlink.log)", diffs - shown);
-    /* settings: resolution is only shown; FOV and frame rate limits must match */
-    static char setl[2048];
-    size_t sl = 0;
+    if (diffs > 12) { sfmt(diffl + dl, sizeof diffl - dl, "!...and %d more (all in the Log)\n", diffs - 12); dl = strlen(diffl); }
+    /* settings that must match: co-op only (Versus has its own settings) */
     int setdiff = 0;
-    setl[0] = 0;
-    for (int d = 0; d < NSETS; d++) {
+    for (int d = 0; d < NSETS && !g_versus; d++) {
         const char *a = set_value(g_mfs, g_nmfs, SETS[d].key), *b = set_value(theirs, nt, SETS[d].key);
-        if (!a && !b) continue;
-        bool same = a && b && !strcmp(a, b);
-        if (!same && SETS[d].must_match) {
-            setdiff++;
-            say("! %s differs: you %s, %s %s. Set the same on both PCs.", SETS[d].label, a ? a : "not set", them, b ? b : "not set");
+        if ((!a && !b) || (a && b && !strcmp(a, b)) || !SETS[d].must_match) continue;
+        setdiff++;
+        say("! %s differs: you %s, %s %s. Set the same on both PCs.", SETS[d].label, a ? a : "not set", them, b ? b : "not set");
+        if (dl < sizeof diffl - 300) {
+            sfmt(diffl + dl, sizeof diffl - dl, "!%s: you %s, %s %s - must be the same\n", SETS[d].label, a ? a : "not set", them,
+                 b ? b : "not set");
+            dl = strlen(diffl);
         }
-        sfmt(setl + sl, sizeof setl - sl, "    %s: you %s, %s %s%s\r\n", SETS[d].label, a ? a : "not set", them, b ? b : "not set",
-             same ? "" : SETS[d].must_match ? "  <- must match" : "  (doesn't need to match)");
-        sl += strlen(setl + sl);
-    }
-    sfmt(o, on, "COMPARED WITH %s\r\n", them);
-    size_t k = strlen(o);
-    if (setl[0]) {
-        if (!setdiff) sfmt(o + k, on - k, "[x] Same settings (FOV, FPS limits, SCCT Fix)\r\n%s", setl);
-        else sfmt(o + k, on - k, "[  ] Same settings - %d difference%s:\r\n%s", setdiff, setdiff == 1 ? "" : "s", setl);
-        k = strlen(o);
-    }
-    static const char *const label[3] = { "Same game version (splintercell3.exe)", "Same mods", "Same game files" };
-    for (int g = 0; g < 3 && k < on - 200; g++) {
-        if (!cnt[g]) sfmt(o + k, on - k, "[x] %s\r\n", label[g]);
-        else sfmt(o + k, on - k, "[  ] %s - %d difference%s:\r\n%s%s", label[g], cnt[g], cnt[g] == 1 ? "" : "s",
-                  lines[g], cnt[g] > 12 ? "    ...more in the Log\r\n" : "");
-        k = strlen(o);
     }
     if (!diffs && !setdiff) {
         say("Game files check: same as %s's (%d files).", them, files_count());
-        sfmt(o + k, on - k, "All %d files are the same. Good to go.\r\n", files_count());
-    } else if (!diffs) {
-        say("Game files check: same as %s's (%d files), but the settings above differ.", them, files_count());
-        sfmt(o + k, on - k, "All %d files are the same, but make the settings marked \"must match\" the same on both PCs.\r\n", files_count());
-        g_cmp[ci].warn = true;
-        ui_alert("settings differ");
+        sfmt(o + k, on - k, g_versus ? "+Everything matches: same game version, same mods, same files (%d)\n"
+                                     : "+Everything matches: same game version, same mods, same files (%d), same settings\n",
+             files_count());
     } else {
-        say("  Make both games the same: the same mods (same versions) on both PCs, or none.");
-        sfmt(o + k, on - k, "Make both games the same: the same mods (same versions) on both PCs, or\r\n"
-                            "none. Then click \"Check again\". Co-op can disconnect while they differ.\r\n");
+        if (!diffs) say("Game files check: same as %s's (%d files), but the settings above differ.", them, files_count());
+        else say("  Make both games the same: the same mods (same versions) on both PCs, or none.");
+        sfmt(o + k, on - k, "%s.Make them the same on both PCs, then click \"Check again\".\n", diffl);
         g_cmp[ci].warn = true;
-        ui_alert("game files differ");
+        ui_alert(diffs ? "game files differ" : "settings differ");
     }
     mods_publish();
 }
@@ -3164,6 +3151,7 @@ static void handle_cmd(const Cmd *c)
             set_versus(c->arg != 0);
             say("Mode: %s (%s, up to %d players).", MODE_NAME, g_versus ? "SCCT_Versus.exe" : "the co-op campaign", g_max_players);
             scctfix_warn();
+            if (g_nmfs >= 0) { mods_local_text(); mods_publish(); } /* the SCCT Fix line is co-op only */
         }
         break;
     case CMD_STOP: stop_mode(false); break;
