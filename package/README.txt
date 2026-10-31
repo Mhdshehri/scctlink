@@ -1,4 +1,4 @@
-SCCTLink 0.9.8 - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
+SCCTLink 0.9.8.1 - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
 ==============================================================================
 
 No VPN (no Hamachi, Radmin or ZeroTier), no port forwarding, no IP addresses.
@@ -13,7 +13,7 @@ Both players need:
   * each other on their Steam friends list
   * this folder unzipped somewhere (Desktop is fine). Keep SCCTLink.exe,
     steam_api.dll and SCCTFix-d3d9.dll together.
-  * the SAME SCCTLink version (0.9.8).
+  * the SAME SCCTLink version (0.9.8.1).
 
 
 HOW TO PLAY
@@ -49,13 +49,13 @@ FRIEND(S)
        Co-op:  Co-op -> LAN -> Join game.    Versus: the LAN game list.
   3. Leave SCCTLink open while you play.
 
-Live stats = a small window that stays on top of the game. It shows the
+Live stats = text that floats on top of the game, with no background. It shows the
 game's frame rate (FPS) all the time - playing the story alone, in the menu,
 or online - and while you're linked the ping, packet loss and packets per
 second for each friend. The FPS comes from Windows' own performance events
 (like PresentMon / Xbox Game Bar): nothing is put into the game, and it is
-only measured while the window is open. Drag it anywhere; right-click it (or
-click the button again) to close it.
+only measured while it is shown. Drag it by its text; right-click the text
+(or click the button again) to close it.
 Other buttons: Details = ping, packet loss, ports (in the Log). Stop = back
 to the start. Host: pick a friend in the list and click Kick to remove them
 (they can't link again until you click Stop).
@@ -255,6 +255,9 @@ plus the log file to drag into it).
 0.9.8: the Mods tab is simpler and in colors (names, mods, green when
 everything matches, red for each difference); in Versus the co-op settings
 and the SCCT Fix are hidden.
+0.9.8.1: the Mods tab in two columns (you on the left, your friend on the
+right); each mode compares only its own files, and Versus shows who has
+SCCT Versus Reloaded; Live stats float over the game with no background.
 
 Tested end to end on a simulated network: separate "PCs", a stand-in for the
 game that finds LAN games by broadcast (including the real game's encrypted

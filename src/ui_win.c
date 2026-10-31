@@ -83,6 +83,7 @@ IMP int WINAPI DrawTextW(HDC dc, const WCHAR *t, int n, RECT *r, UINT fmt);
 IMP BOOL WINAPI GetClientRect(HWND w, RECT *r);
 IMP BOOL WINAPI RedrawWindow(HWND w, const RECT *r, HANDLE rgn, UINT flags);
 IMP BOOL WINAPI SetWindowPos(HWND w, HWND after, int x, int y, int cx, int cy, UINT flags);
+IMP BOOL WINAPI SetLayeredWindowAttributes(HWND w, DWORD key, unsigned char alpha, DWORD flags);
 typedef struct { UINT size; HWND hwnd; DWORD flags; UINT count; DWORD timeout; } FLASHWINFO;
 IMP BOOL WINAPI FlashWindowEx(const FLASHWINFO *f);
 IMP HWND WINAPI GetForegroundWindow(void);
@@ -155,7 +156,7 @@ IMP void *WINAPI GetProcAddress(void *mod, const char *name);
 enum {
     ID_HOST = 101, ID_JOIN, ID_STOP, ID_STATUS, ID_LOBBY, ID_COPYID, ID_JOINID,
     ID_LISTLABEL, ID_LIST, ID_ACTION, ID_LAUNCH, ID_COPYCONN, ID_LOG, ID_TITLE, ID_REFRESH, ID_ACCENT, ID_THEME, ID_TAB_HOWTO, ID_TAB_LOG, ID_COPYLOG, ID_REPORT, ID_HOWTO,
-    ID_LOBBYLABEL, ID_TAB_MODS, ID_MODS, ID_RECHECK,
+    ID_LOBBYLABEL, ID_TAB_MODS, ID_MODS, ID_MODS2, ID_MODSDIV, ID_RECHECK,
     /* the Settings tab */
     ID_TAB_SET, ID_SET_NOTE, ID_SL_RES, ID_SL_X, ID_SL_FOV, ID_SL_FPS, ID_SL_WS, ID_SET_W, ID_SET_H, ID_SET_FOV, ID_SET_FPS,
     ID_SET_WS, ID_SF_RES, ID_SF_FOV, ID_SF_FPS, ID_SF_WS, ID_SET_FRIEND, ID_SET_FIX, ID_FOV43, ID_FOV1610, ID_FOV169, ID_SET_APPLY, ID_STATS,
@@ -323,7 +324,7 @@ static Theme T;
 typedef struct { int id, x, y, w, h, tab; } Frame; /* tab: drawn only on that tab (-1: always) */
 static Frame g_frames[12];
 static int g_nframes;
-static HBRUSH g_br_bg, g_br_panel, g_br_accent;
+static HBRUSH g_br_bg, g_br_panel, g_br_accent, g_br_border;
 
 static void draw_frames(HDC dc)
 {
@@ -370,6 +371,7 @@ static void apply_system_parts(void)
         theme(g_c[ID_LOG], name, 0);
         theme(g_c[ID_HOWTO], name, 0);
         theme(g_c[ID_MODS], name, 0);
+        theme(g_c[ID_MODS2], name, 0);
         theme(g_c[ID_LIST], name, 0);
     }
 }
@@ -389,7 +391,8 @@ static bool saved_light(void)
 static void set_theme(bool dark)
 {
     T = dark ? DARK : LIGHT;
-    if (g_br_bg) { DeleteObject(g_br_bg); DeleteObject(g_br_panel); DeleteObject(g_br_accent); }
+    if (g_br_bg) { DeleteObject(g_br_bg); DeleteObject(g_br_panel); DeleteObject(g_br_accent); DeleteObject(g_br_border); }
+    g_br_border = CreateSolidBrush(T.border);
     g_br_bg = CreateSolidBrush(T.bg);
     g_br_panel = CreateSolidBrush(T.panel);
     g_br_accent = CreateSolidBrush(T.accent);
@@ -531,7 +534,7 @@ static void draw_mods_item(DrawItem *d)
         DeleteObject(p);
         tr.left += S_(16);
     }
-    DrawTextW(d->dc, t, n - 1, &tr, DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    DrawTextW(d->dc, t, n - 1, &tr, DT_VCENTER | DT_SINGLELINE | (kind == '!' || kind == ' ' ? 0x4000 /* DT_PATH_ELLIPSIS */ : DT_END_ELLIPSIS));
     SelectObject(d->dc, of);
 }
 
@@ -539,9 +542,10 @@ static void draw_mods_item(DrawItem *d)
 static LRESULT control_colors(UINT msg, HDC dc, HWND ctl_)
 {
     if (ctl_ == g_c[ID_ACCENT]) return (LRESULT)g_br_accent;
+    if (ctl_ == g_c[ID_MODSDIV]) return (LRESULT)g_br_border; /* the line between you and your friends */
     int sid = 0; /* a label on the Settings tab? */
     for (int i = ID_SET_NOTE; i <= ID_SET_APPLY && !sid; i++) if (ctl_ == g_c[i]) sid = i;
-    bool box = msg != WM_CTLCOLORSTATIC || ctl_ == g_c[ID_LOG] || ctl_ == g_c[ID_LOBBY] || ctl_ == g_c[ID_HOWTO] || ctl_ == g_c[ID_MODS] || sid;
+    bool box = msg != WM_CTLCOLORSTATIC || ctl_ == g_c[ID_LOG] || ctl_ == g_c[ID_LOBBY] || ctl_ == g_c[ID_HOWTO] || ctl_ == g_c[ID_MODS] || ctl_ == g_c[ID_MODS2] || sid;
     bool dim = ctl_ == g_c[ID_LISTLABEL] || ctl_ == g_c[ID_LOBBYLABEL] || (sid >= ID_SF_RES && sid <= ID_SF_WS) ||
                (sid == ID_SET_NOTE && !g_set_warn);
     SetTextColor(dc, sid == ID_SET_NOTE && g_set_warn ? T.status : dim ? T.dim : T.text);
@@ -625,9 +629,12 @@ static void build(void)
     /* one box: "How to" and the log take turns in it */
     framed(ID_LOG, E, WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY, 14, 384, 572, 180, 7, 5);
     ctl(ID_HOWTO, E, WTEXT(""), WS_VSCROLL | ES_MULTILINE | ES_READONLY, 0, 14 + 7, 384 + 5, 572 - 14, 180 - 10, g_font);
-    /* the Mods tab: one line per row, drawn in colors (see draw_mods_item) */
-    ctl(ID_MODS, L, WTEXT(""), WS_VSCROLL | LBS_NOINTEGRALHEIGHT | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | 0x4000 /* LBS_NOSEL */,
-        0, 14 + 7, 384 + 5, 572 - 14, 180 - 10, g_font);
+    /* the Mods tab: you on the left, your friends on the right, a line between;
+       one line per row, drawn in colors (see draw_mods_item) */
+    const DWORD MODS = WS_VSCROLL | LBS_NOINTEGRALHEIGHT | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | 0x4000 /* LBS_NOSEL */;
+    ctl(ID_MODS, L, WTEXT(""), MODS, 0, 14 + 7, 384 + 5, 274, 180 - 10, g_font);
+    ctl(ID_MODSDIV, T_, WTEXT(""), 0, 0, 14 + 7 + 278, 384 + 9, 1, 180 - 18, g_font);
+    ctl(ID_MODS2, L, WTEXT(""), MODS, 0, 14 + 7 + 283, 384 + 5, 572 - 14 - 283, 180 - 10, g_font);
     SendMessageW(g_c[ID_MODS], LB_ADDSTRING, 0, (LPARAM)WTEXT(".Checking the game files..."));
     SendMessageW(g_c[ID_LOG], EM_SETLIMITTEXT, 0x7FFFFFFE, 0);
     /* "Settings": the same box holds the game's resolution / FOV / FPS limit */
@@ -759,6 +766,8 @@ static void show_tab(int tab)
     ShowWindow(g_c[ID_LOG], tab == TAB_LOG ? 5 : 0);
     ShowWindow(g_c[ID_HOWTO], tab == TAB_HOWTO ? 5 : 0);
     ShowWindow(g_c[ID_MODS], tab == TAB_MODS ? 5 : 0);
+    ShowWindow(g_c[ID_MODS2], tab == TAB_MODS ? 5 : 0);
+    ShowWindow(g_c[ID_MODSDIV], tab == TAB_MODS ? 5 : 0);
     ShowWindow(g_c[ID_COPYLOG], tab == TAB_LOG ? 5 : 0);
     ShowWindow(g_c[ID_REPORT], tab == TAB_LOG ? 5 : 0);
     ShowWindow(g_c[ID_RECHECK], tab == TAB_MODS ? 5 : 0);
@@ -1004,7 +1013,27 @@ static int stats_lines(void)
 
 static void stats_layout(void)
 {
-    if (g_stats) SetWindowPos(g_stats, 0, 0, 0, S_(420), S_(30 + 20 * stats_lines()), 0x2 | 0x4 | 0x10 /* no move, no z-order, no activate */);
+    if (g_stats) SetWindowPos(g_stats, 0, 0, 0, S_(420), S_(8 + 20 * stats_lines()), 0x2 | 0x4 | 0x10 /* no move, no z-order, no activate */);
+}
+
+/* The live stats float over the game with no background: the window's key
+   color is see-through (WS_EX_LAYERED + LWA_COLORKEY), and each line is drawn
+   with a dark outline so it reads on any scene. A font without smoothing,
+   since smoothed edges would blend with the key color. */
+#define STATS_KEY RGBC(255, 0, 255)
+static HFONT g_stats_font;
+
+static void outlined(HDC dc, const WCHAR *t, RECT r, DWORD color)
+{
+    SetTextColor(dc, RGBC(0, 0, 0));
+    for (int dx = -1; dx <= 1; dx++)
+        for (int dy = -1; dy <= 1; dy++) {
+            if (!dx && !dy) continue;
+            RECT o = { r.left + dx, r.top + dy, r.right + dx, r.bottom + dy };
+            DrawTextW(dc, t, -1, &o, DT_SINGLELINE | DT_END_ELLIPSIS);
+        }
+    SetTextColor(dc, color);
+    DrawTextW(dc, t, -1, &r, DT_SINGLELINE | DT_END_ELLIPSIS);
 }
 
 static LRESULT WINAPI stats_proc(HWND w, UINT m, WPARAM wp, LPARAM lp)
@@ -1014,16 +1043,11 @@ static LRESULT WINAPI stats_proc(HWND w, UINT m, WPARAM wp, LPARAM lp)
         HDC dc = (HDC)wp;
         RECT r;
         GetClientRect(w, &r);
-        FillRect(dc, &r, g_br_panel);
-        RECT bar = { 0, 0, S_(4), r.bottom };
-        FillRect(dc, &bar, g_br_accent);
+        HBRUSH key = CreateSolidBrush(STATS_KEY);
+        FillRect(dc, &r, key);
+        DeleteObject(key);
         SetBkMode(dc, TRANSPARENT_BK);
-        HANDLE of = SelectObject(dc, g_bold);
-        SetTextColor(dc, T.status);
-        RECT tr = { S_(12), S_(5), r.right - S_(8), S_(25) };
-        DrawTextW(dc, WTEXT("SCCTLink live stats"), -1, &tr, DT_SINGLELINE | DT_END_ELLIPSIS);
-        SelectObject(dc, g_font);
-        SetTextColor(dc, T.text);
+        HANDLE of = SelectObject(dc, g_stats_font);
         static WCHAR wl[200];
         const char *l = g_stats_text[0] ? g_stats_text : "Starting...";
         for (int i = 0; *l; i++) {
@@ -1033,8 +1057,8 @@ static LRESULT WINAPI stats_proc(HWND w, UINT m, WPARAM wp, LPARAM lp)
             if (n > 199) n = 199;
             memcpy(line, l, (size_t)n);
             line[n] = 0;
-            RECT lr = { S_(12), S_(26 + 20 * i), r.right - S_(8), S_(46 + 20 * i) };
-            DrawTextW(dc, wide(line, wl, 200), -1, &lr, DT_SINGLELINE | DT_END_ELLIPSIS);
+            RECT lr = { S_(4), S_(4 + 20 * i), r.right - S_(4), S_(24 + 20 * i) };
+            outlined(dc, wide(line, wl, 200), lr, i ? RGBC(240, 240, 240) : RGBC(90, 235, 130)); /* FPS in green */
             l = e ? e + 1 : l + n;
         }
         SelectObject(dc, of);
@@ -1055,10 +1079,13 @@ static LRESULT WINAPI stats_proc(HWND w, UINT m, WPARAM wp, LPARAM lp)
 static void stats_toggle(void)
 {
     if (g_stats) { DestroyWindow(g_stats); return; } /* WM_DESTROY tells the engine */
-    g_stats = CreateWindowExW(0x8 | 0x80 | 0x08000000 /* topmost, tool window, doesn't take focus */,
-                              WTEXT("SCCTLinkStats"), WTEXT("SCCTLink live stats"), 0x80000000 | 0x800000 /* popup, thin border */,
-                              S_(16), S_(16), S_(420), S_(50), 0, 0, GetModuleHandleW(0), 0);
+    if (!g_stats_font)
+        g_stats_font = CreateFontW(-S_(15), 0, 0, 0, FW_BOLD, 0, 0, 0, 1, 0, 0, 3 /* NONANTIALIASED_QUALITY */, 0, WTEXT("Segoe UI"));
+    g_stats = CreateWindowExW(0x8 | 0x80 | 0x08000000 | 0x80000 /* topmost, tool window, no focus, layered */,
+                              WTEXT("SCCTLinkStats"), WTEXT("SCCTLink live stats"), 0x80000000 /* popup, no border */,
+                              S_(16), S_(16), S_(420), S_(28), 0, 0, GetModuleHandleW(0), 0);
     if (!g_stats) return;
+    SetLayeredWindowAttributes(g_stats, STATS_KEY, 255, 0x1 /* LWA_COLORKEY: the background is see-through */);
     push_cmd(CMD_STATS, 1); /* start measuring the game's frame rate */
     stats_layout();
     ShowWindow(g_stats, 4 /* SW_SHOWNOACTIVATE */);
@@ -1110,9 +1137,12 @@ static void on_timer(void)
 
     if (n) { pend[n] = 0; append_log(pend); }
     if (mods_dirty) {
+        /* your block (up to the first divider) on the left, everyone else's on the right */
         HWND lb = g_c[ID_MODS];
-        SendMessageW(lb, 0x000B /* WM_SETREDRAW */, 0, 0);
-        SendMessageW(lb, LB_RESETCONTENT, 0, 0);
+        for (int k = 0; k < 2; k++) {
+            SendMessageW(g_c[k ? ID_MODS2 : ID_MODS], 0x000B /* WM_SETREDRAW */, 0, 0);
+            SendMessageW(g_c[k ? ID_MODS2 : ID_MODS], LB_RESETCONTENT, 0, 0);
+        }
         for (const char *l = mods; *l;) {
             const char *e = strchr(l, '\n');
             int len = e ? (int)(e - l) : (int)strlen(l);
@@ -1121,14 +1151,19 @@ static void on_timer(void)
             memcpy(line, l, (size_t)len);
             line[len] = 0;
             if (len && line[len - 1] == '\r') line[len - 1] = 0;
+            if (line[0] == '-' && lb == g_c[ID_MODS]) line[0] = 0, lb = g_c[ID_MODS2]; /* the column break */
+            if (line[0] == '!' || line[0] == ' ') /* Windows paths, and the path ellipsis keeps the file name */
+                for (char *c = line; *c; c++) if (*c == '/') *c = '\\';
             if (line[0]) {
                 static WCHAR w[320];
                 SendMessageW(lb, LB_ADDSTRING, 0, (LPARAM)wide(line, w, 320));
             }
             l = e ? e + 1 : l + len;
         }
-        SendMessageW(lb, 0x000B /* WM_SETREDRAW */, 1, 0);
-        RedrawWindow(lb, 0, 0, 0x1 | 0x4);
+        for (int k = 0; k < 2; k++) {
+            SendMessageW(g_c[k ? ID_MODS2 : ID_MODS], 0x000B /* WM_SETREDRAW */, 1, 0);
+            RedrawWindow(g_c[k ? ID_MODS2 : ID_MODS], 0, 0, 0x1 | 0x4);
+        }
         bool dot = mods_warn && g_tab != TAB_MODS;
         if (dot != g_mods_unseen) { g_mods_unseen = dot; RedrawWindow(g_c[ID_TAB_MODS], 0, 0, 0x1 | 0x4); }
     }
@@ -1283,12 +1318,12 @@ static LRESULT WINAPI wndproc(HWND w, UINT m, WPARAM wp, LPARAM lp)
         return control_colors(m, (HDC)wp, (HWND)lp);
     case WM_MEASUREITEM: {
         MeasureItem *mi = (MeasureItem *)lp;
-        if (mi->type == ODT_LISTBOX) mi->height = (UINT)S_(mi->id == ID_MODS ? 19 : 24);
+        if (mi->type == ODT_LISTBOX) mi->height = (UINT)S_(mi->id == ID_MODS || mi->id == ID_MODS2 ? 19 : 24);
         return 1;
     }
     case WM_DRAWITEM: {
         DrawItem *d = (DrawItem *)lp;
-        if (d->type == ODT_LISTBOX && d->id == ID_MODS) draw_mods_item(d);
+        if (d->type == ODT_LISTBOX && (d->id == ID_MODS || d->id == ID_MODS2)) draw_mods_item(d);
         else if (d->type == ODT_LISTBOX) draw_list_item(d);
         else draw_button(d);
         return 1;
