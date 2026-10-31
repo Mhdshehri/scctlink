@@ -2,7 +2,7 @@
 # Build dist/SCCTLink-<ver>.zip. steam_api.dll must be the pinned file (pass its path).
 set -eu
 cd "$(dirname "$0")"
-VER=$(sed -n 's/^#define VERSION "\(.*\)"/\1/p' src/scctlink.c)
+VER=$(sed -n 's/^#define SCCTLINK_VERSION "\(.*\)"/\1/p' src/ui.h)
 DLL=${1:?usage: package.sh path/to/steam_api.dll}
 echo "fdafb7c65ec7d4182b42bf92cc8671c68e4dc547cc6e613899d2618a47eb65da  $DLL" | sha256sum -c -
 FIX=package/SCCTFix-d3d9.dll   # the SCCT Fix (d3d9.dll), pinned
