@@ -1,4 +1,4 @@
-SCCTLink 0.9.5 - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
+SCCTLink 0.9.6 - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
 ==============================================================================
 
 No VPN (no Hamachi, Radmin or ZeroTier), no port forwarding, no IP addresses.
@@ -13,7 +13,7 @@ Both players need:
   * each other on their Steam friends list
   * this folder unzipped somewhere (Desktop is fine). Keep SCCTLink.exe,
     steam_api.dll and SCCTFix-d3d9.dll together.
-  * the SAME SCCTLink version (0.9.5).
+  * the SAME SCCTLink version (0.9.6).
 
 
 HOW TO PLAY
@@ -75,7 +75,10 @@ How to   = the steps for the host or the friend, ticked as they happen
            ([x] done, [>] do this now), and what to watch out for.
 Log      = everything SCCTLink did. A dot on "Log" means a warning arrived.
            "Copy log" copies it - send it with your friend's when something
-           doesn't work.
+           doesn't work. "Report" opens a new problem report on GitHub and
+           the folder with scctlink.log: drag the log into the report (and
+           your friend's too). Reports are public; the log has no IP
+           addresses, but it has your Steam friends' names.
 Mods     = the game files check. As soon as SCCTLink opens it lists your
            game's mods (the game doesn't have to be running). When you link,
            it compares your game with your friend's as a checklist - same
@@ -192,8 +195,8 @@ TROUBLESHOOTING
     2. Both click Details: "Your game: running" must show on both sides, and the
        friend should see the host's ports listed.
     3. Restart the friend's game while SCCTLink stays connected.
-    4. Send both scctlink.log files to the developer. They contain no IP
-       addresses (they are written as LAN-IP#1 etc).
+    4. Click "Report" in the Log tab and drag both scctlink.log files into
+       the report. They contain no IP addresses (written as LAN-IP#1 etc).
   Co-op disconnects when someone draws a weapon -> install the SCCT Fix on
     both PCs (Settings tab), then check the Mods tab: everything must match.
   "different SCCTLink version" -> both need the same SCCTLink zip.
@@ -236,6 +239,8 @@ are left alone, less memory for a stalled TCP stream.
 are read again), "Live stats" window on top of the game (the game's FPS
 even playing alone; ping, packet loss and packets per second while linked),
 a reminder in co-op when the SCCT Fix isn't installed.
+0.9.6: "Report" button in the Log tab (a GitHub problem report, filled in,
+plus the log file to drag into it).
 
 Tested end to end on a simulated network: separate "PCs", a stand-in for the
 game that finds LAN games by broadcast (including the real game's encrypted
@@ -243,7 +248,8 @@ discovery packet), embeds its address in packets and uses UDP and TCP, and a
 stand-in for Steam with 10% packet loss and 60 ms delay. Packets arrived
 byte-for-byte exact and in order. Versus was tested the same way with a host
 and two friends on three "PCs". Co-op was tested with the real game between
-two homes. If something doesn't work, send both scctlink.log files.
+two homes. If something doesn't work, click "Report" and attach both
+scctlink.log files.
 
 
 SCCTLink by Mhdshehri (github.com/Mhdshehri). MIT license. Not affiliated with Ubisoft or Valve.

@@ -318,6 +318,7 @@ int clipboard_get(char *out, int n)
     return (int)strlen(out);
 }
 void open_url(const char *u) { log_line(u); printf("[mock] would open %s\n", u); }
+void show_in_folder(const char *p) { printf("[mock] would show %s\n", p); }
 bool file_exists(const char *path) { return access(path, F_OK) == 0; }
 bool run_program(const char *exe, const char *args, const char *dir)
 {

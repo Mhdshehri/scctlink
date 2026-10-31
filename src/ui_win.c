@@ -154,7 +154,7 @@ IMP void *WINAPI GetProcAddress(void *mod, const char *name);
 
 enum {
     ID_HOST = 101, ID_JOIN, ID_STOP, ID_STATUS, ID_LOBBY, ID_COPYID, ID_JOINID,
-    ID_LISTLABEL, ID_LIST, ID_ACTION, ID_LAUNCH, ID_COPYCONN, ID_LOG, ID_TITLE, ID_REFRESH, ID_ACCENT, ID_THEME, ID_TAB_HOWTO, ID_TAB_LOG, ID_COPYLOG, ID_HOWTO,
+    ID_LISTLABEL, ID_LIST, ID_ACTION, ID_LAUNCH, ID_COPYCONN, ID_LOG, ID_TITLE, ID_REFRESH, ID_ACCENT, ID_THEME, ID_TAB_HOWTO, ID_TAB_LOG, ID_COPYLOG, ID_REPORT, ID_HOWTO,
     ID_LOBBYLABEL, ID_TAB_MODS, ID_MODS, ID_RECHECK,
     /* the Settings tab */
     ID_TAB_SET, ID_SET_NOTE, ID_SL_RES, ID_SL_X, ID_SL_FOV, ID_SL_FPS, ID_SL_WS, ID_SET_W, ID_SET_H, ID_SET_FOV, ID_SET_FPS,
@@ -578,6 +578,7 @@ static void build(void)
     ctl(ID_TAB_HOWTO, B, WTEXT("How to"), OD, 0, 14, 350, 96, 28, g_font);
     ctl(ID_TAB_LOG, B, WTEXT("Log"), OD, 0, 114, 350, 80, 28, g_font);
     ctl(ID_TAB_MODS, B, WTEXT("Mods"), OD, 0, 198, 350, 84, 28, g_font);
+    ctl(ID_REPORT, B, WTEXT("Report"), OD, 0, 392, 350, 88, 26, g_font);
     ctl(ID_COPYLOG, B, WTEXT("Copy log"), OD, 0, 486, 350, 100, 26, g_font);
     ctl(ID_TAB_SET, B, WTEXT("Settings"), OD, 0, 286, 350, 96, 28, g_font);
     ctl(ID_RECHECK, B, WTEXT("Check again"), OD, 0, 466, 350, 120, 26, g_font);
@@ -711,6 +712,7 @@ static void show_tab(int tab)
     ShowWindow(g_c[ID_HOWTO], tab == TAB_HOWTO ? 5 : 0);
     ShowWindow(g_c[ID_MODS], tab == TAB_MODS ? 5 : 0);
     ShowWindow(g_c[ID_COPYLOG], tab == TAB_LOG ? 5 : 0);
+    ShowWindow(g_c[ID_REPORT], tab == TAB_LOG ? 5 : 0);
     ShowWindow(g_c[ID_RECHECK], tab == TAB_MODS ? 5 : 0);
     for (int i = ID_SET_NOTE; i <= ID_SET_APPLY; i++) ShowWindow(g_c[i], tab == TAB_SET ? 5 : 0);
     RedrawWindow(g_c[ID_TAB_SET], 0, 0, 0x1 | 0x4);
@@ -826,6 +828,56 @@ static void use_friends(void)
     if (g_set.fwsfov && g_set.have_ws) set_ws(ID_SET_WS, g_set.fwsfov);
     g_set_warn = false;
     set_text(ID_SET_NOTE, "Your friend's values are in the fields. Click Apply to save them.");
+}
+
+/* "Report": a new GitHub issue, filled in, and the log file shown in its
+   folder so it can be dragged into the report. */
+static void url_add(char *o, size_t n, size_t *k, const char *s)
+{
+    static const char hx[] = "0123456789ABCDEF";
+    for (; *s && *k + 4 < n; s++) {
+        unsigned char c = (unsigned char)*s;
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '.' || c == '_')
+            o[(*k)++] = (char)c;
+        else { o[(*k)++] = '%'; o[(*k)++] = hx[c >> 4]; o[(*k)++] = hx[c & 15]; }
+    }
+    o[*k] = 0;
+}
+
+static void report(void)
+{
+    const UiState *s = &g_shown;
+    if (MessageBoxW(g_wnd, WTEXT("SCCTLink opens a new problem report on GitHub (you need to be signed in) and\r\n"
+                                 "the folder with scctlink.log.\r\n\r\n"
+                                 "Drag scctlink.log into the report, and your friend's scctlink.log too if you can.\r\n"
+                                 "Without the logs the problem usually can't be found.\r\n\r\n"
+                                 "Reports are public. The log never contains IP addresses, but it has your\r\n"
+                                 "Steam friends' names."),
+                    WTEXT("SCCTLink - Report a problem"), 0x1 /* OK, Cancel */ | 0x40 /* information */) != 1)
+        return;
+    char body[1500];
+    sfmt(body, sizeof body,
+         "**What happened?**\n\n\n"
+         "**What were you doing?** (hosting or joining, which map, what you did right before)\n\n\n"
+         "**Logs:** drag scctlink.log here (from the folder SCCTLink opened), and your friend's too.\n\n"
+         "---\nSCCTLink " SCCTLINK_VERSION ", %s, %s, SCCT Fix %s\n",
+         s->versus ? "Versus" : "Co-op",
+         s->mode == MODE_HOST ? "hosting" : s->mode == MODE_JOIN ? "joining" : "stopped",
+         g_set.scctfix == 1 ? "installed" : g_set.scctfix == 2 ? "not installed (another d3d9.dll)" : "not installed");
+    static char url[6000];
+    size_t k = 0;
+    url[0] = 0;
+    sfmt(url, sizeof url, "https://github.com/Mhdshehri/scctlink/issues/new?title=");
+    k = strlen(url);
+    url_add(url, sizeof url, &k, "Problem: ");
+    sfmt(url + k, sizeof url - k, "&body=");
+    k = strlen(url);
+    url_add(url, sizeof url, &k, body);
+    open_url(url);
+    char log[800];
+    sfmt(log, sizeof log, "%s\\scctlink.log", exe_dir());
+    show_in_folder(log);
+    ui_log("(Report: GitHub opened in your browser. Drag scctlink.log from the folder that opened into the report.)");
 }
 
 static void copy_log(void)
@@ -1116,6 +1168,7 @@ static void on_command(int id, int code)
         push_cmd(CMD_SCCTFIX, g_set.scctfix == 1 ? 0 : 1);
         break;
     case ID_RECHECK: push_cmd(CMD_RECHECK, 0); break;
+    case ID_REPORT: report(); break;
     case ID_COPYLOG:
         copy_log();
         ui_log("(Log copied. Paste it with Ctrl+V.)");
@@ -1231,7 +1284,7 @@ int main(int argc, char **argv)
     AdjustWindowRectEx(&r, style, 0, 0);
     int ww = r.right - r.left, wh = r.bottom - r.top;
     int x = (GetSystemMetrics(0) - ww) / 2, y = (GetSystemMetrics(1) - wh) / 2;
-    g_wnd = CreateWindowExW(0, wc.className, WTEXT("SCCTLink 0.9.5 - Splinter Cell: Chaos Theory"), style, x < 0 ? 0 : x,
+    g_wnd = CreateWindowExW(0, wc.className, WTEXT("SCCTLink " SCCTLINK_VERSION " - Splinter Cell: Chaos Theory"), style, x < 0 ? 0 : x,
                             y < 0 ? 0 : y, ww, wh, 0, 0, inst, 0);
     if (!g_wnd) return 1;
     build();

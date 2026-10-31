@@ -659,6 +659,12 @@ void clipboard_set(const char *text)
 }
 
 void open_url(const char *url) { ShellExecuteA(0, "open", url, 0, 0, 1); }
+void show_in_folder(const char *path)
+{
+    char args[1100];
+    sfmt(args, sizeof args, "/select,\"%s\"", path);
+    ShellExecuteA(0, "open", "explorer.exe", args, 0, 1);
+}
 
 bool file_exists(const char *path)
 {

@@ -58,7 +58,7 @@ Chaos Theory's co-op runs the same simulation on both PCs (Quazal's *SyncSim*) a
 - **Settings tab:** change resolution, FOV and FPS limit (and the widescreen fix's FOV factor) without editing `.ini` files. Your friend's values are shown beside yours; **Use friend's** copies them into the fields. Every changed file is backed up first.
 - **Live stats:** a small window that stays on top of the game with the game's **frame rate**, even when you play the story alone or sit in the menu, and while linked the ping, packet loss and packets per second for each friend. The frame rate comes from Windows' own performance events (the same ones PresentMon and Xbox Game Bar read), so nothing is put into the game, and only while the window is open.
 - **SCCT Fix reminder:** in co-op, SCCTLink tells you (in the Log) when the SCCT Fix isn't installed.
-- **How to** shows your steps as you go (`[x]` done, `[>]` do this now). **Log** shows everything that happened, with a red dot when something needs a look, and a **Copy log** button.
+- **How to** shows your steps as you go (`[x]` done, `[>]` do this now). **Log** shows everything that happened, with a red dot when something needs a look, a **Copy log** button, and **Report**, which opens a filled-in problem report here on GitHub and the folder with `scctlink.log` to drag into it.
 - Finds friends who are hosting automatically, with a **Refresh** button and short lobby codes.
 - Alerts when a friend links, or when the host's game is up. **Kick** for the host.
 - Opens fast: game file checksums are cached, so only files that changed are read again.
@@ -151,6 +151,6 @@ The tests cover:
 
 ## Credits
 
-By [Mhdshehri](https://github.com/Mhdshehri). The relay pattern comes from the [Co-op Anything](https://github.com/cranebeaker/coop-anything) playbook (Steam Spacewar networking) and CoFLink. Splinter Cell: Chaos Theory is by Ubisoft. SCCTLink is not affiliated with Ubisoft or with Valve.
+By [Mhdshehri](https://github.com/Mhdshehri). The relay pattern comes from the [Co-op Anything](https://github.com/cranebeaker/coop-anything) playbook (Steam Spacewar networking). Splinter Cell: Chaos Theory is by Ubisoft. SCCTLink is not affiliated with Ubisoft or with Valve.
 
 SCCTLink's own code is released under the [MIT license](LICENSE). `steam_api.dll`, which ships in the release zip, is Valve Corporation's Steamworks redistributable (from Steamworks.NET 2025.164.1). It is not covered by the MIT license; it is distributed under the Steamworks SDK terms.

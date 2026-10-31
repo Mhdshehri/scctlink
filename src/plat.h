@@ -58,6 +58,7 @@ void clipboard_set(const char *text);
 int clipboard_get(char *out, int n); /* text on the clipboard, 0 if none */
 #define KEY_PASTE 22                  /* key_poll() value for Ctrl+V */
 void open_url(const char *url);
+void show_in_folder(const char *path); /* opens the file's folder with the file selected */
 bool file_exists(const char *path);
 /* Files and folders directly inside dir (not recursive, no "." / ".."). */
 typedef void (*DirFn)(void *ctx, const char *name, bool is_dir, u64 size, u64 mtime); /* mtime: any number that changes when the file does */
