@@ -27,7 +27,7 @@
 #include "plat.h"
 #include "ui.h"
 
-#define VERSION "0.9.4"
+#define VERSION "0.9.5"
 #define SCCT_APPID 13570
 #define SPACEWAR_APPID 480
 #define MAX_PEERS 3

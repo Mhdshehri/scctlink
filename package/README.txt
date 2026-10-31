@@ -1,4 +1,4 @@
-SCCTLink 0.9.4 - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
+SCCTLink 0.9.5 - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
 ==============================================================================
 
 No VPN (no Hamachi, Radmin or ZeroTier), no port forwarding, no IP addresses.
@@ -13,7 +13,7 @@ Both players need:
   * each other on their Steam friends list
   * this folder unzipped somewhere (Desktop is fine). Keep SCCTLink.exe,
     steam_api.dll and SCCTFix-d3d9.dll together.
-  * the SAME SCCTLink version (0.9.4).
+  * the SAME SCCTLink version (0.9.5).
 
 
 HOW TO PLAY
@@ -232,7 +232,7 @@ StartupFullscreen when the DLL is already there, guides updated.
 0.9.3: security review: .ini files are written to a new file first and then
 swapped in (a failed write never leaves half a file), oversized .ini files
 are left alone, less memory for a stalled TCP stream.
-0.9.4: opens faster (game file checksums are cached and only changed files
+0.9.5: opens faster (game file checksums are cached and only changed files
 are read again), "Live stats" window on top of the game (the game's FPS
 even playing alone; ping, packet loss and packets per second while linked),
 a reminder in co-op when the SCCT Fix isn't installed.
