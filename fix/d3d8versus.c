@@ -181,12 +181,14 @@ static DI8CreateFn g_di8create;
 static DICreateDevFn g_di_create_dev;
 static GetDataFn g_get_data;
 static GetStateFn g_get_state;
-static void *g_mouse;
+static void *g_mice[4]; /* the game makes more than one mouse device */
+static int g_nmice;
+static int is_mouse(void *d) { for (int i = 0; i < g_nmice; i++) if (g_mice[i] == d) return 1; return 0; }
 static const DWORD GUID_SYSMOUSE[4] = { 0x6F1D2B60, 0x11CFD5A0, 0x4544C7BF, 0x00005453 }; /* {6F1D2B60-D5A0-11CF-BFC7-444553540000} */
 static long WINAPI hook_GetDeviceData(void *dev, DWORD size, DWORD *data, DWORD *n, DWORD flags)
 {
     long hr = g_get_data(dev, size, data, n, flags);
-    if (dev == g_mouse && hr >= 0 && data && n && size >= 8) {
+    if (is_mouse(dev) && hr >= 0 && data && n && size >= 8) {
         g_mreads++;
         for (DWORD i = 0; i < *n; i++) {
             DWORD *e = (DWORD *)((char *)data + i * size); /* DIDEVICEOBJECTDATA: offset, data, ... */
@@ -203,7 +205,7 @@ static long WINAPI hook_GetDeviceData(void *dev, DWORD size, DWORD *data, DWORD 
 static long WINAPI hook_GetDeviceState(void *dev, DWORD size, void *state)
 {
     long hr = g_get_state(dev, size, state);
-    if (dev == g_mouse && hr >= 0 && state && size >= 8) {
+    if (is_mouse(dev) && hr >= 0 && state && size >= 8) {
         long dx = ((long *)state)[0], dy = ((long *)state)[1];
         g_mreads++;
         if (dx || dy) { g_mevents++; g_mdx += dx; g_mdy += dy; g_mframe_dx += dx; }
@@ -215,7 +217,7 @@ static long WINAPI hook_DICreateDevice(void *di, const DWORD *guid, void **out, 
     long hr = g_di_create_dev(di, guid, out, outer);
     if (hr >= 0 && out && *out && guid && guid[0] == GUID_SYSMOUSE[0] && guid[1] == GUID_SYSMOUSE[1] &&
         guid[2] == GUID_SYSMOUSE[2] && guid[3] == GUID_SYSMOUSE[3]) {
-        g_mouse = *out;
+        if (g_nmice < 4) g_mice[g_nmice++] = *out;
         void *o = hook_slot(*out, 10, (void *)hook_GetDeviceData);
         if (o) g_get_data = (GetDataFn)o;
         o = hook_slot(*out, 9, (void *)hook_GetDeviceState);
