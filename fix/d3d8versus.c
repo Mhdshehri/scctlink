@@ -116,6 +116,7 @@ static void stats_frame(void)
                       g_frames, g_mreads, g_mevents, g_mdx, g_mdy, g_mmax, g_mframe_max);
             static int lines;
             if (lines++ < 400) log_line(b); /* keep the log small */
+            if (lines % 5 == 0 && lines < 400) sleeps_log();
         }
         g_sec_start = now;
         g_frames = g_mreads = g_mevents = g_mdx = g_mdy = g_mmax = g_mframe_max = 0;
@@ -236,6 +237,50 @@ static long WINAPI hook_DirectInput8Create(HINSTANCE inst, DWORD ver, const void
     }
     return hr;
 }
+/* Who sleeps, and how long (testing): Versus holds itself at ~30 FPS somewhere. */
+static struct { void *caller; DWORD ms; long n; } g_sleeps[32];
+static volatile long g_sleep_lock;
+static void WINAPI hook_Sleep(DWORD ms)
+{
+    void *c = __builtin_return_address(0);
+    if (!g_sleep_lock) {
+        g_sleep_lock = 1;
+        int i;
+        for (i = 0; i < 32 && g_sleeps[i].caller && !(g_sleeps[i].caller == c && g_sleeps[i].ms == ms); i++) {}
+        if (i < 32) { g_sleeps[i].caller = c; g_sleeps[i].ms = ms; g_sleeps[i].n++; }
+        g_sleep_lock = 0;
+    }
+    Sleep(ms);
+}
+static void sleeps_log(void)
+{
+    char b[120];
+    for (int i = 0; i < 32 && g_sleeps[i].caller; i++) {
+        wsprintfA(b, "  Sleep(%lu) from 0x%08lX: %ld times\r\n", g_sleeps[i].ms, (DWORD)g_sleeps[i].caller, g_sleeps[i].n);
+        log_line(b);
+        g_sleeps[i].n = 0;
+    }
+}
+static int patch_import(const char *dll, const char *fn, void *hook)
+{
+    unsigned char *base = (unsigned char *)GetModuleHandleA(0);
+    DWORD rva = *(DWORD *)(base + *(LONG *)(base + 0x3c) + 0x80);
+    HMODULE m = GetModuleHandleA(dll);
+    void *target = m ? GetProcAddress(m, fn) : 0;
+    int k = 0;
+    if (!rva || !target) return 0;
+    for (DWORD *desc = (DWORD *)(base + rva); desc[3]; desc += 5)
+        for (void **iat = (void **)(base + desc[4]); *iat; iat++)
+            if (*iat == target) {
+                DWORD old;
+                VirtualProtect(iat, 4, 4, &old);
+                *iat = hook;
+                VirtualProtect(iat, 4, old, &old);
+                k++;
+            }
+    return k;
+}
+
 /* the game's own import table entry for dinput8!DirectInput8Create */
 static int g_di_patched;
 static void patch_dinput(void)
@@ -420,6 +465,7 @@ BOOL WINAPI DllEntry(HINSTANCE dll, DWORD reason, void *reserved)
        ~22 FPS, even in the menu. The SCCT Fix does the same for co-op. */
     timeBeginPeriod(1);
     patch_dinput();
+    if (patch_import("kernel32.dll", "Sleep", (void *)hook_Sleep)) log_line("watching Sleep\r\n");
     HANDLE t = CreateThread(0, 0, worker, 0, 0, 0);
     if (t) CloseHandle(t);
     return 1;
