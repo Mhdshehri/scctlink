@@ -358,7 +358,7 @@ static float read_mult(const char *key)
 {
     char ini[320], v[32];
     wsprintfA(ini, "%sSCCTVersusFix.ini", g_dir);
-    GetPrivateProfileStringA("Turning", key, "1.0", v, sizeof v, ini); /* missing = the game's own
+    GetPrivateProfileStringA("Turning", key, "1.0", v, sizeof v, ini); /* missing = the game's own */
     /* "1.5" -> 1.5 (no C runtime) */
     float r = 0, scale = 1;
     int i = 0, dot = 0;
