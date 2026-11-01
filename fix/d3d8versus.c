@@ -54,6 +54,7 @@ IMP BOOL WINAPI VirtualProtect(void *, SIZE_T, DWORD, DWORD *);
 IMP HMODULE WINAPI GetModuleHandleA(const char *);
 IMP BOOL WINAPI QueryPerformanceCounter(long long *);
 IMP BOOL WINAPI QueryPerformanceFrequency(long long *);
+IMP UINT WINAPI timeBeginPeriod(UINT);
 
 void *memcpy(void *d, const void *s, unsigned n)
 {
@@ -414,6 +415,10 @@ BOOL WINAPI DllEntry(HINSTANCE dll, DWORD reason, void *reserved)
     g_log = CreateFileA(path, 0x40000000, 1, 0, 2, 0x80000000, 0);
     log_line("SCCT Versus Fix loaded (testing)\r\n");
     QueryPerformanceFrequency(&g_qpf);
+    /* Windows' timer ticks every 15.6 ms unless a program asks for 1 ms (since Windows 10 2004
+       only for that program). Versus sleeps between frames, so with 15.6 ms steps it lands on
+       ~22 FPS, even in the menu. The SCCT Fix does the same for co-op. */
+    timeBeginPeriod(1);
     patch_dinput();
     HANDLE t = CreateThread(0, 0, worker, 0, 0, 0);
     if (t) CloseHandle(t);
