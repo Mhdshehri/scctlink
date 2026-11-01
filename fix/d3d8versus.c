@@ -99,6 +99,8 @@ static void *hook_slot(void *obj, int slot, void *hook)
     return orig;
 }
 static void sleeps_log(void);
+static int g_limiter_patched;
+static void set_frame_rate(int refresh);
 static long long g_qpf, g_sec_start;
 static volatile long g_frames, g_mreads, g_mevents, g_mdx, g_mdy, g_mmax, g_mframe_dx, g_mframe_max;
 static void stats_frame(void)
@@ -141,6 +143,7 @@ static long WINAPI hook_Present(void *dev, const void *a, const void *b, void *w
 }
 static long WINAPI hook_CreateDevice(void *d3d, UINT ad, UINT type, void *wnd, DWORD flags, DWORD *pp, void **out)
 {
+    if (g_limiter_patched) set_frame_rate((int)pp[11] ? (int)pp[11] : 60);
     long hr = g_create_dev(d3d, ad, type, wnd, flags, pp, out);
     char b[200];
     /* D3DPRESENT_PARAMETERS (8): width, height, format, count, multisample, swap effect, window, windowed, ... */
@@ -238,6 +241,50 @@ static long WINAPI hook_DirectInput8Create(HINSTANCE inst, DWORD ver, const void
     }
     return hr;
 }
+/* ---- the frame limiter ----
+   Versus waits each frame until (2.0 / refresh rate) - 1 ms have passed: half the
+   screen's refresh, ~31 FPS on a 60 Hz screen. The code is in SCCT_Versus.ex
+   (Steam copy, fixed address 0x10900000):
+       1095e356: fdivr dword ptr [0x10c10acc]   ; 2.0 / refresh   (d8 3d cc 0a c1 10)
+   The constant 2.0 is used in 66 other places, so only this instruction is
+   pointed at our own number: refresh / MaxFPS (SCCTVersusFix.ini [Display]). */
+static float g_frame_div = 2.0f; /* the game's own until the device exists */
+static void patch_limiter(void)
+{
+    unsigned char *ins = (unsigned char *)0x1095e356;
+    static const unsigned char want[6] = { 0xd8, 0x3d, 0xcc, 0x0a, 0xc1, 0x10 };
+    MEMORY_BASIC_INFORMATION mi;
+    if (!VirtualQuery(ins, &mi, sizeof mi) || mi.State != 0x1000) return;
+    for (int i = 0; i < 6; i++)
+        if (ins[i] != want[i]) { log_line("frame limiter: not the Steam copy's code - left alone\r\n"); return; }
+    DWORD old, a = (DWORD)&g_frame_div;
+    VirtualProtect(ins + 2, 4, 0x40 /* PAGE_EXECUTE_READWRITE */, &old);
+    memcpy(ins + 2, &a, 4);
+    VirtualProtect(ins + 2, 4, old, &old);
+    g_limiter_patched = 1;
+    log_line("frame limiter: found\r\n");
+}
+static int read_int(const char *sec, const char *key, int def)
+{
+    char ini[320], v[32];
+    wsprintfA(ini, "%sSCCTVersusFix.ini", g_dir);
+    GetPrivateProfileStringA(sec, key, "", v, sizeof v, ini);
+    if (!v[0]) return def;
+    int r = 0;
+    for (int i = 0; v[i] >= '0' && v[i] <= '9'; i++) r = r * 10 + (v[i] - '0');
+    return r;
+}
+static void set_frame_rate(int refresh)
+{
+    int fps = read_int("Display", "MaxFPS", 60);
+    if (refresh <= 0) refresh = 60;
+    g_frame_div = fps <= 0 ? 0.0f : (float)refresh / (float)fps; /* 0: no limit */
+    char b[120];
+    wsprintfA(b, "frame limiter: %s (screen %d Hz)\r\n", fps <= 0 ? "off" : "set", refresh);
+    log_line(b);
+    if (fps > 0) { wsprintfA(b, "  max %d FPS\r\n", fps); log_line(b); }
+}
+
 /* Who sleeps, and how long (testing): Versus holds itself at ~30 FPS somewhere. */
 static struct { void *caller; DWORD ms; long n; } g_sleeps[32];
 static volatile long g_sleep_lock;
@@ -471,6 +518,7 @@ BOOL WINAPI DllEntry(HINSTANCE dll, DWORD reason, void *reserved)
        only for that program). Versus sleeps between frames, so with 15.6 ms steps it lands on
        ~22 FPS, even in the menu. The SCCT Fix does the same for co-op. */
     timeBeginPeriod(1);
+    patch_limiter();
     patch_dinput();
     if (patch_import("kernel32.dll", "Sleep", (void *)hook_Sleep)) log_line("watching Sleep\r\n");
     HANDLE t = CreateThread(0, 0, worker, 0, 0, 0);
