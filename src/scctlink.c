@@ -2050,6 +2050,7 @@ static const SetDef SETS[] = {
     { "ws_fps", "FPS limit (widescreen fix)", true },
     { "scctfix", "SCCT Fix (60 FPS cap, borderless)", true },
     { "fullscreen", "Starts in fullscreen", true },
+    { "rawmouse", "Raw mouse (UseDIMouse)", true }, /* how the mouse is read: kept the same on both PCs, to be safe */
 };
 #define NSETS ((int)(sizeof SETS / sizeof *SETS))
 
@@ -2151,6 +2152,7 @@ static void settings_collect(void)
     set_add("scctfix", scctfix_state() == 1 ? "installed" : "not installed");
     sfmt(path, sizeof path, "%s" PATHSEP "SplinterCell3.ini", sys);
     if (ini_get(path, "WinDrv.WindowsClient", "StartupFullscreen", v, sizeof v)) set_add("fullscreen", (v[0] | 32) == 't' ? "yes" : "no");
+    if (ini_get(path, "Init", "UseDIMouse", v, sizeof v)) set_add("rawmouse", (v[0] | 32) == 't' ? "on" : "off");
 }
 
 /* Write value for key (in section, or anywhere if section is 0) into an .ini
@@ -2312,6 +2314,31 @@ static void scctfix(bool install)
     g_uiset.note_warn = false;
     scctfix_(install);
     mf_recheck(); /* the file list changed: show it and tell the friends */
+    settings_publish();
+}
+
+/* Raw mouse: by default (UseDIMouse=False) the game reads the Windows cursor
+   and puts it back in the middle each frame, so a fast move hits the window's
+   edge and is cut short (negative acceleration), and Windows' own pointer
+   acceleration is added. UseDIMouse=True makes the game read the mouse itself
+   (its DirectInput code, already in SplinterCell3.exe): every movement counts
+   the same. Only this one line of SplinterCell3.ini changes. */
+static void rawmouse(bool on)
+{
+    char src[900], dst[900], bak[900], ini[900];
+    g_uiset.note[0] = 0;
+    g_uiset.note_warn = false;
+    if (scctfix_state() < 0) set_say("! Raw mouse: the game's folder wasn't found (only Steam copies).");
+    else if (game_is_running(g_exe)) set_say("! Raw mouse: close Splinter Cell first.");
+    else {
+        scctfix_paths(src, dst, bak, ini, sizeof src);
+        int r = ini_set(ini, "Init", "UseDIMouse", on ? "True" : "False");
+        if (r < 0) set_say("! Raw mouse: couldn't write SplinterCell3.ini.");
+        else if (r == 0) set_say("! Raw mouse: UseDIMouse isn't in SplinterCell3.ini (not changed).");
+        else set_say(on ? "Raw mouse on: the game reads the mouse itself (no acceleration). In co-op your friend needs it on too."
+                        : "Raw mouse off: the game's default mouse again. In co-op your friend needs it off too.");
+    }
+    mf_recheck();
     settings_publish();
 }
 
@@ -2551,6 +2578,8 @@ static void settings_publish(void)
     u->have_fov = u->found && set_value(g_mfs, g_nmfs, "fov");
     u->have_ws = u->found && g_ws_ini[0];
     u->scctfix = scctfix_state();
+    const char *rm = u->found ? set_value(g_mfs, g_nmfs, "rawmouse") : 0;
+    u->rawmouse = rm ? !strcmp(rm, "on") : -1;
     ui_settings(u);
 }
 
@@ -2669,6 +2698,8 @@ static void mf_report(Peer *p, bool they_found)
     g_uiset.friend_ = true;
     sfmt(g_uiset.friend_name, sizeof g_uiset.friend_name, "%s", them);
     set_numbers(theirs, nt, &g_uiset.fw, &g_uiset.fh, &g_uiset.ffov, &g_uiset.ffps, &g_uiset.fwsfov);
+    const char *frm = set_value(theirs, nt, "rawmouse");
+    g_uiset.frawmouse = frm ? !strcmp(frm, "on") : -1;
     settings_publish();
     mf_sort(theirs, nt);
     /* their block: their mods (and the SCCT Fix in co-op) */
@@ -3183,6 +3214,7 @@ static void handle_cmd(const Cmd *c)
         break;
     case CMD_APPLY_SETTINGS: apply_settings(c->arg); break;
     case CMD_SCCTFIX: scctfix(c->arg != 0); break;
+    case CMD_RAWMOUSE: rawmouse(c->arg != 0); break;
     case CMD_STATS:
         if (c->arg && !g_stats_on) {
             g_stats_on = true;

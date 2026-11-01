@@ -34,6 +34,7 @@ void ui_state(const UiState *s)
 }
 void ui_settings(const UiSettings *s)
 {
+    printf("[settings] rawmouse %d friend %d\n", s->rawmouse, s->friend_ ? s->frawmouse : -2);
     printf("[settings] scctfix %d mine %dx%d fov %d fps %d ws %d", s->scctfix, s->w, s->h, s->fov, s->fps, s->wsfov);
     if (s->friend_) printf(" | %s %dx%d fov %d fps %d ws %d", s->friend_name, s->fw, s->fh, s->ffov, s->ffps, s->fwsfov);
     printf("\n");
@@ -112,6 +113,10 @@ bool ui_poll(Cmd *c)
         break;
     case 'f': case 'F': /* the Settings tab's SCCT Fix button: then "1" (install) or "0" (remove) */
         c->kind = CMD_SCCTFIX;
+        c->arg = read_line(line, sizeof line) && line[0] == '1';
+        break;
+    case 'u': case 'U': /* the Settings tab's Raw mouse button: then "1" (on) or "0" (off) */
+        c->kind = CMD_RAWMOUSE;
         c->arg = read_line(line, sizeof line) && line[0] == '1';
         break;
     case 'a': case 'A': { /* the Settings tab's Apply: "width height fov fps wsfactor*100" */

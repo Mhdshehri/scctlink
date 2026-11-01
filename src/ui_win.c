@@ -159,7 +159,7 @@ enum {
     ID_LOBBYLABEL, ID_TAB_MODS, ID_MODS, ID_MODS2, ID_MODSDIV, ID_RECHECK,
     /* the Settings tab */
     ID_TAB_SET, ID_SET_NOTE, ID_SL_RES, ID_SL_X, ID_SL_FOV, ID_SL_FPS, ID_SL_WS, ID_SET_W, ID_SET_H, ID_SET_FOV, ID_SET_FPS,
-    ID_SET_WS, ID_SF_RES, ID_SF_FOV, ID_SF_FPS, ID_SF_WS, ID_SET_FRIEND, ID_SET_FIX, ID_FOV43, ID_FOV1610, ID_FOV169, ID_SET_APPLY, ID_STATS,
+    ID_SET_WS, ID_SF_RES, ID_SF_FOV, ID_SF_FPS, ID_SF_WS, ID_SET_FRIEND, ID_SET_FIX, ID_SET_MOUSE, ID_FOV43, ID_FOV1610, ID_FOV169, ID_SET_APPLY, ID_STATS,
     ID_GAMEMODE, /* keep last */
 };
 
@@ -663,6 +663,7 @@ static void build(void)
     framed(ID_SET_WS, E, WS_TABSTOP | ES_AUTOHSCROLL, 180, 504, 64, 26, 6, 5);
     g_frame_tab = -1;
     ctl(ID_SET_FIX, B, WTEXT("Install SCCT Fix"), OD, 0, 28, 534, 170, 24, g_font);
+    ctl(ID_SET_MOUSE, B, WTEXT("Raw mouse: off"), OD, 0, 204, 534, 136, 24, g_font);
     ctl(ID_SET_FRIEND, B, WTEXT("Use friend's"), OD, 0, 346, 534, 112, 24, g_font);
     ctl(ID_SET_APPLY, B, WTEXT("Apply"), OD, 0, 466, 534, 110, 24, g_bold);
 }
@@ -833,6 +834,7 @@ static void show_settings(const UiSettings *n)
     for (int i = ID_FOV43; i <= ID_FOV169; i++) EnableWindow(g_c[i], n->have_fov);
     EnableWindow(g_c[ID_SET_WS], n->have_ws);
     set_text(ID_SET_FIX, n->scctfix == 1 ? "Remove SCCT Fix" : "Install SCCT Fix");
+    set_text(ID_SET_MOUSE, n->rawmouse == 1 ? "Raw mouse: on" : "Raw mouse: off");
     g_set_warn = n->note_warn;
     if (g_shown.versus) set_text(ID_SET_NOTE, "Versus has its own settings: press F12 in the game (SCCT Versus Reloaded). This tab is for co-op.");
     else if (n->note[0]) set_text(ID_SET_NOTE, n->note);
@@ -971,6 +973,7 @@ static void refresh_controls(void)
     EnableWindow(g_c[ID_SET_APPLY], g_set.found && !g_closing);
     EnableWindow(g_c[ID_SET_FRIEND], g_set.friend_ && !g_closing);
     EnableWindow(g_c[ID_SET_FIX], g_set.found && !g_closing);
+    EnableWindow(g_c[ID_SET_MOUSE], g_set.found && g_set.rawmouse >= 0 && !g_closing);
     static int ro = -1;
     int want_ro = host || (join && s->lobby);
     if (want_ro != ro) { SendMessageW(g_c[ID_LOBBY], EM_SETREADONLY, (WPARAM)want_ro, 0); ro = want_ro; }
@@ -1282,6 +1285,11 @@ static void on_command(int id, int code)
         g_set_warn = false;
         set_text(ID_SET_NOTE, "Working...");
         push_cmd(CMD_SCCTFIX, g_set.scctfix == 1 ? 0 : 1);
+        break;
+    case ID_SET_MOUSE: /* UseDIMouse: the game reads the mouse itself, no acceleration */
+        g_set_warn = false;
+        set_text(ID_SET_NOTE, "Working...");
+        push_cmd(CMD_RAWMOUSE, g_set.rawmouse == 1 ? 0 : 1);
         break;
     case ID_RECHECK: push_cmd(CMD_RECHECK, 0); break;
     case ID_REPORT: report(); break;

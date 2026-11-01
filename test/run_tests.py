@@ -769,6 +769,33 @@ def main():
               "a co-op file (System\\d3d9.dll) is not compared in Versus")
         hv.stop(); jv.stop()
 
+        print("[19] Raw mouse: the Settings tab's button turns UseDIMouse on and off")
+        mouse = dict(base)
+        mouse["System/SplinterCell3.ini"] = (b"[Init]\r\nLogFlags=LNONE\r\nUseDIMouse=False\r\ndefaultRMode=5\r\n"
+                                             b"[WinDrv.WindowsClient]\r\nStartupFullscreen=False\r\n")
+        gm = game_dir("mouse", mouse)
+        ini_m = os.path.join(gm, "System", "SplinterCell3.ini")
+        exe_m = os.path.join(d, "exe_m")
+        os.makedirs(exe_m, exist_ok=True)
+        rm = relay(A, "RM", 1198, "", ["idle"], d, {"MOCK_GAME_DIR": gm, "MOCK_EXE_DIR": exe_m}, stdin=subprocess.PIPE)
+        procs.append(rm)
+        check(rm.wait_for(r"\[settings\] rawmouse 0 ", timeout=10) is not None, "raw mouse is off by default (UseDIMouse=False)")
+        mk = rm.mark()
+        rm.p.stdin.write("U\n1\n"); rm.p.stdin.flush()
+        check(rm.wait_for(r"Raw mouse on: the game reads the mouse itself", timeout=10, since=mk) is not None
+              and rm.wait_for(r"\[settings\] rawmouse 1 ", timeout=5, since=mk) is not None, "Raw mouse on")
+        with open(ini_m, "rb") as f:
+            txt = f.read()
+        check(b"UseDIMouse=True\r\n" in txt and b"LogFlags=LNONE\r\n" in txt and b"defaultRMode=5\r\n" in txt
+              and b"StartupFullscreen=False" in txt, "only the UseDIMouse line changed (Windows line ends kept)")
+        check(os.path.exists(ini_m + ".scctlink-backup"), "the original .ini is backed up first")
+        mk = rm.mark()
+        rm.p.stdin.write("U\n0\n"); rm.p.stdin.flush()
+        check(rm.wait_for(r"\[settings\] rawmouse 0 ", timeout=10, since=mk) is not None, "Raw mouse off again")
+        with open(ini_m, "rb") as f:
+            check(b"UseDIMouse=False\r\n" in f.read(), "...UseDIMouse=False in the file")
+        rm.stop()
+
         print("[13] bad internet: 10% packet loss each way and 60 ms delay each way")
         h10, j10, hg10, jg10 = session("    (setup)", d, A, B, extra={"MOCK_LOSS": "10", "MOCK_DELAY_MS": "60"}, n_stream=1000)
         procs += [h10, j10, hg10, jg10]

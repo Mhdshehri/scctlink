@@ -22,6 +22,7 @@ typedef enum {
     CMD_RECHECK,     /* list the game files again and compare with the friends again */
     CMD_STATS,       /* arg 1: the live stats window is open (measure the game's frame rate), 0: closed */
     CMD_SCCTFIX,      /* arg 1: put the SCCT Fix (d3d9.dll + StartupFullscreen=False) into the game's System folder, 0: take it out */
+    CMD_RAWMOUSE,     /* arg 1: UseDIMouse=True in SplinterCell3.ini (the game reads the mouse itself, no acceleration), 0: False */
     CMD_APPLY_SETTINGS, /* arg = settings_pack(): write resolution / FOV / FPS limit into the game's .ini files */
     CMD_STOP,        /* stop hosting/joining, back to the start screen */
     CMD_QUIT,
@@ -62,6 +63,7 @@ typedef struct {
     bool friend_;               /* a friend's values are known */
     int fw, fh, ffov, ffps, fwsfov;
     char friend_name[64];
+    int rawmouse, frawmouse;    /* UseDIMouse: 1 on, 0 off, -1 not found (frawmouse: the friend's) */
     int scctfix;                 /* the SCCT Fix: 0 not there, 1 installed, 2 another d3d9.dll is there, -1 no game folder */
     char note[200];             /* what the last Apply did */
     bool note_warn;

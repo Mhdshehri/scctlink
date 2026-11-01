@@ -255,6 +255,8 @@ plus the log file to drag into it).
 0.9.8: the Mods tab is simpler and in colors (names, mods, green when
 everything matches, red for each difference); in Versus the co-op settings
 and the SCCT Fix are hidden.
+(next): Raw mouse button in the Settings tab (no mouse acceleration); the
+SCCT Fix's source code (fix/d3d9fix.c).
 0.9.8.1: the Mods tab in two columns (you on the left, your friend on the
 right); each mode compares only its own files, and Versus shows who has
 SCCT Versus Reloaded; Live stats float over the game with no background.
