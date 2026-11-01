@@ -358,7 +358,7 @@ static float read_mult(const char *key)
 {
     char ini[320], v[32];
     wsprintfA(ini, "%sSCCTVersusFix.ini", g_dir);
-    GetPrivateProfileStringA("Turning", key, "1.0", v, sizeof v, ini);
+    GetPrivateProfileStringA("Turning", key, "1.0", v, sizeof v, ini); /* missing = the game's own
     /* "1.5" -> 1.5 (no C runtime) */
     float r = 0, scale = 1;
     int i = 0, dot = 0;
@@ -385,19 +385,21 @@ static void put(DWORD *game, DWORD now, DWORD orig, float mult)
 }
 
 /* one chunk: the spy's camera and the mercenary's aim */
-static void scan_chunk(const DWORD *w, SIZE_T n, DWORD *game, float spy, float merc)
+/* left/right and up/down apart: up/down at the same factor made the aim jump vertically */
+static float g_spy_yaw, g_spy_pitch, g_merc_yaw, g_merc_pitch;
+static void scan_chunk(const DWORD *w, SIZE_T n, DWORD *game)
 {
     for (SIZE_T i = 3; i + 4 < n; i++) {
         DWORD a = w[i];
         if (a == I_MINPITCH && w[i + 1] == I_MAXPITCH && w[i + 2] == F_0_2 && w[i + 3] == F_30000 &&
             plausible(w[i - 2], F_40000) && plausible(w[i - 1], F_25000)) {
-            put(game + i - 2, w[i - 2], F_40000, spy);
-            put(game + i - 1, w[i - 1], F_25000, spy);
+            put(game + i - 2, w[i - 2], F_40000, g_spy_yaw);
+            put(game + i - 1, w[i - 1], F_25000, g_spy_pitch);
             g_cams++;
         } else if (a == F_0_1 && w[i + 1] == F_0_15 && w[i + 2] == F_0_25 &&
                    plausible(w[i - 3], F_4_5) && plausible(w[i - 2], F_12) && w[i - 1] == F_60000) {
-            put(game + i - 3, w[i - 3], F_4_5, merc);
-            put(game + i - 2, w[i - 2], F_12, merc);
+            put(game + i - 3, w[i - 3], F_4_5, g_merc_yaw);
+            put(game + i - 2, w[i - 2], F_12, g_merc_pitch);
             g_mercs++;
         }
     }
@@ -405,13 +407,13 @@ static void scan_chunk(const DWORD *w, SIZE_T n, DWORD *game, float spy, float m
 
 #define CHUNK 16384 /* words */
 static DWORD g_buf[CHUNK];
-static void scan_region(DWORD *base, SIZE_T words, float spy, float merc)
+static void scan_region(DWORD *base, SIZE_T words)
 {
     /* chunks overlap by 8 words so nothing on a boundary is missed */
     for (SIZE_T at = 0; at < words; at += CHUNK - 8) {
         SIZE_T n = words - at < CHUNK ? words - at : CHUNK, got = 0;
         if (!ReadProcessMemory(GetCurrentProcess(), base + at, g_buf, n * 4, &got) || got != n * 4) continue;
-        scan_chunk(g_buf, n, base + at, spy, merc);
+        scan_chunk(g_buf, n, base + at);
         if (n < CHUNK) break;
     }
 }
@@ -423,7 +425,11 @@ static DWORD WINAPI worker(void *arg)
     Sleep(5000);
     int last_c = -1, last_m = -1;
     for (;;) {
-        float spy = read_mult("Spy"), merc = read_mult("Merc");
+        g_spy_yaw = read_mult("Spy");
+        g_spy_pitch = read_mult("SpyVertical");
+        g_merc_yaw = read_mult("Merc");
+        g_merc_pitch = read_mult("MercVertical");
+        float spy = g_spy_yaw, merc = g_merc_yaw;
         g_cams = g_mercs = 0;
         MEMORY_BASIC_INFORMATION mi;
         unsigned char *p = (unsigned char *)0x10000;
@@ -431,7 +437,7 @@ static DWORD WINAPI worker(void *arg)
             unsigned char *next = (unsigned char *)mi.BaseAddress + mi.RegionSize;
             if (mi.State == 0x1000 /* MEM_COMMIT */ && mi.Type == 0x20000 /* MEM_PRIVATE */ &&
                 (mi.Protect & 0xFF) == 0x04 /* PAGE_READWRITE, not guard/nocache */)
-                scan_region((DWORD *)mi.BaseAddress, mi.RegionSize / 4, spy, merc);
+                scan_region((DWORD *)mi.BaseAddress, mi.RegionSize / 4);
             if (next <= p) break;
             p = next;
         }
