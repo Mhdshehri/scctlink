@@ -385,13 +385,21 @@ IMP HANDLE WINAPI CreateThread(void *sa, size_t stack, DWORD(WINAPI *fn)(void *)
 
 static const EtwGuid D3D9_PROVIDER = { 0x783aca0a, 0x790e, 0x4d7f, { 0x84, 0x51, 0xaa, 0x85, 0x05, 0x11, 0xc6, 0xb9 } };
 static const EtwGuid DXGI_PROVIDER = { 0xca11c036, 0x0102, 0x4a2d, { 0xa6, 0xad, 0xf0, 0x3c, 0xfe, 0xd5, 0xd3, 0xc9 } };
+/* Microsoft-Windows-DxgKrnl: the graphics kernel sees every present, whatever
+   the API. Needed for Versus, which is Direct3D 8 (no D3D9/DXGI events). Only
+   these events are let through (filtered inside Windows, so it stays light):
+   Blit_Info 166, Flip_Info 168, Present_Info 184. */
+static const EtwGuid DXGK_PROVIDER = { 0x802ec45a, 0x1e99, 0x4b83, { 0x99, 0x20, 0x87, 0xc9, 0x82, 0x77, 0xba, 0x9d } };
+typedef struct { uint64_t ptr; uint32_t size, type; } EtwFilterDesc;
+typedef struct { uint32_t version, enable_property, control_flags; EtwGuid source_id; EtwFilterDesc *filters; uint32_t nfilters; } EtwEnableParams;
+static struct { uint8_t filter_in, reserved; uint16_t count, ids[3]; } g_dxgk_ids = { 1, 0, 3, { 166, 168, 184 } };
 static const WCHAR_T_ FPS_SESSION[] = { 'S', 'C', 'C', 'T', 'L', 'i', 'n', 'k', ' ', 'F', 'P', 'S', 0 };
 static struct { EtwProps p; WCHAR_T_ name[32]; } g_etw;
 static TRACEHANDLE g_etw_session, g_etw_trace;
-static volatile long g_frames_d3d9, g_frames_dxgi;
+static volatile long g_frames_d3d9, g_frames_dxgi, g_frames_kpresent, g_frames_kblitflip;
 static volatile bool g_fps_on;
 static u64 g_fps_at;
-static long g_fps_last9, g_fps_lastx;
+static long g_fps_last9, g_fps_lastx, g_fps_lastkp, g_fps_lastkb;
 
 static void WINAPI fps_event(const uint8_t *r)
 {
@@ -402,6 +410,10 @@ static void WINAPI fps_event(const uint8_t *r)
     if (!pid_is_game(pid)) return;
     if (id == 1 && !memcmp(r + 24, &D3D9_PROVIDER, 16)) g_frames_d3d9++;       /* Present start */
     else if (id == 42 && !memcmp(r + 24, &DXGI_PROVIDER, 16)) g_frames_dxgi++;  /* Present start */
+    else if (!memcmp(r + 24, &DXGK_PROVIDER, 16)) {
+        if (id == 184) g_frames_kpresent++;                 /* Present_Info */
+        else if (id == 166 || id == 168) g_frames_kblitflip++; /* Blit_Info, Flip_Info */
+    }
 }
 
 static DWORD WINAPI fps_thread(void *arg)
@@ -432,6 +444,12 @@ bool fps_start(void)
     if (StartTraceW(&g_etw_session, FPS_SESSION, &g_etw.p) != 0) return false;
     EnableTraceEx2(g_etw_session, &D3D9_PROVIDER, 1, 4, ~0ull, 0, 0, 0);
     EnableTraceEx2(g_etw_session, &DXGI_PROVIDER, 1, 4, ~0ull, 0, 0, 0);
+    static EtwFilterDesc fd;
+    static EtwEnableParams ep;
+    fd = (EtwFilterDesc){ (uint64_t)(uintptr_t)&g_dxgk_ids, sizeof g_dxgk_ids, 0x80000200 /* EVENT_FILTER_TYPE_EVENT_ID */ };
+    ep = (EtwEnableParams){ 2 /* ENABLE_TRACE_PARAMETERS_VERSION_2 */, 0, 0, { 0, 0, 0, { 0 } }, &fd, 1 };
+    if (EnableTraceEx2(g_etw_session, &DXGK_PROVIDER, 1, 4, ~0ull, 0, 0, &ep) != 0) /* Windows 7/8: no filters */
+        EnableTraceEx2(g_etw_session, &DXGK_PROVIDER, 1, 4, 0x1 /* Base */, 0, 0, 0);
     static EtwLogfile lf;
     memset(&lf, 0, sizeof lf);
     lf.logger_name = (WCHAR_T_ *)FPS_SESSION;
@@ -446,6 +464,8 @@ bool fps_start(void)
     g_fps_at = GetTickCount64();
     g_fps_last9 = g_frames_d3d9;
     g_fps_lastx = g_frames_dxgi;
+    g_fps_lastkp = g_frames_kpresent;
+    g_fps_lastkb = g_frames_kblitflip;
     return true;
 }
 
@@ -462,11 +482,12 @@ int fps_get(void)
     if (!g_fps_on) return -1;
     u64 t = GetTickCount64();
     if (t - g_fps_at < 250) return -2; /* too soon: keep the last value */
-    long f9 = g_frames_d3d9, fx = g_frames_dxgi;
-    long d9 = f9 - g_fps_last9, dx = fx - g_fps_lastx;
+    long f9 = g_frames_d3d9, fx = g_frames_dxgi, kp = g_frames_kpresent, kb = g_frames_kblitflip;
+    long d9 = f9 - g_fps_last9, dx = fx - g_fps_lastx, dkp = kp - g_fps_lastkp, dkb = kb - g_fps_lastkb;
     unsigned ms = (unsigned)(t - g_fps_at);
-    g_fps_at = t; g_fps_last9 = f9; g_fps_lastx = fx;
+    g_fps_at = t; g_fps_last9 = f9; g_fps_lastx = fx; g_fps_lastkp = kp; g_fps_lastkb = kb;
     long frames = d9 > dx ? d9 : dx; /* the game's own API; the other may be an overlay */
+    if (!frames) frames = dkp > dkb ? dkp : dkb; /* Direct3D 8 (Versus): only the graphics kernel sees its frames */
     return (int)((unsigned)frames * 1000u / ms);
 }
 

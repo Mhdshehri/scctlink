@@ -686,6 +686,9 @@ static void build(void)
 static bool set_versus_only(int id) { (void)id; return false; }
 static bool set_coop_only(int id)
 {
+    /* Versus' resolution: the game sets it from the profile's list (up to 1600x900) and writes it back
+       to Default.ini when it exits, so changing it needs the Versus Fix (not made yet) */
+    if (id == ID_SL_RES || id == ID_SL_X || id == ID_SET_W || id == ID_SET_H || id == ID_SF_RES) return true;
     return (id >= ID_SL_FOV && id <= ID_SL_WS) || id == ID_SET_FOV || id == ID_SET_FPS || id == ID_SET_WS ||
            (id >= ID_SF_FOV && id <= ID_SF_WS) || id == ID_SET_FRIEND || id == ID_SET_FIX || id == ID_SET_MOUSE ||
            (id >= ID_FOV43 && id <= ID_FOV169);
@@ -693,7 +696,7 @@ static bool set_coop_only(int id)
 static void move_ctl(int id, int x, int y) { SetWindowPos(g_c[id], 0, S_(x), S_(y), 0, 0, 0x1 | 0x4 | 0x10 /* no size, z-order, activate */); }
 static void place_mouse_row(bool versus)
 {
-    int y = SET_ROW(versus ? 1 : 4);
+    int y = SET_ROW(versus ? 0 : 4);
     move_ctl(ID_SL_MOUSE, 28, y + 4);
     move_ctl(ID_SF_MOUSE, 368, y + 4);
     move_ctl(ID_SL_TURN, 250, y + 4);
@@ -857,7 +860,6 @@ static void show_settings(const UiSettings *n)
     shown_versus = vs;
     g_set = *n;
     if (vs) {
-        if (first || o.vw != n->vw || o.vh != n->vh) { set_num(ID_SET_W, n->vw); set_num(ID_SET_H, n->vh); }
         if (first || o.vsens != n->vsens) set_ws(ID_SET_SENS, n->vsens);
         if (first || o.vmult != n->vmult) set_ws(ID_SET_TURN, n->vmult);
         set_text(ID_SF_RES, "");
@@ -892,7 +894,7 @@ static void show_settings(const UiSettings *n)
     set_text(ID_SET_MOUSE, n->rawmouse == 1 ? "Raw mouse: on" : "Raw mouse: off");
     g_set_warn = n->note_warn;
     if (vs && n->note[0]) set_text(ID_SET_NOTE, n->note);
-    else if (vs) set_text(ID_SET_NOTE, n->have_vprofile ? "Versus: resolution and mouse. Close Versus before changing them."
+    else if (vs) set_text(ID_SET_NOTE, n->have_vprofile ? "Versus: mouse. Close Versus before changing it."
                                                      : "Versus: start it once and make a profile, then its mouse settings show here.");
     else if (n->note[0]) set_text(ID_SET_NOTE, n->note);
     else if (!n->found) set_text(ID_SET_NOTE, "The game's folder wasn't found (only Steam copies of the game can be changed).");
@@ -916,9 +918,7 @@ static int edit_num(int id, bool ws)
 
 static void apply_versus_clicked(void)
 {
-    int w = edit_num(ID_SET_W, false), h = edit_num(ID_SET_H, false), sens = edit_num(ID_SET_SENS, true),
-        mult = edit_num(ID_SET_TURN, true);
-    if (w == g_set.vw && h == g_set.vh) w = h = 0;
+    int w = 0, h = 0, sens = edit_num(ID_SET_SENS, true), mult = edit_num(ID_SET_TURN, true); /* (resolution: see set_coop_only) */
     if (sens == g_set.vsens || !g_set.have_vprofile) sens = 0;
     if (mult == g_set.vmult || !g_set.have_vprofile) mult = 0;
     if ((w && !h) || (h && !w)) { g_set_warn = true; set_text(ID_SET_NOTE, "Type both the width and the height."); return; }

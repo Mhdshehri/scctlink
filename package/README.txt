@@ -1,4 +1,4 @@
-SCCTLink 0.9.9 - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
+SCCTLink 0.9.9.1 - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
 ==============================================================================
 
 No VPN (no Hamachi, Radmin or ZeroTier), no port forwarding, no IP addresses.
@@ -13,7 +13,7 @@ Both players need:
   * each other on their Steam friends list
   * this folder unzipped somewhere (Desktop is fine). Keep SCCTLink.exe,
     steam_api.dll and SCCTFix-d3d9.dll together.
-  * the SAME SCCTLink version (0.9.9).
+  * the SAME SCCTLink version (0.9.9.1).
 
 
 HOW TO PLAY
@@ -110,7 +110,7 @@ Settings = change resolution, FOV and FPS limit (and the widescreen fix's
            (no mouse acceleration) and "Reset" (the game's own values: FOV
            75, FPS limit 60, sensitivity 100, aim turn 0.50, raw mouse off;
            the resolution is kept).
-           In Versus the tab has Versus' own settings: resolution, mouse
+           In Versus the tab has Versus' own settings: mouse
            sensitivity and the mouse multiplier (lower = less acceleration;
            raise the sensitivity to match), and its own Reset. Versus
            already reads the mouse directly. The mouse settings are in your
@@ -265,8 +265,10 @@ plus the log file to drag into it).
 everything matches, red for each difference); in Versus the co-op settings
 and the SCCT Fix are hidden.
 0.9.9: Settings: mouse sensitivity, aim turn speed and Reset; Versus gets its
-own Settings (resolution, mouse sensitivity, mouse multiplier); the Mods tab
-says on top whether all party members match.
+own Settings (mouse sensitivity, mouse multiplier); the Mods tab says on top
+whether all party members match.
+0.9.9.1: Live stats shows Versus' frame rate (Direct3D 8, read from the
+graphics kernel's events); Versus' resolution field removed (Versus resets it).
 0.9.8.2: Raw mouse button in the Settings tab (no mouse acceleration); the
 SCCT Fix's source code (fix/d3d9fix.c).
 0.9.8.1: the Mods tab in two columns (you on the left, your friend on the
