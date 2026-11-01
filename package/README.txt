@@ -1,4 +1,4 @@
-SCCTLink 0.9.8.2 - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
+SCCTLink 0.9.9 - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
 ==============================================================================
 
 No VPN (no Hamachi, Radmin or ZeroTier), no port forwarding, no IP addresses.
@@ -13,7 +13,7 @@ Both players need:
   * each other on their Steam friends list
   * this folder unzipped somewhere (Desktop is fine). Keep SCCTLink.exe,
     steam_api.dll and SCCTFix-d3d9.dll together.
-  * the SAME SCCTLink version (0.9.8.2).
+  * the SAME SCCTLink version (0.9.9).
 
 
 HOW TO PLAY
@@ -103,9 +103,18 @@ Settings = change resolution, FOV and FPS limit (and the widescreen fix's
            85 / 91 (the game's default 75 is made for old 4:3 screens and
            looks cut off on wide ones). Then Apply. In co-op both players
            need the SAME FOV, so agree on one number.
-           Also here: "Install SCCT Fix" / "Remove SCCT Fix".
-           In Versus this tab only shows a note: Versus has its own settings
-           (press F12 in the game with SCCT Versus Reloaded).
+           Mouse sensitivity, and "Aim turn": how fast you turn while
+           aiming (the game's 0.50 = half speed; 1.00 = as fast as normal).
+           In co-op both players need the same aim turn speed.
+           Also here: "Install SCCT Fix" / "Remove SCCT Fix", "Raw mouse"
+           (no mouse acceleration) and "Reset" (the game's own values: FOV
+           75, FPS limit 60, sensitivity 100, aim turn 0.50, raw mouse off;
+           the resolution is kept).
+           In Versus the tab has Versus' own settings: resolution, mouse
+           sensitivity and the mouse multiplier (lower = less acceleration;
+           raise the sensitivity to match), and its own Reset. Versus
+           already reads the mouse directly. The mouse settings are in your
+           Versus profile: start Versus once and make one first.
 
 
 SCCT FIX (needed for co-op)
@@ -255,6 +264,9 @@ plus the log file to drag into it).
 0.9.8: the Mods tab is simpler and in colors (names, mods, green when
 everything matches, red for each difference); in Versus the co-op settings
 and the SCCT Fix are hidden.
+0.9.9: Settings: mouse sensitivity, aim turn speed and Reset; Versus gets its
+own Settings (resolution, mouse sensitivity, mouse multiplier); the Mods tab
+says on top whether all party members match.
 0.9.8.2: Raw mouse button in the Settings tab (no mouse acceleration); the
 SCCT Fix's source code (fix/d3d9fix.c).
 0.9.8.1: the Mods tab in two columns (you on the left, your friend on the

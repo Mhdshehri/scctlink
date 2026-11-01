@@ -2051,6 +2051,12 @@ static const SetDef SETS[] = {
     { "scctfix", "SCCT Fix (60 FPS cap, borderless)", true },
     { "fullscreen", "Starts in fullscreen", true },
     { "rawmouse", "Raw mouse (UseDIMouse)", true }, /* how the mouse is read: kept the same on both PCs, to be safe */
+    { "sens", "Mouse sensitivity", false },          /* each player's own (the game's menu has it too) */
+    { "turn", "Aim turn speed (m_turnMul)", true },  /* turning while aiming: part of the simulation */
+    /* Versus (its own game in Versus\; compared only in Versus) */
+    { "v_res", "Versus resolution", false },
+    { "v_sens", "Versus mouse sensitivity", false },
+    { "v_mult", "Versus mouse multiplier", false },
 };
 #define NSETS ((int)(sizeof SETS / sizeof *SETS))
 
@@ -2109,6 +2115,47 @@ static void ws_ini_cb(void *ctx, const char *name, bool is_dir, u64 size, u64 mt
     if (ini_get(path, 0, "FPSLimit", v, sizeof v)) set_add("ws_fps", strcmp(v, "0") ? v : "off");
 }
 
+static int num_at(const char *v, int scale);
+/* Versus keeps each player's profile (<name>_prf.ini, <name>_kbd_0.ini) in
+   ProgramData\Ubisoft\Tom Clancy's Splinter Cell Chaos Theory\... (the newest one is in use) */
+static char g_vprf[900], g_vkbd[900];
+static u64 g_vprf_time;
+static void find_vprofile(const char *dir, int depth);
+static void vprofile_cb(void *ctx, const char *name, bool is_dir, u64 size, u64 mtime)
+{
+    (void)size;
+    const char *dir = ctx;
+    char path[900], low[128];
+    sfmt(path, sizeof path, "%s" PATHSEP "%s", dir, name);
+    sfmt(low, sizeof low, "%s", name);
+    for (char *c = low; *c; c++) if (*c >= 'A' && *c <= 'Z') *c = (char)(*c + 32);
+    if (is_dir) { find_vprofile(path, -1); return; }
+    size_t L = strlen(low);
+    if (L <= 8 || strcmp(low + L - 8, "_prf.ini") || (g_vprf[0] && mtime <= g_vprf_time)) return;
+    char kbd[900];
+    sfmt(kbd, sizeof kbd, "%.*s_kbd_0.ini", (int)(strlen(path) - 8), path);
+    sfmt(g_vprf, sizeof g_vprf, "%s", path);
+    sfmt(g_vkbd, sizeof g_vkbd, "%s", file_exists(kbd) ? kbd : "");
+    g_vprf_time = mtime;
+}
+static void find_vprofile(const char *dir, int depth)
+{
+    static int left;
+    if (depth >= 0) left = depth; else if (--left < 0) { left++; return; }
+    dir_list(dir, vprofile_cb, (void *)dir);
+    if (depth < 0) left++;
+}
+#define VKBD_X "IK_MouseX=Axis aMouseX Speed" /* the mouse multiplier: "IK_MouseX=Axis aMouseX Speed=6.0" */
+#define VKBD_Y "IK_MouseY=Axis aMouseY Speed"
+static void put_num(const char *key, const char *v, int scale) /* "0.5" -> "0.50": the same text on every PC */
+{
+    char b[24];
+    int n = num_at(v, scale);
+    if (scale == 100) sfmt(b, sizeof b, "%d.%02d", n / 100, n % 100);
+    else sfmt(b, sizeof b, "%d", n);
+    set_add(key, b);
+}
+
 static int scctfix_state(void);
 static void settings_collect(void)
 {
@@ -2128,6 +2175,7 @@ static void settings_collect(void)
     for (int i = 0; i < 2; i++) {
         if (!users[i][0]) continue;
         if (ini_get(users[i], 0, "DesiredFOV", v, sizeof v) || ini_get(users[i], 0, "DefaultFOV", v, sizeof v)) set_add("fov", v);
+        if (ini_get(users[i], "Engine.PlayerInput", "MouseSensitivity", v, sizeof v)) put_num("sens", v, 1);
         if (ini_get(users[i], "WinDrv.WindowsClient", "FullscreenViewportX", x, sizeof x) &&
             ini_get(users[i], "WinDrv.WindowsClient", "FullscreenViewportY", y, sizeof y)) {
             char r[17];
@@ -2153,6 +2201,24 @@ static void settings_collect(void)
     sfmt(path, sizeof path, "%s" PATHSEP "SplinterCell3.ini", sys);
     if (ini_get(path, "WinDrv.WindowsClient", "StartupFullscreen", v, sizeof v)) set_add("fullscreen", (v[0] | 32) == 't' ? "yes" : "no");
     if (ini_get(path, "Init", "UseDIMouse", v, sizeof v)) set_add("rawmouse", (v[0] | 32) == 't' ? "on" : "off");
+    sfmt(path, sizeof path, "%s" PATHSEP "SplinterCell3Settings.ini", sys);
+    if (ini_get(path, "Echelon.ECoopPlayerController", "m_turnMul", v, sizeof v)) put_num("turn", v, 100);
+    /* Versus */
+    sfmt(path, sizeof path, "%s" PATHSEP "Versus" PATHSEP "System" PATHSEP "Default.ini", g_mf_dir);
+    if (ini_get(path, "WinDrv.WindowsClient", "FullscreenViewportX", x, sizeof x) &&
+        ini_get(path, "WinDrv.WindowsClient", "FullscreenViewportY", y, sizeof y)) {
+        char r[17];
+        sfmt(r, sizeof r, "%sx%s", x, y);
+        set_add("v_res", r);
+    }
+    g_vprf[0] = g_vkbd[0] = 0;
+    g_vprf_time = 0;
+    if (pd && *pd) {
+        sfmt(path, sizeof path, "%s" PATHSEP "Ubisoft" PATHSEP "Tom Clancy's Splinter Cell Chaos Theory", pd);
+        find_vprofile(path, 3);
+    }
+    if (g_vprf[0] && ini_get(g_vprf, 0, "MouseSensitivity", v, sizeof v)) put_num("v_sens", v, 100);
+    if (g_vkbd[0] && ini_get(g_vkbd, 0, VKBD_X, v, sizeof v)) put_num("v_mult", v, 100);
 }
 
 /* Write value for key (in section, or anywhere if section is 0) into an .ini
@@ -2363,6 +2429,134 @@ static void set_say(const char *fmt, ...)
     sfmt(g_uiset.note, sizeof g_uiset.note, "%s", t);
     g_uiset.note_warn = b[0] == '!';
 }
+/* Co-op's mouse: sensitivity (the player's own) and the aim turn speed (both PCs the same). */
+static bool settings_ready(const char *what)
+{
+    if (!g_steam_ok || g_nmfs <= 0 || !g_mf_dir[0]) { set_say("! %s: the game's folder wasn't found (only Steam copies).", what); return false; }
+    if (game_is_running(g_exe)) { set_say("! %s: close Splinter Cell first - it writes its settings back when it exits.", what); return false; }
+    return true;
+}
+static int set_coop_mouse(int sens, int turn) /* 0 = leave it; returns lines changed, -1 on a write error */
+{
+    char user_sys[900], st[900], v[24];
+    sfmt(user_sys, sizeof user_sys, "%s" PATHSEP "System" PATHSEP "SplinterCell3User.ini", g_mf_dir);
+    sfmt(st, sizeof st, "%s" PATHSEP "System" PATHSEP "SplinterCell3Settings.ini", g_mf_dir);
+    const char *users[2] = { g_user_ini, user_sys };
+    int n = 0, r;
+    bool err = false;
+    if (sens) {
+        sfmt(v, sizeof v, "%d.0", sens);
+        for (int i = 0; i < 2; i++) if (users[i][0]) { r = ini_set(users[i], "Engine.PlayerInput", "MouseSensitivity", v); if (r < 0) err = true; else n += r; }
+    }
+    if (turn) {
+        sfmt(v, sizeof v, "%d.%02d", turn / 100, turn % 100);
+        r = ini_set(st, "Echelon.EPlayerController", "m_turnMul", v); if (r < 0) err = true; else n += r;
+        r = ini_set(st, "Echelon.ECoopPlayerController", "m_turnMul", v); if (r < 0) err = true; else n += r;
+    }
+    return err ? -1 : n;
+}
+static void apply_mouse(u64 a)
+{
+    int sens = (int)(a & 65535), turn = (int)(a >> 16 & 65535);
+    g_uiset.note[0] = 0;
+    g_uiset.note_warn = false;
+    if (!sens && !turn) set_say("Settings: nothing changed.");
+    else if (sens && (sens < 1 || sens > 1000)) set_say("! Settings: mouse sensitivity must be between 1 and 1000.");
+    else if (turn && (turn < 10 || turn > 300)) set_say("! Settings: the aim turn speed must be between 0.1 and 3.0.");
+    else if (settings_ready("Settings")) {
+        int r = set_coop_mouse(sens, turn);
+        if (r < 0) set_say("! Settings: some files couldn't be written (are they read-only?).");
+        else if (!r) set_say("! Settings: the mouse settings weren't found in the game's files.");
+        else {
+            if (sens) set_say("Settings: mouse sensitivity set to %d.", sens);
+            if (turn) set_say("Settings: aim turn speed set to %d.%02d (%s). In co-op your friend needs the same.", turn / 100, turn % 100,
+                              turn == 50 ? "the game's default" : turn == 100 ? "as fast as turning normally" : "custom");
+            sfmt(g_uiset.note, sizeof g_uiset.note, "Saved. They apply the next time Splinter Cell starts.");
+        }
+        mf_recheck();
+    }
+    settings_publish();
+}
+
+/* Versus: resolution (Versus\System\Default.ini) and the profile's mouse. */
+static void apply_versus(u64 a)
+{
+    int w = (int)(a & 8191), h = (int)(a >> 13 & 8191), sens = (int)(a >> 26 & 65535), mult = (int)(a >> 42 & 65535);
+    g_uiset.note[0] = 0;
+    g_uiset.note_warn = false;
+    char def[900], v[24];
+    sfmt(def, sizeof def, "%s" PATHSEP "Versus" PATHSEP "System" PATHSEP "Default.ini", g_mf_dir);
+    bool err = false;
+    int r;
+    if (!w && !h && !sens && !mult) set_say("Settings: nothing changed.");
+    else if ((w || h) && (w < 320 || w > 7680 || h < 200 || h > 4320)) set_say("! Settings: that resolution doesn't look right.");
+    else if (sens && (sens < 1 || sens > 10000)) set_say("! Settings: mouse sensitivity must be between 0.01 and 100.");
+    else if (mult && (mult < 1 || mult > 2000)) set_say("! Settings: the mouse multiplier must be between 0.01 and 20.");
+    else if ((sens || mult) && !g_vprf[0]) set_say("! Settings: no Versus profile found yet - start Versus once and make a profile.");
+    else if (settings_ready("Settings")) {
+        if (w && h) {
+            sfmt(v, sizeof v, "%d", w); r = ini_set(def, "WinDrv.WindowsClient", "FullscreenViewportX", v); err |= r < 0;
+            sfmt(v, sizeof v, "%d", h); r = ini_set(def, "WinDrv.WindowsClient", "FullscreenViewportY", v); err |= r < 0;
+            set_say(r > 0 ? "Settings: Versus resolution set to %dx%d." : "! Settings: Versus' resolution setting wasn't found.", w, h);
+        }
+        if (sens) {
+            sfmt(v, sizeof v, "%d.%02d", sens / 100, sens % 100);
+            r = ini_set(g_vprf, 0, "MouseSensitivity", v); err |= r < 0;
+            set_say(r > 0 ? "Settings: Versus mouse sensitivity set to %s." : "! Settings: the profile has no mouse sensitivity.", v);
+        }
+        if (mult) {
+            sfmt(v, sizeof v, "%d.%02d", mult / 100, mult % 100);
+            if (!g_vkbd[0]) set_say("! Settings: the profile's key settings file wasn't found.");
+            else {
+                r = ini_set(g_vkbd, 0, VKBD_X, v); err |= r < 0;
+                int r2 = ini_set(g_vkbd, 0, VKBD_Y, v); err |= r2 < 0;
+                set_say(r > 0 ? "Settings: Versus mouse multiplier set to %s (lower = less acceleration; raise the sensitivity to match)."
+                              : "! Settings: the mouse multiplier wasn't found.", v);
+            }
+        }
+        if (err) set_say("! Settings: some files couldn't be written (are they read-only?).");
+        else if (!g_uiset.note_warn) sfmt(g_uiset.note, sizeof g_uiset.note, "Saved. They apply the next time Versus starts.");
+        mf_recheck();
+    }
+    settings_publish();
+}
+
+/* Reset: the settings SCCTLink can change, back to the game's own values
+   (the resolution is left alone: it depends on the screen). */
+static void reset_settings(bool versus)
+{
+    g_uiset.note[0] = 0;
+    g_uiset.note_warn = false;
+    if (settings_ready("Reset")) {
+        bool err = false;
+        char p[900], user_sys[900];
+        if (!versus) {
+            sfmt(p, sizeof p, "%s" PATHSEP "System" PATHSEP "SplinterCell3.ini", g_mf_dir);
+            sfmt(user_sys, sizeof user_sys, "%s" PATHSEP "System" PATHSEP "SplinterCell3User.ini", g_mf_dir);
+            const char *users[2] = { g_user_ini, user_sys };
+            for (int i = 0; i < 2; i++) if (users[i][0]) {
+                err |= ini_set(users[i], 0, "DesiredFOV", "75.000000") < 0;
+                err |= ini_set(users[i], 0, "DefaultFOV", "75.000000") < 0;
+            }
+            err |= ini_set(p, 0, "DesiredFOV", "75.000000") < 0;
+            err |= ini_set(p, "SIMULATION", "MAXFPS", "60") < 0;
+            err |= ini_set(p, "Init", "UseDIMouse", "False") < 0;
+            err |= set_coop_mouse(100, 50) < 0;
+            set_say(err ? "! Reset: some files couldn't be written (are they read-only?)."
+                        : "Reset: co-op settings are the game's own again: FOV 75, FPS limit 60, mouse sensitivity 100, "
+                          "aim turn speed 0.50, raw mouse off (the resolution is kept).");
+        } else {
+            if (g_vprf[0]) err |= ini_set(g_vprf, 0, "MouseSensitivity", "10.00") < 0;
+            if (g_vkbd[0]) { err |= ini_set(g_vkbd, 0, VKBD_X, "6.0") < 0; err |= ini_set(g_vkbd, 0, VKBD_Y, "6.0") < 0; }
+            set_say(err ? "! Reset: some files couldn't be written (are they read-only?)."
+                        : !g_vprf[0] ? "! Reset: no Versus profile found yet - nothing to reset."
+                        : "Reset: Versus settings are the game's own again: mouse sensitivity 10, mouse multiplier 6 (the resolution is kept).");
+        }
+        mf_recheck();
+    }
+    settings_publish();
+}
+
 static void apply_settings_(u64 a);
 static void apply_settings(u64 a)
 {
@@ -2530,15 +2724,29 @@ static bool mf_is_mod(const char *path)
 
 /* The "Mods" tab: this PC's game, then one checklist per linked friend. */
 static char g_mods_local[4096];
-static struct { u64 id; bool warn; char text[6144]; } g_cmp[MAX_PEERS];
+static struct { u64 id; bool warn, checked; char text[6144]; } g_cmp[MAX_PEERS];
 static int g_ncmp;
 
 static void mods_publish(void)
 {
     static char t[16384];
-    bool warn = false;
-    sfmt(t, sizeof t, "%s", g_mods_local);
+    bool warn = false, all = g_ncmp > 0;
+    /* the top line (both columns): does everyone in the party have the same game? */
+    char who[300] = "";
+    for (int i = 0; i < g_ncmp; i++) {
+        all &= g_cmp[i].checked;
+        if (!g_cmp[i].warn) continue;
+        const char *n = g_cmp[i].text + 1, *e = strchr(n, '\n');
+        size_t w = strlen(who);
+        sfmt(who + w, sizeof who - w, "%s%.*s", w ? ", " : "", e ? (int)(e - n) : 0, n);
+    }
+    if (who[0]) sfmt(t, sizeof t, "=!Not all party members match: %s\n", who);
+    else if (all) sfmt(t, sizeof t, "=+All party members match\n");
+    else if (g_ncmp) sfmt(t, sizeof t, "=.Not everyone's game could be checked\n");
+    else t[0] = 0;
     size_t k = strlen(t);
+    sfmt(t + k, sizeof t - k, "%s", g_mods_local);
+    k = strlen(t);
     for (int i = 0; i < g_ncmp && k < sizeof t - 10; i++) {
         sfmt(t + k, sizeof t - k, "-\n%s", g_cmp[i].text);
         k = strlen(t);
@@ -2578,6 +2786,14 @@ static void settings_publish(void)
     u->have_fov = u->found && set_value(g_mfs, g_nmfs, "fov");
     u->have_ws = u->found && g_ws_ini[0];
     u->scctfix = scctfix_state();
+    u->sens = u->found ? num_at(set_value(g_mfs, g_nmfs, "sens"), 1) : 0;
+    u->turn = u->found ? num_at(set_value(g_mfs, g_nmfs, "turn"), 100) : 0;
+    u->vw = u->vh = 0;
+    const char *vr = u->found ? set_value(g_mfs, g_nmfs, "v_res") : 0;
+    if (vr) { u->vw = num_at(vr, 1); if (strchr(vr, 'x')) u->vh = num_at(strchr(vr, 'x') + 1, 1); }
+    u->vsens = u->found ? num_at(set_value(g_mfs, g_nmfs, "v_sens"), 100) : 0;
+    u->vmult = u->found ? num_at(set_value(g_mfs, g_nmfs, "v_mult"), 100) : 0;
+    u->have_vprofile = g_vprf[0] != 0;
     const char *rm = u->found ? set_value(g_mfs, g_nmfs, "rawmouse") : 0;
     u->rawmouse = rm ? !strcmp(rm, "on") : -1;
     ui_settings(u);
@@ -2675,6 +2891,7 @@ static void mf_report(Peer *p, bool they_found)
     if (ci == g_ncmp) { if (g_ncmp == MAX_PEERS) return; g_ncmp++; }
     g_cmp[ci].id = p->id;
     g_cmp[ci].warn = false;
+    g_cmp[ci].checked = g_nmfs > 0 && they_found;
     char *o = g_cmp[ci].text;
     size_t on = sizeof g_cmp[ci].text;
     sfmt(o, on, "#%s\n", them);
@@ -2700,6 +2917,8 @@ static void mf_report(Peer *p, bool they_found)
     set_numbers(theirs, nt, &g_uiset.fw, &g_uiset.fh, &g_uiset.ffov, &g_uiset.ffps, &g_uiset.fwsfov);
     const char *frm = set_value(theirs, nt, "rawmouse");
     g_uiset.frawmouse = frm ? !strcmp(frm, "on") : -1;
+    g_uiset.fsens = num_at(set_value(theirs, nt, "sens"), 1);
+    g_uiset.fturn = num_at(set_value(theirs, nt, "turn"), 100);
     settings_publish();
     mf_sort(theirs, nt);
     /* their block: their mods (and the SCCT Fix in co-op) */
@@ -3215,6 +3434,9 @@ static void handle_cmd(const Cmd *c)
     case CMD_APPLY_SETTINGS: apply_settings(c->arg); break;
     case CMD_SCCTFIX: scctfix(c->arg != 0); break;
     case CMD_RAWMOUSE: rawmouse(c->arg != 0); break;
+    case CMD_APPLY_MOUSE: apply_mouse(c->arg); break;
+    case CMD_APPLY_VERSUS: apply_versus(c->arg); break;
+    case CMD_RESET_SETTINGS: reset_settings(c->arg != 0); break;
     case CMD_STATS:
         if (c->arg && !g_stats_on) {
             g_stats_on = true;

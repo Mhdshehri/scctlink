@@ -35,6 +35,8 @@ void ui_state(const UiState *s)
 void ui_settings(const UiSettings *s)
 {
     printf("[settings] rawmouse %d friend %d\n", s->rawmouse, s->friend_ ? s->frawmouse : -2);
+    printf("[settings] mouse sens %d turn %d friend %d %d\n", s->sens, s->turn, s->friend_ ? s->fsens : -2, s->friend_ ? s->fturn : -2);
+    printf("[settings] versus %dx%d sens %d mult %d profile %d\n", s->vw, s->vh, s->vsens, s->vmult, s->have_vprofile);
     printf("[settings] scctfix %d mine %dx%d fov %d fps %d ws %d", s->scctfix, s->w, s->h, s->fov, s->fps, s->wsfov);
     if (s->friend_) printf(" | %s %dx%d fov %d fps %d ws %d", s->friend_name, s->fw, s->fh, s->ffov, s->ffps, s->fwsfov);
     printf("\n");
@@ -117,6 +119,27 @@ bool ui_poll(Cmd *c)
         break;
     case 'u': case 'U': /* the Settings tab's Raw mouse button: then "1" (on) or "0" (off) */
         c->kind = CMD_RAWMOUSE;
+        c->arg = read_line(line, sizeof line) && line[0] == '1';
+        break;
+    case 'o': case 'O': /* co-op mouse: "sensitivity turn*100", then Versus: "w h sens*100 mult*100" with 'w' */
+    case 'w': case 'W': {
+        int v[4] = { 0, 0, 0, 0 };
+        bool vs = (key | 32) == 'w';
+        if (read_line(line, sizeof line)) {
+            int k = 0;
+            for (char *p = line; *p && k < 4;) {
+                while (*p == ' ') p++;
+                if (!*p) break;
+                v[k++] = atoi(p);
+                while (*p && *p != ' ') p++;
+            }
+        }
+        c->kind = vs ? CMD_APPLY_VERSUS : CMD_APPLY_MOUSE;
+        c->arg = vs ? versus_pack(v[0], v[1], v[2], v[3]) : mouse_pack(v[0], v[1]);
+        break;
+    }
+    case 'z': case 'Z': /* Reset: then "0" (co-op) or "1" (Versus) */
+        c->kind = CMD_RESET_SETTINGS;
         c->arg = read_line(line, sizeof line) && line[0] == '1';
         break;
     case 'a': case 'A': { /* the Settings tab's Apply: "width height fov fps wsfactor*100" */

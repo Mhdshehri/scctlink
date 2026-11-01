@@ -711,6 +711,7 @@ def main():
         check(hs.wait_for(r"Game files check: same as user1194's", timeout=15) is not None, "...and on the host's side")
         check(hs.wait_for(r"\[mods\] \+Everything matches: same game version, same mods, same files \(1503\)", timeout=3) is not None,
               "Mods tab: everything matches, in green")
+        check(hs.wait_for(r"\[mods\] =\+All party members match", timeout=3) is not None, "the top line: all party members match")
         with open(os.path.join(gdd, "System", "d3d9.dll"), "wb") as f:  # the friend installs a mod...
             f.write(b"MZreshade")
         js.p.stdin.write("M\n"); js.p.stdin.flush()  # ...and clicks "Check again"
@@ -758,6 +759,8 @@ def main():
                    dict(vplain, MOCK_GAME_DIR=gvb, MOCK_EXE_DIR=exe_vb), stdin=subprocess.PIPE)
         procs.append(jv)
         check(jv.wait_for(r"\[mods\]  No Versus mod \(plain Versus\)", timeout=15) is not None, "the friend sees they have plain Versus")
+        check(hv.wait_for(r"\[mods\] =!Not all party members match: user1197", timeout=15) is not None,
+              "the top line: not all party members match, and who")
         check(hv.wait_for(r"\[mods\]  No Versus mod \(plain Versus\)", timeout=15) is not None, "...and the host sees it too")
         check(hv.wait_for(r"\[mods\] !SCCT Versus Reloaded: you have it, user1197 doesn't", timeout=5) is not None,
               "the host: 'you have it, your friend doesn't', in red")
@@ -795,6 +798,68 @@ def main():
         with open(ini_m, "rb") as f:
             check(b"UseDIMouse=False\r\n" in f.read(), "...UseDIMouse=False in the file")
         rm.stop()
+
+        print("[20] Settings: co-op mouse (sensitivity, aim turn speed), Versus settings, Reset")
+        st = dict(base)
+        st["System/SplinterCell3.ini"] = (b"[Init]\r\nUseDIMouse=True\r\n[SIMULATION]\r\nMAXFPS=144\r\n"
+                                          b"[WinDrv.WindowsClient]\r\nFullscreenViewportX=1920\r\nFullscreenViewportY=1080\r\n")
+        st["System/SplinterCell3User.ini"] = b"[Engine.PlayerInput]\r\nMouseSensitivity=100.0\r\nDesiredFOV=90.000000\r\nDefaultFOV=90.000000\r\n"
+        st["System/SplinterCell3Settings.ini"] = (b"[Echelon.EPlayerController]\r\nm_speedRun=400\r\nm_turnMul=0.5\r\n"
+                                                  b"[Echelon.ECoopPlayerController]\r\nm_turnMul=0.5\r\nm_towardAngle=0.707\r\n")
+        st["Versus/System/Default.ini"] = b"[WinDrv.WindowsClient]\r\nFullscreenViewportX=1600\r\nFullscreenViewportY=1024\r\nStartupFullscreen=True\r\n"
+        gs = game_dir("settings", st)
+        pdv = os.path.join(gd, "programdata_s")
+        prof = os.path.join(pdv, "Ubisoft", "Tom Clancy's Splinter Cell Chaos Theory", "Versus")
+        os.makedirs(prof, exist_ok=True)
+        with open(os.path.join(prof, "KaZ_prf.ini"), "wb") as f:
+            f.write(b"[SBase.SPlayerProfile]\r\nInvertY=False\r\nMouseSensitivity=10.0\r\nScreenRes=0\r\n")
+        with open(os.path.join(prof, "KaZ_kbd_0.ini"), "wb") as f:
+            f.write(b"[Keys]\r\nIK_MiddleMouse=ChangeSpeed\r\nIK_MouseX=Axis aMouseX Speed=6.0\r\nIK_MouseY=Axis aMouseY Speed=6.0\r\n")
+        exe_s = os.path.join(d, "exe_s")
+        os.makedirs(exe_s, exist_ok=True)
+        se = relay(A, "SE", 1199, "", ["idle"], d, {"MOCK_GAME_DIR": gs, "MOCK_EXE_DIR": exe_s, "PROGRAMDATA": pdv}, stdin=subprocess.PIPE)
+        procs.append(se)
+
+        def rd(*parts):
+            with open(os.path.join(*parts), "rb") as f:
+                return f.read()
+        sysd = os.path.join(gs, "System")
+        check(se.wait_for(r"\[settings\] mouse sens 100 turn 50 ", timeout=10) is not None, "co-op mouse: sensitivity 100, aim turn speed 0.50")
+        check(se.wait_for(r"\[settings\] versus 1600x1024 sens 1000 mult 600 profile 1", timeout=5) is not None,
+              "Versus: resolution, and the profile's sensitivity and multiplier (found in ProgramData)")
+        mk = se.mark()
+        se.p.stdin.write("O\n120 100\n"); se.p.stdin.flush()
+        check(se.wait_for(r"\[settings\] mouse sens 120 turn 100 ", timeout=10, since=mk) is not None, "co-op mouse applied")
+        t = rd(sysd, "SplinterCell3Settings.ini")
+        check(t.count(b"m_turnMul=1.00\r\n") == 2 and b"m_speedRun=400\r\n" in t and b"m_towardAngle=0.707\r\n" in t,
+              "aim turn speed written in both player sections, nothing else changed")
+        check(b"MouseSensitivity=120.0\r\n" in rd(sysd, "SplinterCell3User.ini"), "mouse sensitivity written")
+        mk = se.mark()
+        se.p.stdin.write("W\n2560 1440 4000 50\n"); se.p.stdin.flush()
+        check(se.wait_for(r"\[settings\] versus 2560x1440 sens 4000 mult 50 profile 1", timeout=10, since=mk) is not None, "Versus settings applied")
+        dv = rd(gs, "Versus", "System", "Default.ini")
+        check(b"FullscreenViewportX=2560\r\n" in dv and b"FullscreenViewportY=1440\r\n" in dv and b"StartupFullscreen=True" in dv,
+              "Versus resolution in Versus\\System\\Default.ini")
+        kb = rd(prof, "KaZ_kbd_0.ini")
+        check(b"IK_MouseX=Axis aMouseX Speed=0.50\r\n" in kb and b"IK_MouseY=Axis aMouseY Speed=0.50\r\n" in kb
+              and b"IK_MiddleMouse=ChangeSpeed" in kb, "the mouse multiplier in the profile's key file (rest of the line kept)")
+        check(b"MouseSensitivity=40.00\r\n" in rd(prof, "KaZ_prf.ini"), "Versus sensitivity in the profile")
+        check("! " not in "".join(l for l in se.log.splitlines()[-20:] if l.startswith("! ")), "no warnings while applying")
+        mk = se.mark()
+        se.p.stdin.write("Z\n0\n"); se.p.stdin.flush()
+        check(se.wait_for(r"Reset: co-op settings are the game's own again", timeout=10, since=mk) is not None
+              and se.wait_for(r"\[settings\] mouse sens 100 turn 50 ", timeout=5, since=mk) is not None, "Reset (co-op)")
+        s3, us = rd(sysd, "SplinterCell3.ini"), rd(sysd, "SplinterCell3User.ini")
+        check(b"UseDIMouse=False" in s3 and b"MAXFPS=60\r\n" in s3 and b"FullscreenViewportX=1920" in s3
+              and b"DesiredFOV=75.000000" in us and b"MouseSensitivity=100.0" in us
+              and rd(sysd, "SplinterCell3Settings.ini").count(b"m_turnMul=0.50") == 2,
+              "co-op defaults: FOV 75, FPS 60, raw mouse off, sensitivity 100, aim turn 0.50; resolution kept")
+        check(b"Speed=0.50" in rd(prof, "KaZ_kbd_0.ini"), "co-op's Reset leaves Versus alone")
+        mk = se.mark()
+        se.p.stdin.write("Z\n1\n"); se.p.stdin.flush()
+        check(se.wait_for(r"\[settings\] versus 2560x1440 sens 1000 mult 600 profile 1", timeout=10, since=mk) is not None,
+              "Reset (Versus): sensitivity 10, multiplier 6, resolution kept")
+        se.stop()
 
         print("[13] bad internet: 10% packet loss each way and 60 ms delay each way")
         h10, j10, hg10, jg10 = session("    (setup)", d, A, B, extra={"MOCK_LOSS": "10", "MOCK_DELAY_MS": "60"}, n_stream=1000)

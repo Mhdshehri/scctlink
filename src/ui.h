@@ -6,7 +6,7 @@
 #pragma once
 #include "mini.h"
 
-#define SCCTLINK_VERSION "0.9.8.2"
+#define SCCTLINK_VERSION "0.9.9"
 
 typedef enum {
     CMD_NONE,
@@ -23,6 +23,9 @@ typedef enum {
     CMD_STATS,       /* arg 1: the live stats window is open (measure the game's frame rate), 0: closed */
     CMD_SCCTFIX,      /* arg 1: put the SCCT Fix (d3d9.dll + StartupFullscreen=False) into the game's System folder, 0: take it out */
     CMD_RAWMOUSE,     /* arg 1: UseDIMouse=True in SplinterCell3.ini (the game reads the mouse itself, no acceleration), 0: False */
+    CMD_APPLY_MOUSE,  /* arg = mouse_pack(sensitivity, aim turn speed x100): co-op's mouse settings */
+    CMD_APPLY_VERSUS, /* arg = versus_pack(w, h, sensitivity x100, mouse multiplier x100): Versus' settings */
+    CMD_RESET_SETTINGS, /* arg 0: co-op's settings back to the game's defaults, 1: Versus' */
     CMD_APPLY_SETTINGS, /* arg = settings_pack(): write resolution / FOV / FPS limit into the game's .ini files */
     CMD_STOP,        /* stop hosting/joining, back to the start screen */
     CMD_QUIT,
@@ -63,6 +66,9 @@ typedef struct {
     bool friend_;               /* a friend's values are known */
     int fw, fh, ffov, ffps, fwsfov;
     char friend_name[64];
+    int sens, turn, fsens, fturn; /* co-op: mouse sensitivity, aim turn speed (m_turnMul) x100; f*: the friend's */
+    int vw, vh, vsens, vmult;   /* Versus: resolution, mouse sensitivity x100, mouse multiplier x100 (0 = not found) */
+    bool have_vprofile;         /* a Versus profile was found (its mouse settings can be changed) */
     int rawmouse, frawmouse;    /* UseDIMouse: 1 on, 0 off, -1 not found (frawmouse: the friend's) */
     int scctfix;                 /* the SCCT Fix: 0 not there, 1 installed, 2 another d3d9.dll is there, -1 no game folder */
     char note[200];             /* what the last Apply did */
@@ -73,6 +79,11 @@ void ui_settings(const UiSettings *s);
 static inline u64 settings_pack(int w, int h, int fov, int fps, int ws)
 {
     return (u64)(w & 8191) | (u64)(h & 8191) << 13 | (u64)(fov & 255) << 26 | (u64)(fps & 1023) << 34 | (u64)(ws & 4095) << 44;
+}
+static inline u64 mouse_pack(int sens, int turn) { return (u64)(sens & 65535) | (u64)(turn & 65535) << 16; }
+static inline u64 versus_pack(int w, int h, int sens, int mult)
+{
+    return (u64)(w & 8191) | (u64)(h & 8191) << 13 | (u64)(sens & 65535) << 26 | (u64)(mult & 65535) << 42;
 }
 void ui_list(int which, int n, const UiPerson *p);
 /* Friends found hosting. Return the lobby to join now, or 0. Set *reject to a
