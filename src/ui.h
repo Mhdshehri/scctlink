@@ -6,7 +6,7 @@
 #pragma once
 #include "mini.h"
 
-#define SCCTLINK_VERSION "0.9.8.1"
+#define SCCTLINK_VERSION "0.9.8.2"
 
 typedef enum {
     CMD_NONE,
