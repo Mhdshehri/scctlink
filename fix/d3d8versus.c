@@ -50,6 +50,10 @@ IMP int __cdecl wsprintfA(char *, const char *, ...);
 IMP HANDLE WINAPI GetCurrentProcess(void);
 IMP BOOL WINAPI ReadProcessMemory(HANDLE, const void *, void *, SIZE_T, SIZE_T *);
 IMP BOOL WINAPI WriteProcessMemory(HANDLE, void *, const void *, SIZE_T, SIZE_T *);
+IMP BOOL WINAPI VirtualProtect(void *, SIZE_T, DWORD, DWORD *);
+IMP HMODULE WINAPI GetModuleHandleA(const char *);
+IMP BOOL WINAPI QueryPerformanceCounter(long long *);
+IMP BOOL WINAPI QueryPerformanceFrequency(long long *);
 
 void *memcpy(void *d, const void *s, unsigned n)
 {
@@ -81,7 +85,178 @@ static void log_line(const char *s)
     if (g_log != (HANDLE)-1) WriteFile(g_log, s, slen(s), &w, 0);
 }
 
-/* ---- Direct3DCreate8: straight to the real one ---- */
+/* ---- diagnostics (testing): frame rate, the mouse data the game reads, display modes ----
+   Written to SCCTVersusFix.log once a second while something happens. */
+static void *hook_slot(void *obj, int slot, void *hook)
+{
+    void **vt = *(void ***)obj, *orig = vt[slot];
+    if (orig == hook) return 0;
+    DWORD old;
+    VirtualProtect(&vt[slot], 4, 4, &old);
+    vt[slot] = hook;
+    VirtualProtect(&vt[slot], 4, old, &old);
+    return orig;
+}
+static long long g_qpf, g_sec_start;
+static volatile long g_frames, g_mreads, g_mevents, g_mdx, g_mdy, g_mmax, g_mframe_dx, g_mframe_max;
+static void stats_frame(void)
+{
+    long long now;
+    QueryPerformanceCounter(&now);
+    if (!g_sec_start) g_sec_start = now;
+    g_frames++;
+    long f = g_mframe_dx < 0 ? -g_mframe_dx : g_mframe_dx;
+    if (f > g_mframe_max) g_mframe_max = f;
+    g_mframe_dx = 0;
+    if (now - g_sec_start >= g_qpf) {
+        if (g_mevents || g_frames) {
+            char b[200];
+            wsprintfA(b, "fps %ld | mouse: reads %ld, events %ld, dx %ld, dy %ld, biggest event %ld, biggest x per frame %ld\r\n",
+                      g_frames, g_mreads, g_mevents, g_mdx, g_mdy, g_mmax, g_mframe_max);
+            static int lines;
+            if (lines++ < 400) log_line(b); /* keep the log small */
+        }
+        g_sec_start = now;
+        g_frames = g_mreads = g_mevents = g_mdx = g_mdy = g_mmax = g_mframe_max = 0;
+    }
+}
+
+/* Direct3D 8: CreateDevice (IDirect3D8 slot 15) -> Present (IDirect3DDevice8 slot 15) */
+typedef long(WINAPI *PresentFn)(void *, const void *, const void *, void *, const void *);
+typedef long(WINAPI *CreateDevFn)(void *, UINT, UINT, void *, DWORD, DWORD *, void **);
+typedef long(WINAPI *EnumModesFn)(void *, UINT, UINT, DWORD *);
+typedef UINT(WINAPI *ModeCountFn)(void *, UINT);
+static PresentFn g_present;
+static CreateDevFn g_create_dev;
+static EnumModesFn g_enum_modes;
+static ModeCountFn g_mode_count;
+static long WINAPI hook_Present(void *dev, const void *a, const void *b, void *w, const void *r)
+{
+    long hr = g_present(dev, a, b, w, r);
+    stats_frame();
+    return hr;
+}
+static long WINAPI hook_CreateDevice(void *d3d, UINT ad, UINT type, void *wnd, DWORD flags, DWORD *pp, void **out)
+{
+    long hr = g_create_dev(d3d, ad, type, wnd, flags, pp, out);
+    char b[200];
+    /* D3DPRESENT_PARAMETERS (8): width, height, format, count, multisample, swap effect, window, windowed, ... */
+    wsprintfA(b, "CreateDevice %lux%lu format %lu windowed %lu refresh %lu interval %lu hr 0x%08lX\r\n", pp[0], pp[1], pp[2],
+              pp[7], pp[11], pp[12], hr);
+    log_line(b);
+    if (hr >= 0 && out && *out) {
+        void *o = hook_slot(*out, 15, (void *)hook_Present);
+        if (o) g_present = (PresentFn)o;
+    }
+    return hr;
+}
+static int g_modes_logged;
+static long WINAPI hook_EnumAdapterModes(void *d3d, UINT ad, UINT i, DWORD *mode)
+{
+    long hr = g_enum_modes(d3d, ad, i, mode);
+    if (hr >= 0 && g_modes_logged < 200) { /* D3DDISPLAYMODE: width, height, refresh, format */
+        char b[100];
+        wsprintfA(b, "  mode %u: %lux%lu %luHz format %lu\r\n", i, mode[0], mode[1], mode[2], mode[3]);
+        log_line(b);
+        g_modes_logged++;
+    }
+    return hr;
+}
+static UINT WINAPI hook_GetAdapterModeCount(void *d3d, UINT ad)
+{
+    UINT n = g_mode_count(d3d, ad);
+    char b[80];
+    wsprintfA(b, "display modes offered: %u\r\n", n);
+    if (g_modes_logged < 200) log_line(b);
+    return n;
+}
+
+/* DirectInput 8: the game's import of DirectInput8Create -> CreateDevice (slot 3)
+   -> the mouse's GetDeviceData (slot 10) / GetDeviceState (slot 9) */
+typedef long(WINAPI *DI8CreateFn)(HINSTANCE, DWORD, const void *, void **, void *);
+typedef long(WINAPI *DICreateDevFn)(void *, const DWORD *, void **, void *);
+typedef long(WINAPI *GetDataFn)(void *, DWORD, DWORD *, DWORD *, DWORD);
+typedef long(WINAPI *GetStateFn)(void *, DWORD, void *);
+static DI8CreateFn g_di8create;
+static DICreateDevFn g_di_create_dev;
+static GetDataFn g_get_data;
+static GetStateFn g_get_state;
+static void *g_mouse;
+static const DWORD GUID_SYSMOUSE[4] = { 0x6F1D2B60, 0x11CFD5A0, 0x5345C7BF, 0x00005453 }; /* {6F1D2B60-D5A0-11CF-BFC7-444553540000} */
+static long WINAPI hook_GetDeviceData(void *dev, DWORD size, DWORD *data, DWORD *n, DWORD flags)
+{
+    long hr = g_get_data(dev, size, data, n, flags);
+    if (dev == g_mouse && hr >= 0 && data && n && size >= 8) {
+        g_mreads++;
+        for (DWORD i = 0; i < *n; i++) {
+            DWORD *e = (DWORD *)((char *)data + i * size); /* DIDEVICEOBJECTDATA: offset, data, ... */
+            long v = (long)e[1];
+            if (e[0] == 0) { g_mdx += v; g_mframe_dx += v; } /* DIMOFS_X */
+            else if (e[0] == 4) g_mdy += v;                /* DIMOFS_Y */
+            else continue;
+            g_mevents++;
+            if ((v < 0 ? -v : v) > g_mmax) g_mmax = v < 0 ? -v : v;
+        }
+    }
+    return hr;
+}
+static long WINAPI hook_GetDeviceState(void *dev, DWORD size, void *state)
+{
+    long hr = g_get_state(dev, size, state);
+    if (dev == g_mouse && hr >= 0 && state && size >= 8) {
+        long dx = ((long *)state)[0], dy = ((long *)state)[1];
+        g_mreads++;
+        if (dx || dy) { g_mevents++; g_mdx += dx; g_mdy += dy; g_mframe_dx += dx; }
+    }
+    return hr;
+}
+static long WINAPI hook_DICreateDevice(void *di, const DWORD *guid, void **out, void *outer)
+{
+    long hr = g_di_create_dev(di, guid, out, outer);
+    if (hr >= 0 && out && *out && guid && guid[0] == GUID_SYSMOUSE[0] && guid[1] == GUID_SYSMOUSE[1] &&
+        guid[2] == GUID_SYSMOUSE[2] && guid[3] == GUID_SYSMOUSE[3]) {
+        g_mouse = *out;
+        void *o = hook_slot(*out, 10, (void *)hook_GetDeviceData);
+        if (o) g_get_data = (GetDataFn)o;
+        o = hook_slot(*out, 9, (void *)hook_GetDeviceState);
+        if (o) g_get_state = (GetStateFn)o;
+        log_line("mouse device created (DirectInput)\r\n");
+    }
+    return hr;
+}
+static long WINAPI hook_DirectInput8Create(HINSTANCE inst, DWORD ver, const void *riid, void **out, void *outer)
+{
+    long hr = g_di8create(inst, ver, riid, out, outer);
+    if (hr >= 0 && out && *out) {
+        void *o = hook_slot(*out, 3, (void *)hook_DICreateDevice);
+        if (o) g_di_create_dev = (DICreateDevFn)o;
+    }
+    return hr;
+}
+/* the game's own import table entry for dinput8!DirectInput8Create */
+static int g_di_patched;
+static void patch_dinput(void)
+{
+    if (g_di_patched) return;
+    unsigned char *base = (unsigned char *)GetModuleHandleA(0);
+    DWORD rva = *(DWORD *)(base + *(LONG *)(base + 0x3c) + 0x80);
+    HMODULE di = GetModuleHandleA("dinput8.dll"); /* already loaded with the game (no loading inside DllMain) */
+    void *target = di ? GetProcAddress(di, "DirectInput8Create") : 0;
+    if (!rva || !target) return;
+    g_di8create = (DI8CreateFn)target;
+    g_di_patched = 1;
+    for (DWORD *desc = (DWORD *)(base + rva); desc[3]; desc += 5)
+        for (void **iat = (void **)(base + desc[4]); *iat; iat++)
+            if (*iat == target) {
+                DWORD old;
+                VirtualProtect(iat, 4, 4, &old);
+                *iat = (void *)hook_DirectInput8Create;
+                VirtualProtect(iat, 4, old, &old);
+                log_line("watching the mouse (DirectInput)\r\n");
+            }
+}
+
+/* ---- Direct3DCreate8: the real one (its CreateDevice and mode list watched) ---- */
 typedef void *(WINAPI *Create8Fn)(UINT);
 __declspec(dllexport) void *WINAPI Direct3DCreate8(UINT sdk)
 {
@@ -93,7 +268,17 @@ __declspec(dllexport) void *WINAPI Direct3DCreate8(UINT sdk)
         real = (Create8Fn)GetProcAddress(LoadLibraryA(path), "Direct3DCreate8");
         if (!real) { log_line("Could not load system d3d8.dll\r\n"); return 0; }
     }
-    return real(sdk);
+    patch_dinput(); /* in case it wasn't possible at load */
+    void *d3d = real(sdk);
+    if (d3d) {
+        void *o = hook_slot(d3d, 15, (void *)hook_CreateDevice);
+        if (o) g_create_dev = (CreateDevFn)o;
+        o = hook_slot(d3d, 6, (void *)hook_GetAdapterModeCount);
+        if (o) g_mode_count = (ModeCountFn)o;
+        o = hook_slot(d3d, 7, (void *)hook_EnumAdapterModes);
+        if (o) g_enum_modes = (EnumModesFn)o;
+    }
+    return d3d;
 }
 
 /* ---- the values ---- */
@@ -226,6 +411,8 @@ BOOL WINAPI DllEntry(HINSTANCE dll, DWORD reason, void *reserved)
     wsprintfA(path, "%sSCCTVersusFix.log", g_dir);
     g_log = CreateFileA(path, 0x40000000, 1, 0, 2, 0x80000000, 0);
     log_line("SCCT Versus Fix loaded (testing)\r\n");
+    QueryPerformanceFrequency(&g_qpf);
+    patch_dinput();
     HANDLE t = CreateThread(0, 0, worker, 0, 0, 0);
     if (t) CloseHandle(t);
     return 1;
