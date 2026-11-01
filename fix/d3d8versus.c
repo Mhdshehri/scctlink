@@ -98,6 +98,7 @@ static void *hook_slot(void *obj, int slot, void *hook)
     VirtualProtect(&vt[slot], 4, old, &old);
     return orig;
 }
+static void sleeps_log(void);
 static long long g_qpf, g_sec_start;
 static volatile long g_frames, g_mreads, g_mevents, g_mdx, g_mdy, g_mmax, g_mframe_dx, g_mframe_max;
 static void stats_frame(void)
