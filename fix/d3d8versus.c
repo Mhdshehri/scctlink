@@ -182,7 +182,7 @@ static DICreateDevFn g_di_create_dev;
 static GetDataFn g_get_data;
 static GetStateFn g_get_state;
 static void *g_mouse;
-static const DWORD GUID_SYSMOUSE[4] = { 0x6F1D2B60, 0x11CFD5A0, 0x5345C7BF, 0x00005453 }; /* {6F1D2B60-D5A0-11CF-BFC7-444553540000} */
+static const DWORD GUID_SYSMOUSE[4] = { 0x6F1D2B60, 0x11CFD5A0, 0x4544C7BF, 0x00005453 }; /* {6F1D2B60-D5A0-11CF-BFC7-444553540000} */
 static long WINAPI hook_GetDeviceData(void *dev, DWORD size, DWORD *data, DWORD *n, DWORD flags)
 {
     long hr = g_get_data(dev, size, data, n, flags);
