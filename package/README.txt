@@ -1,4 +1,4 @@
-SCCTLink 0.9.9.6 - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
+SCCTLink 0.9.9.7 - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
 ==============================================================================
 
 No VPN (no Hamachi, Radmin or ZeroTier), no port forwarding, no IP addresses.
@@ -13,7 +13,7 @@ Both players need:
   * each other on their Steam friends list
   * this folder unzipped somewhere (Desktop is fine). Keep SCCTLink.exe,
     steam_api.dll and SCCTFix-d3d9.dll together.
-  * the SAME SCCTLink version (0.9.9.6).
+  * the SAME SCCTLink version (0.9.9.7).
 
 
 HOW TO PLAY
@@ -85,36 +85,42 @@ Mods     = the game files check, kept simple: your name and your mods, then
                Only on your PC: system/dinput8.dll
                Different version: system/core.u
                FOV: you 90, Friend 75 - must be the same   (co-op only)
-           In co-op FOV, FPS limits, the SCCT Fix and fullscreen must match;
+           In co-op FOV, the SCCT Fix and fullscreen must match;
            the resolution doesn't have to. As soon as SCCTLink opens it lists
            your own mods (the game doesn't have to be running). "Check again"
            after you change something; the Log has every detail. Only file
            names relative to the game folder, sizes, checksums and those
            settings are sent - nothing about your PC.
-Settings = change resolution, FOV and FPS limit (and the widescreen fix's
-           FOV factor, if it's installed) without editing .ini files. Your
-           friend's values are shown next to yours; "Use friend's" copies
-           them into the fields, "Apply" saves. Close Splinter Cell first (it
-           writes its settings back when it exits). The first time a file is
-           changed, the original is kept next to it as
-           <name>.scctlink-backup - to undo, delete the changed file and
-           remove ".scctlink-backup" from the backup's name.
+Settings = on top, the fix of this mode: installed (green) or not (red),
+           with its Install / Update / Remove button. Below it:
+           Display: resolution and FOV (co-op), Max FPS (Versus), and the
+           I / O switches "Widescreen HUD" and "Skip intro videos".
+           Mouse: "Raw mouse" (co-op), "Mouse fix (125 Hz)" (Versus),
+           sensitivity, and aim turn (co-op) or multiplier (Versus).
+           Versus also has "Per class": FOV and turn speed for spies and
+           mercenaries. "Reset to defaults" is on the left, "Apply" on the
+           right (co-op also has "Use friend's": copies your friend's values
+           into the fields). Close the game first (it writes its settings
+           back when it exits). The first time a file is changed, the
+           original is kept next to it as <name>.scctlink-backup - to undo,
+           delete the changed file and remove ".scctlink-backup" from the
+           backup's name.
            FOV for your screen: the 4:3 / 16:10 / 16:9 buttons fill in 75 /
            85 / 91 (the game's default 75 is made for old 4:3 screens and
            looks cut off on wide ones). Then Apply. In co-op both players
            need the SAME FOV, so agree on one number.
-           Mouse sensitivity, and "Aim turn": how fast you turn while
-           aiming (the game's 0.50 = half speed; 1.00 = as fast as normal).
-           In co-op both players need the same aim turn speed.
-           Also here: "Install SCCT Fix" / "Remove SCCT Fix", "Raw mouse"
-           (no mouse acceleration) and "Reset" (the game's own values: FOV
-           75, FPS limit 60, sensitivity 100, aim turn 0.50, raw mouse off;
-           the resolution is kept).
-           In Versus the tab has Versus' own settings: mouse
-           sensitivity and the mouse multiplier (lower = less acceleration;
-           raise the sensitivity to match), and its own Reset. Versus
-           already reads the mouse directly. The mouse settings are in your
-           Versus profile: start Versus once and make one first.
+           Aim turn: how fast you turn while aiming (the game's 0.50 = half
+           speed; 1.00 = as fast as normal). In co-op both players need the
+           same aim turn speed.
+           The SCCT Fix has the widescreen HUD built in: you don't need
+           another widescreen mod (the Mods tab says so if one is there -
+           remove it, the two change the same code). No FPS limit to set
+           in co-op: the SCCT Fix keeps both PCs at 60.
+           Raw mouse (part of the SCCT Fix, on when it's installed): the
+           mouse is read as Windows Raw Input - no acceleration, fast moves
+           aren't cut short, any polling rate. Each player's own choice.
+           In Versus the mouse settings are in your Versus profile: start
+           Versus once and make one first.
 
 
 SCCT FIX (needed for co-op)
@@ -267,6 +273,12 @@ and the SCCT Fix are hidden.
 0.9.9: Settings: mouse sensitivity, aim turn speed and Reset; Versus gets its
 own Settings (mouse sensitivity, mouse multiplier); the Mods tab says on top
 whether all party members match.
+0.9.9.7 (testing): Raw mouse is now in the SCCT Fix (Windows Raw Input,
+ported from ThirteenAG's FusionFix: no acceleration, any polling rate); the
+Settings tab is rebuilt (a banner for the fix, sections, I / O switches,
+Reset on its own); no FPS limit or widescreen FOV factor in co-op any more
+(the SCCT Fix keeps 60 FPS and has its own widescreen HUD); the Mods tab
+says when another widescreen mod is there.
 0.9.9.6 (testing): new co-op HUD fix, ported from ThirteenAG's FusionFix (MIT,
 see THIRD-PARTY.txt): the HUD, menus and text are drawn 4:3 in the middle
 instead of stretched; full-screen pictures, the scope and the loading bar

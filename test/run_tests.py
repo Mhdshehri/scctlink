@@ -613,7 +613,7 @@ def main():
         hm = relay(A, "HM", 1191, "1192", ["host"], d, {"MOCK_GAME_DIR": ga, "PROGRAMDATA": os.path.join(gd, "programdata_a"),
                                                          "MOCK_EXE_DIR": exe_a}, stdin=subprocess.PIPE)
         procs.append(hm)
-        check(hm.wait_for(r"\[settings\] scctfix 0 mine 2560x1440 fov 75 fps 60 ws 120") is not None,
+        check(hm.wait_for(r"\[settings\] scctfix 0 mine 2560x1440 fov 75 fps 60 ws 0") is not None,
               "the host's resolution, FOV (from ProgramData) and FPS limit, before anyone links")
         check(hm.wait_for(r"\[mods\] #user1191 \(you\)") is not None and hm.wait_for(r"\[mods\]  system/dinput8\.dll") is not None
               and hm.wait_for(r"\[mods\] !SCCT Fix not installed") is not None,
@@ -627,6 +627,9 @@ def main():
         check(hm.wait_for(r"only on your PC: system/dinput8\.dll", timeout=3) is not None, "...the mod loader only on the host's PC")
         check(hm.wait_for(r"only on your PC: system/scripts/splintercellchaostheory\.widescreenfix\.asi", timeout=3) is not None,
               "...the widescreen fix only on the host's PC")
+        check(hm.wait_for(r"\[mods\] !Another widescreen mod \(SplinterCellChaosTheory\.WidescreenFix\.(asi|ini)\): not needed, remove it", timeout=5) is not None
+              and jm.wait_for(r"\[mods\] !Another widescreen mod: not needed, remove it", timeout=5) is not None,
+              "...the Mods tab says another widescreen mod isn't needed (on both sides)")
         check(hm.wait_for(r"different version: system/core\.u", timeout=3) is not None, "...a game file with the same size but other content")
         check(jm.wait_for(r"only on user1191's PC: system/dinput8\.dll", timeout=15) is not None, "the friend sees the same, from their side")
         check(hm.wait_for(r"\[mods\] #user1192", timeout=3) is not None and hm.wait_for(r"\[mods\] !Only on your PC: system/dinput8\.dll", timeout=3) is not None
@@ -641,7 +644,7 @@ def main():
         check("splintercell3.ini" not in hm.log + jm.log, "settings files (.ini) are not compared")
         check(gd not in hm.log + jm.log and gd not in open(os.path.join(d, "log_HM.txt")).read(), "the game folder's path is never sent or logged")
         # the Settings tab
-        check(hm.wait_for(r"\[settings\] scctfix 0 mine 2560x1440 fov 75 fps 60 ws 120 \| user1192 1920x1080 fov 90 fps 60 ws 0", timeout=5) is not None,
+        check(hm.wait_for(r"\[settings\] scctfix 0 mine 2560x1440 fov 75 fps 60 ws 0 \| user1192 1920x1080 fov 90 fps 60 ws 0", timeout=5) is not None,
               "Settings tab: this PC's values and the friend's")
         hm.p.stdin.write("A\n1920 1080 90 60 100\n"); hm.p.stdin.flush()  # "Use friend's", FOV factor 1.00, Apply
         check(hm.wait_for(r"Settings: resolution set to 1920x1080", timeout=10) is not None
@@ -659,7 +662,7 @@ def main():
         check(rd(ga, "System", "scripts", "SplinterCellChaosTheory.WidescreenFix.ini") ==
               b"[MAIN]\r\nResX = 0\r\nResY = 0\r\nFOVFactor = 1.00\r\nFPSLimit = 60 // frame rate cap\r\n",
               "...the widescreen fix's .ini: FOV factor and FPS limit changed, its comment and ResX=0 (auto) kept")
-        check(hm.wait_for(r"\[settings\] scctfix 0 mine 1920x1080 fov 90 fps 60 ws 100", timeout=10) is not None, "the Settings tab shows the new values")
+        check(hm.wait_for(r"\[settings\] scctfix 0 mine 1920x1080 fov 90 fps 60 ws 0", timeout=10) is not None, "the Settings tab shows the new values")
         leftovers = [os.path.join(r, f) for r, _, fs in os.walk(gd) for f in fs if f.endswith(".scctlink-new")]
         check(not leftovers, "...each .ini was written in full and swapped in (no half-written files left) %s" % leftovers)
         time.sleep(1)
@@ -783,31 +786,42 @@ def main():
               "a co-op file (System\\d3d9.dll) is not compared in Versus")
         hv.stop(); jv.stop()
 
-        print("[19] Raw mouse: the Settings tab's button turns UseDIMouse on and off")
+        print("[19] Raw mouse: part of the SCCT Fix (SCCTFix.ini [Mouse] Raw), the game's DirectInput mouse off")
         mouse = dict(base)
-        mouse["System/SplinterCell3.ini"] = (b"[Init]\r\nLogFlags=LNONE\r\nUseDIMouse=False\r\ndefaultRMode=5\r\n"
+        mouse["System/SplinterCell3.ini"] = (b"[Init]\r\nLogFlags=LNONE\r\nUseDIMouse=True\r\ndefaultRMode=5\r\n"
                                              b"[WinDrv.WindowsClient]\r\nStartupFullscreen=False\r\n")
         gm = game_dir("mouse", mouse)
         ini_m = os.path.join(gm, "System", "SplinterCell3.ini")
+        fix_m = os.path.join(gm, "System", "SCCTFix.ini")
+        d3d_m = os.path.join(gm, "System", "d3d9.dll")
         exe_m = os.path.join(d, "exe_m")
         os.makedirs(exe_m, exist_ok=True)
         rm = relay(A, "RM", 1198, "", ["idle"], d, {"MOCK_GAME_DIR": gm, "MOCK_EXE_DIR": exe_m}, stdin=subprocess.PIPE)
         procs.append(rm)
-        check(rm.wait_for(r"\[settings\] rawmouse 0 ", timeout=10) is not None, "raw mouse is off by default (UseDIMouse=False)")
+        check(rm.wait_for(r"\[settings\] rawmouse 0 ", timeout=10) is not None, "raw mouse is off without the SCCT Fix")
         mk = rm.mark()
         rm.p.stdin.write("U\n1\n"); rm.p.stdin.flush()
-        check(rm.wait_for(r"Raw mouse on: the game reads the mouse itself", timeout=10, since=mk) is not None
+        check(rm.wait_for(r"Raw mouse is part of the SCCT Fix: install it first", timeout=10, since=mk) is not None
+              and not os.path.exists(fix_m), "...and can't be turned on before the SCCT Fix is installed")
+        with open(os.path.join(ROOT, "build", "fix", "d3d9.dll"), "rb") as f, open(d3d_m, "wb") as o:
+            o.write(f.read())  # the SCCT Fix in place (as Install does)
+        mk = rm.mark()
+        rm.p.stdin.write("U\n1\n"); rm.p.stdin.flush()
+        check(rm.wait_for(r"Raw mouse on: no acceleration, any polling rate", timeout=10, since=mk) is not None
               and rm.wait_for(r"\[settings\] rawmouse 1 ", timeout=5, since=mk) is not None, "Raw mouse on")
         with open(ini_m, "rb") as f:
             txt = f.read()
-        check(b"UseDIMouse=True\r\n" in txt and b"LogFlags=LNONE\r\n" in txt and b"defaultRMode=5\r\n" in txt
-              and b"StartupFullscreen=False" in txt, "only the UseDIMouse line changed (Windows line ends kept)")
-        check(os.path.exists(ini_m + ".scctlink-backup"), "the original .ini is backed up first")
+        check(b"UseDIMouse=False\r\n" in txt and b"LogFlags=LNONE\r\n" in txt and b"defaultRMode=5\r\n" in txt
+              and b"StartupFullscreen=False" in txt, "...the game's DirectInput mouse off (only that line changed)")
+        with open(fix_m, "rb") as f:
+            check(b"[Mouse]\r\n" in f.read(), "...SCCTFix.ini has it")
+        with open(fix_m, "rb") as f:
+            check(b"Raw=1\r\n" in f.read(), "...Raw=1")
         mk = rm.mark()
         rm.p.stdin.write("U\n0\n"); rm.p.stdin.flush()
         check(rm.wait_for(r"\[settings\] rawmouse 0 ", timeout=10, since=mk) is not None, "Raw mouse off again")
-        with open(ini_m, "rb") as f:
-            check(b"UseDIMouse=False\r\n" in f.read(), "...UseDIMouse=False in the file")
+        with open(fix_m, "rb") as f:
+            check(b"Raw=0\r\n" in f.read(), "...Raw=0 in SCCTFix.ini")
         rm.stop()
 
         print("[20] Settings: co-op mouse (sensitivity, aim turn speed), Versus settings, Reset")

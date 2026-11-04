@@ -14,6 +14,8 @@
  *   - Alt+Tab: the game grabs Alt+Tab for itself (RegisterHotKey "UnrealAltTab")
  *     and minimizes on focus loss; both are blocked.
  *   - Crash log: a crash's code and address are written to SCCTFix.log.
+ *   - Raw mouse (optional, SCCTFix.ini [Mouse] Raw=1): the mouse is read as
+ *     Windows Raw Input (no acceleration, any polling rate); see below.
  *   - HUD fix (optional, SCCTFix.ini [HUD] Fix=1): the game stretches its
  *     640x480 HUD, menus and text sideways on a wide screen. With it they are
  *     drawn 4:3 in the middle, not stretched (ported from ThirteenAG's
@@ -354,7 +356,10 @@ static void code_write(void *at, const void *b, unsigned n)
     memcpy(at, b, n);
     VirtualProtect(at, n, old, &old);
 }
-static void mid_hook(DWORD at, unsigned len, MidFn fn)
+static BYTE g_skip; /* set by a gate's function: return 0 from the hooked function instead of running it */
+/* gate: -1 = always go on; else the hooked function's "ret n" bytes count, and the
+   function may set g_skip to return 0 without running it (only at a function's entry) */
+static void mid_hook(DWORD at, unsigned len, MidFn fn, int gate)
 {
     BYTE *s = g_stubs + g_stubs_used, *p = s;
     static const BYTE pre[] = { 0x60, 0x9c, 0x89, 0xe0,            /* pushad; pushfd; mov eax, esp */
@@ -368,15 +373,30 @@ static void mid_hook(DWORD at, unsigned len, MidFn fn)
     p += 4;
     memcpy(p, post, sizeof post);
     p += sizeof post;
+    if (gate >= 0) { /* cmp byte [g_skip], 0; jne skip */
+        *p++ = 0x80; *p++ = 0x3d; put32(p, (DWORD)&g_skip); p += 4; *p++ = 0;
+        *p++ = 0x75; *p++ = (BYTE)(len + 5);
+    }
     memcpy(p, (void *)at, len); /* the replaced instructions (none of them relative) */
     p += len;
     *p++ = 0xe9;
     put32(p, at + len - (DWORD)(p + 4));
     p += 4;
+    if (gate >= 0) { /* skip: mov byte [g_skip], 0; xor eax, eax; ret gate */
+        *p++ = 0xc6; *p++ = 0x05; put32(p, (DWORD)&g_skip); p += 4; *p++ = 0;
+        *p++ = 0x31; *p++ = 0xc0;
+        *p++ = 0xc2; *p++ = (BYTE)gate; *p++ = (BYTE)(gate >> 8);
+    }
     g_stubs_used += (int)((p - s + 15) & ~15);
     BYTE j[8] = { 0xe9, 0, 0, 0, 0, 0x90, 0x90, 0x90 };
     put32(j + 1, (DWORD)s - (at + 5));
     code_write((void *)at, j, len);
+}
+static int stubs_ready(void)
+{
+    if (!g_stubs) g_stubs = VirtualAlloc(0, 4096, 0x3000 /* MEM_COMMIT|MEM_RESERVE */, 0x40 /* PAGE_EXECUTE_READWRITE */);
+    if (!g_stubs) log_write("no memory for the hooks\r\n", 26);
+    return g_stubs != 0;
 }
 
 struct Site { DWORD at; BYTE len; BYTE code[7]; };
@@ -440,18 +460,141 @@ static void hud_fix(UINT w, UINT h)
         log_write(b, slen(b));
         return;
     }
-    g_stubs = VirtualAlloc(0, 4096, 0x3000 /* MEM_COMMIT|MEM_RESERVE */, 0x40 /* PAGE_EXECUTE_READWRITE */);
-    if (!g_stubs) {
-        log_write("HUD fix: no memory, left off\r\n", 30);
-        return;
-    }
+    if (!stubs_ready()) return;
     for (i = 0; i < sizeof ops / sizeof *ops; i++) {
         DWORD a = (DWORD)op_to[i];
         code_write((void *)(ops[i].at + ops[i].len - 4), &a, 4);
     }
-    for (j = 0; j < sizeof mids / sizeof *mids; j++) mid_hook(mids[j].at, mids[j].len, mid_fn[j]);
+    for (j = 0; j < sizeof mids / sizeof *mids; j++) mid_hook(mids[j].at, mids[j].len, mid_fn[j], -1);
     wsprintfA(b, "HUD fix: on (4:3 HUD, %ux%u, side %d)\r\n", w, h, g_side);
     log_write(b, slen(b));
+}
+
+/* ---- Raw mouse (SCCTFix.ini [Mouse] Raw=1) ----
+   Ported from ThirteenAG's SplinterCellChaosTheory.FusionFix and its
+   RawInputHandler (MIT License, Copyright (c) 2018 ThirteenAG; see
+   THIRD-PARTY.txt), rewritten in plain C.
+
+   With the game's own DirectInput mouse off (SplinterCell3.ini UseDIMouse=False,
+   SCCTLink sets it), the game turns WM_MOUSEMOVE into mouse moves, with Windows'
+   pointer speed and acceleration. With Raw mouse, a thread of ours reads the
+   mouse as Windows Raw Input (the counts the mouse sends: no acceleration, any
+   polling rate), the game's WM_MOUSEMOVE is dropped, and once a frame, at the
+   start of UGameEngine::Tick, the summed counts go to the game through its
+   own UWindowsViewport::CauseInputEvent (MouseX 228, MouseY 229, as an axis).
+   The game handles them like any mouse move, so co-op is not affected. */
+IMP void *WINAPI CreateThread(void *, unsigned long, DWORD(WINAPI *)(void *), void *, DWORD, DWORD *);
+IMP ATOM WINAPI RegisterClassExA(const void *);
+IMP HWND WINAPI CreateWindowExA(DWORD, const char *, const char *, DWORD, int, int, int, int, HWND, void *, HINSTANCE, void *);
+IMP BOOL WINAPI RegisterRawInputDevices(const void *, UINT, UINT);
+IMP UINT WINAPI GetRawInputData(void *, UINT, void *, UINT *, UINT);
+IMP BOOL WINAPI GetMessageA(void *, HWND, UINT, UINT);
+IMP LONG WINAPI DispatchMessageA(const void *);
+IMP LONG WINAPI DefWindowProcA(HWND, UINT, UINT, LONG);
+IMP HWND WINAPI GetForegroundWindow(void);
+IMP HWND WINAPI GetAncestor(HWND, UINT);
+IMP BOOL WINAPI SetCursorPos(int, int);
+IMP BOOL WINAPI GetClientRect(HWND, RECT *);
+typedef struct { LONG x, y; } POINT;
+IMP BOOL WINAPI ClientToScreen(HWND, POINT *);
+
+typedef int(__thiscall *CauseInputFn)(void *, int, int, float);
+#define CAUSE_INPUT_EVENT ((CauseInputFn)0x10cc28b0) /* UWindowsViewport::CauseInputEvent */
+static int g_raw = -1;           /* -1: not read yet */
+static int g_raw_on;             /* the hooks are in */
+static int g_raw_thread;
+static volatile LONG g_rdx, g_rdy; /* counts not given to the game yet */
+static BYTE *g_viewport;         /* UWindowsViewport */
+static HWND g_vp_hwnd;           /* its window */
+
+static LONG WINAPI raw_wndproc(HWND w, UINT m, UINT wp, LONG lp)
+{
+    if (m == 0x00ff /* WM_INPUT */) {
+        struct { DWORD type, size; HANDLE dev; UINT wp; WORD flags, pad; DWORD buttons, rawbuttons; LONG x, y; DWORD extra; DWORD more[4]; } r;
+        UINT n = sizeof r;
+        HWND game = g_vp_hwnd;
+        if (GetRawInputData((void *)lp, 0x10000003 /* RID_INPUT */, &r, &n, 16) != (UINT)-1 && r.type == 0 /* RIM_TYPEMOUSE */ &&
+            !(r.flags & 1 /* MOUSE_MOVE_ABSOLUTE */) && game && GetForegroundWindow() == GetAncestor(game, 2 /* GA_ROOT */)) {
+            __atomic_fetch_add(&g_rdx, r.x, __ATOMIC_RELAXED);
+            __atomic_fetch_add(&g_rdy, r.y, __ATOMIC_RELAXED);
+        }
+    }
+    return DefWindowProcA(w, m, wp, lp);
+}
+/* Its own thread and a message-only window: a fast mouse sends thousands of
+   WM_INPUT a second, which would flood the game's message queue. */
+static DWORD WINAPI raw_thread(void *arg)
+{
+    (void)arg;
+    struct { UINT size, style; void *proc; int cls, wnd; HINSTANCE inst; HANDLE icon, cursor, brush; const char *menu, *name; HANDLE sm; } wc;
+    memset(&wc, 0, sizeof wc);
+    wc.size = sizeof wc;
+    wc.proc = (void *)raw_wndproc;
+    wc.inst = GetModuleHandleA(0);
+    wc.name = "SCCTFixRawMouse";
+    RegisterClassExA(&wc);
+    HWND w = CreateWindowExA(0, wc.name, "", 0, 0, 0, 0, 0, (HWND)-3 /* HWND_MESSAGE */, 0, wc.inst, 0);
+    struct { WORD page, usage; DWORD flags; HWND target; } rid = { 1, 2, 0x100 /* RIDEV_INPUTSINK */, w };
+    if (!w || !RegisterRawInputDevices(&rid, 1, sizeof rid)) {
+        log_write("Raw mouse: Windows refused it\r\n", 31);
+        return 0;
+    }
+    log_write("Raw mouse: reading\r\n", 20);
+    struct { HWND w; UINT m; UINT wp; LONG lp; DWORD t; LONG x, y, priv; } msg;
+    while (GetMessageA(&msg, 0, 0, 0) > 0) DispatchMessageA(&msg);
+    return 0;
+}
+
+/* UWindowsViewport::ViewportWndProc (thiscall: this, msg, wParam, lParam; ret 0xc) */
+static void on_vp_wndproc(Regs *r)
+{
+    g_viewport = (BYTE *)r->ecx;
+    DWORD w = *(DWORD *)(g_viewport + 0x1f0);
+    if (w) g_vp_hwnd = *(HWND *)(w + 4);
+    if (!g_raw_thread) {
+        g_raw_thread = 1;
+        if (!CreateThread(0, 0, raw_thread, 0, 0, 0)) log_write("Raw mouse: no thread\r\n", 22);
+    }
+    if (*(UINT *)(r->esp + 4) == 0x0200 /* WM_MOUSEMOVE: the raw counts move the mouse instead */) g_skip = 1;
+}
+/* UGameEngine::Tick: once a frame, the counts go to the game */
+static void on_engine_tick(Regs *r)
+{
+    (void)r;
+    BYTE *vp = g_viewport;
+    LONG dx = __atomic_exchange_n(&g_rdx, 0, __ATOMIC_RELAXED);
+    LONG dy = __atomic_exchange_n(&g_rdy, 0, __ATOMIC_RELAXED);
+    if (!vp || (!dx && !dy) || GetForegroundWindow() != g_vp_hwnd) return;
+    CAUSE_INPUT_EVENT(vp, 228 /* IK_MouseX */, 4 /* IST_Axis */, (float)dx);
+    CAUSE_INPUT_EVENT(vp, 229 /* IK_MouseY */, 4, (float)dy);
+    if ((vp[0x204] & 1) || *(int *)(vp + 0x218) != -1) { /* the game has the mouse: keep the pointer in the middle */
+        RECT rc;
+        GetClientRect(g_vp_hwnd, &rc);
+        POINT c = { (rc.left + rc.right) / 2, (rc.top + rc.bottom) / 2 };
+        ClientToScreen(g_vp_hwnd, &c);
+        SetCursorPos(c.x, c.y);
+    }
+}
+
+static const struct Site raw_sites[] = {
+    { 0x10cc37b0, 6, { 0x81, 0xec, 0x8c, 0x03, 0x00, 0x00 } }, /* ViewportWndProc: sub esp, 0x38c */
+    { 0x10a43920, 5, { 0x83, 0xec, 0x1c, 0x53, 0x55 } },       /* UGameEngine::Tick: sub esp, 0x1c; push ebx; push ebp */
+    { 0x10cc28b0, 6, { 0x56, 0x8b, 0xf1, 0x8b, 0x46, 0x18 } }, /* CauseInputEvent (called, not changed) */
+};
+static void raw_mouse(void)
+{
+    if (g_raw < 0) g_raw = GetPrivateProfileIntA("Mouse", "Raw", 0, g_ini);
+    if (!g_raw || g_raw_on) return;
+    g_raw_on = 1;
+    for (unsigned i = 0; i < sizeof raw_sites / sizeof *raw_sites; i++)
+        if (!site_ok(&raw_sites[i])) {
+            log_write("Raw mouse: not this game's code, left off\r\n", 43);
+            return;
+        }
+    if (!stubs_ready()) return;
+    mid_hook(raw_sites[0].at, raw_sites[0].len, on_vp_wndproc, 0xc);
+    mid_hook(raw_sites[1].at, raw_sites[1].len, on_engine_tick, -1);
+    log_write("Raw mouse: on\r\n", 15);
 }
 
 static void log_mode(const char *what, const PRESENT_PARAMS *pp, HRESULT hr)
@@ -517,6 +660,7 @@ static HRESULT WINAPI hook_CreateDevice(void *d3d, UINT adapter, UINT type, HWND
     HRESULT hr = g_create_device(d3d, adapter, type, focus, flags, &pp, out);
     log_mode("CreateDevice", &pp, hr);
     if (hr >= 0) hud_fix(pp.BackBufferWidth, pp.BackBufferHeight);
+    if (hr >= 0) raw_mouse();
     if (out && hr >= 0 && *out) {
         void *o = hook_slot(*out, 16, (void *)hook_Reset);
         if (o) g_reset = (ResetFn)o;

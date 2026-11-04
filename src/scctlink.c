@@ -2050,12 +2050,10 @@ static const SetDef SETS[] = {
     { "res", "Resolution", false },
     { "fov", "FOV", true },
     { "fps", "FPS limit (game)", true },
-    { "ws_res", "Resolution (widescreen fix)", false },
-    { "ws_fov", "FOV (widescreen fix)", true },
-    { "ws_fps", "FPS limit (widescreen fix)", true },
+    { "otherws", "Another widescreen mod (remove it: the SCCT Fix has its own)", true },
     { "scctfix", "SCCT Fix (60 FPS cap, borderless)", true },
     { "fullscreen", "Starts in fullscreen", true },
-    { "rawmouse", "Raw mouse (UseDIMouse)", true }, /* how the mouse is read: kept the same on both PCs, to be safe */
+    { "rawmouse", "Raw mouse (SCCT Fix)", false },  /* how this PC reads its mouse: each player's own */
     { "sens", "Mouse sensitivity", false },          /* each player's own (the game's menu has it too) */
     { "turn", "Aim turn speed (m_turnMul)", true },  /* turning while aiming: part of the simulation */
     /* Versus (its own game in Versus\; compared only in Versus) */
@@ -2099,6 +2097,10 @@ static void find_user_ini(const char *dir, int depth)
     if (depth < 0) left++;
 }
 
+/* Another widescreen mod (ThirteenAG's WidescreenFix or FusionFix, in scripts\ or
+   System): not needed, the SCCT Fix has its widescreen HUD, and two of them
+   change the same code. Only noted, so the Mods tab can say so. */
+static char g_otherws[128];
 static void ws_ini_cb(void *ctx, const char *name, bool is_dir, u64 size, u64 mtime)
 {
     (void)size; (void)mtime;
@@ -2108,17 +2110,10 @@ static void ws_ini_cb(void *ctx, const char *name, bool is_dir, u64 size, u64 mt
     sfmt(low, sizeof low, "%s", name);
     for (char *c = low; *c; c++) if (*c >= 'A' && *c <= 'Z') *c = (char)(*c + 32);
     size_t L = strlen(low);
-    if (L < 4 || strcmp(low + L - 4, ".ini") || !strstr(low, "widescreen")) return;
-    char path[900], v[24], x[24], y[24];
-    sfmt(path, sizeof path, "%s" PATHSEP "%s", dir, name);
-    if (!g_ws_ini[0]) sfmt(g_ws_ini, sizeof g_ws_ini, "%s", path);
-    if (ini_get(path, 0, "ResX", x, sizeof x) && ini_get(path, 0, "ResY", y, sizeof y)) {
-        char r[17];
-        sfmt(r, sizeof r, "%sx%s", x, y);
-        set_add("ws_res", strcmp(r, "0x0") ? r : "auto");
-    }
-    if (ini_get(path, 0, "FOVFactor", v, sizeof v) || ini_get(path, 0, "FOV", v, sizeof v)) set_add("ws_fov", v);
-    if (ini_get(path, 0, "FPSLimit", v, sizeof v)) set_add("ws_fps", strcmp(v, "0") ? v : "off");
+    if (L < 4 || (strcmp(low + L - 4, ".ini") && strcmp(low + L - 4, ".asi"))) return;
+    if (!strstr(low, "widescreen") && !strstr(low, "fusionfix")) return;
+    if (!g_ws_ini[0] && !strcmp(low + L - 4, ".ini")) sfmt(g_ws_ini, sizeof g_ws_ini, "%s" PATHSEP "%s", dir, name);
+    if (!g_otherws[0]) sfmt(g_otherws, sizeof g_otherws, "%s", name);
 }
 
 static int num_at(const char *v, int scale);
@@ -2200,14 +2195,21 @@ static void settings_collect(void)
     if (ini_get(path, "SIMULATION", "MAXFPS", v, sizeof v)) set_add("fps", v);
     if (ini_get(path, 0, "DesiredFOV", v, sizeof v)) set_add("fov", v);
     /* the ThirteenAG widescreen fix keeps its .ini in scripts\ (System\scripts or the game folder) */
+    g_otherws[0] = 0;
     sfmt(path, sizeof path, "%s" PATHSEP "scripts", sys);
     dir_list(path, ws_ini_cb, path);
     sfmt(path, sizeof path, "%s" PATHSEP "scripts", g_mf_dir);
     dir_list(path, ws_ini_cb, path);
+    dir_list(sys, ws_ini_cb, sys);
+    set_add("otherws", g_otherws[0] ? "yes" : "no");
     set_add("scctfix", scctfix_state() == 1 ? "installed" : "not installed");
     sfmt(path, sizeof path, "%s" PATHSEP "SplinterCell3.ini", sys);
     if (ini_get(path, "WinDrv.WindowsClient", "StartupFullscreen", v, sizeof v)) set_add("fullscreen", (v[0] | 32) == 't' ? "yes" : "no");
-    if (ini_get(path, "Init", "UseDIMouse", v, sizeof v)) set_add("rawmouse", (v[0] | 32) == 't' ? "on" : "off");
+    { /* Raw mouse: the SCCT Fix's (SCCTFix.ini [Mouse] Raw) */
+        char fi[900];
+        sfmt(fi, sizeof fi, "%s" PATHSEP "SCCTFix.ini", sys);
+        set_add("rawmouse", ini_get(fi, "Mouse", "Raw", v, sizeof v) && v[0] == '1' ? "on" : "off");
+    }
     sfmt(path, sizeof path, "%s" PATHSEP "SplinterCell3Settings.ini", sys);
     if (ini_get(path, "Echelon.ECoopPlayerController", "m_turnMul", v, sizeof v)) put_num("turn", v, 100);
     /* Versus */
@@ -2313,7 +2315,7 @@ static int ini_set(const char *path, const char *section, const char *key, const
    SHA-256 is exactly this one (checked: no network functions, starts no
    programs, only writes System\SCCTFix.log). */
 #define SCCTFIX_FILE "SCCTFix-d3d9.dll"
-#define SCCTFIX_SHA "b5624f3f18d4c775f1aca05c8e0fffabcc2aaf523321073f558f2a9d815985da" /* ours: fix/d3d9fix.c (fix/build_fix.sh) */
+#define SCCTFIX_SHA "9b73fe61a3eba66ebd91ffdbc20a59b0a217b3fba61d5facf7b327f2514c0a97" /* ours: fix/d3d9fix.c (fix/build_fix.sh) */
 #define SCCTFIX_OLD_SHA "2f05d8e9e7aaf750eb2889c7ba57dd453820e3a794b9ba74c43730446a84cae9" /* the original; ours replaces it */
 bool sha256_file(const char *path, char hex[65]);
 static void scctfix_paths(char *src, char *dst, char *bak, char *ini, size_t n)
@@ -2333,7 +2335,8 @@ static int scctfix_state(void)
     /* earlier builds of ours (testing versions) are replaced like the original */
     static const char *const ours[] = { "162255f10db01e864f79beb1005cccfedb6e7de0f1e377ccf28ce6b68454ac23",
                                         "2c5fa6a505c3867db282523c5c00a7f66a6bfa5bc598078ee654a2445a9fd2f5",
-                                        "2228214d27cb77ad2b13e63510bad49bab834eba7ce8665e8a55371419994ea4" };
+                                        "2228214d27cb77ad2b13e63510bad49bab834eba7ce8665e8a55371419994ea4",
+                                        "b5624f3f18d4c775f1aca05c8e0fffabcc2aaf523321073f558f2a9d815985da" };
     if (!strcmp(hex, SCCTFIX_SHA)) return 1;
     if (!strcmp(hex, SCCTFIX_OLD_SHA)) return 3;
     for (size_t i = 0; i < sizeof ours / sizeof *ours; i++) if (!strcmp(hex, ours[i])) return 3;
@@ -2355,6 +2358,14 @@ static bool copy_file(const char *from, const char *to)
 static void set_say(const char *fmt, ...);
 static void mf_recheck(void);
 static UiSettings g_uiset;
+static bool scfini_write(int hud, int raw);
+static void chud_path(char *p, size_t n);
+static const char *ini_path_fix(void)
+{
+    static char p[900];
+    chud_path(p, sizeof p);
+    return p;
+}
 static void scctfix_(bool install)
 {
     char src[900], dst[900], bak[900], ini[900], hex[65];
@@ -2390,11 +2401,15 @@ static void scctfix_(bool install)
             return;
         }
     }
+    /* first install: its settings on (widescreen HUD, raw mouse) */
+    if (st != 1 && !file_exists(ini_path_fix())) {
+        if (scfini_write(1, 1)) ini_set(ini, "Init", "UseDIMouse", "False");
+    }
     /* the tested setup also starts the game in a window (the fix makes it borderless) */
     if (ini_set(ini, "WinDrv.WindowsClient", "StartupFullscreen", "False") < 0)
         say("! SCCT Fix: couldn't set StartupFullscreen=False in SplinterCell3.ini.");
     set_say(st == 1 ? "SCCT Fix: already installed (StartupFullscreen=False checked)."
-                    : "SCCT Fix installed: 60 FPS cap, borderless window (StartupFullscreen=False). Both players need it.");
+                    : "SCCT Fix installed: 60 FPS sync, borderless window, widescreen HUD, raw mouse. Both players need it.");
 }
 /* The SCCT Fix's HUD fix (co-op): System\SCCTFix.ini [HUD] Fix=1. It only
    changes how the HUD is drawn, so the two players may differ. */
@@ -2406,23 +2421,34 @@ static int chud_state(void)
     chud_path(p, sizeof p);
     return ini_get(p, "HUD", "Fix", v, sizeof v) && v[0] == '1';
 }
+/* SCCTFix.ini: written whole, with both of its settings. */
+static bool scfini_write(int hud, int raw)
+{
+    char p[900], t[600];
+    chud_path(p, sizeof p);
+    sfmt(t, sizeof t, "; SCCT Fix settings - written by SCCTLink.\r\n"
+                      "[HUD]\r\n; 1 = the HUD, menus and text keep their shape on wide screens (4:3 in the middle).\r\nFix=%d\r\n"
+                      "[Mouse]\r\n; 1 = the mouse is read as Windows Raw Input: no acceleration, any polling rate.\r\nRaw=%d\r\n",
+         hud, raw);
+    FILE *f = fopen(p, "wb");
+    bool ok = f && fwrite(t, 1, strlen(t), f) == strlen(t);
+    if (f && fclose(f) != 0) ok = false;
+    return ok;
+}
+static int raw_state(void)
+{
+    if (!g_steam_ok || g_nmfs <= 0 || !g_mf_dir[0]) return -1;
+    char p[900], v[8];
+    chud_path(p, sizeof p);
+    return ini_get(p, "Mouse", "Raw", v, sizeof v) && v[0] == '1';
+}
 static void chud(bool on)
 {
     g_uiset.note[0] = 0;
     g_uiset.note_warn = false;
-    char p[900];
-    if (chud_state() < 0) set_say("! HUD fix: the game's folder wasn't found (only Steam copies).");
-    else {
-        chud_path(p, sizeof p);
-        FILE *f = fopen(p, "wb");
-        const char *t = on ? "; SCCT Fix settings - written by SCCTLink.\r\n[HUD]\r\n; 1 = the HUD isn't stretched on wide screens.\r\nFix=1\r\n"
-                           : "; SCCT Fix settings - written by SCCTLink.\r\n[HUD]\r\n; 1 = the HUD isn't stretched on wide screens.\r\nFix=0\r\n";
-        bool ok = f && fwrite(t, 1, strlen(t), f) == strlen(t);
-        if (f && fclose(f) != 0) ok = false;
-        if (!ok) set_say("! HUD fix: couldn't write System\\SCCTFix.ini.");
-        else set_say(on ? "HUD fix on: the HUD keeps its shape on wide screens (with the SCCT Fix; next time the game starts)."
-                        : "HUD fix off.");
-    }
+    if (chud_state() < 0) set_say("! Widescreen HUD: the game's folder wasn't found (only Steam copies).");
+    else if (!scfini_write(on, raw_state() == 1)) set_say("! Widescreen HUD: couldn't write System\\SCCTFix.ini.");
+    else set_say(on ? "Widescreen HUD on: the HUD and menus keep their shape (next time the game starts)." : "Widescreen HUD off.");
     settings_publish();
 }
 /* Skip the startup videos (Ubisoft logos, teaser, rating screen): the files in
@@ -2638,26 +2664,24 @@ static void apply_vfix(u64 a, bool turns)
     settings_publish();
 }
 
-/* Raw mouse: by default (UseDIMouse=False) the game reads the Windows cursor
-   and puts it back in the middle each frame, so a fast move hits the window's
-   edge and is cut short (negative acceleration), and Windows' own pointer
-   acceleration is added. UseDIMouse=True makes the game read the mouse itself
-   (its DirectInput code, already in SplinterCell3.exe): every movement counts
-   the same. Only this one line of SplinterCell3.ini changes. */
+/* Raw mouse: the SCCT Fix reads the mouse as Windows Raw Input (ported from
+   ThirteenAG's FusionFix): every count the mouse sends, no Windows acceleration,
+   no cut-off fast moves, any polling rate. It needs the game's own DirectInput
+   mouse off (UseDIMouse=False), so the two don't both move it. Each player's own. */
 static void rawmouse(bool on)
 {
     char src[900], dst[900], bak[900], ini[900];
     g_uiset.note[0] = 0;
     g_uiset.note_warn = false;
-    if (scctfix_state() < 0) set_say("! Raw mouse: the game's folder wasn't found (only Steam copies).");
+    int st = scctfix_state();
+    if (st < 0) set_say("! Raw mouse: the game's folder wasn't found (only Steam copies).");
     else if (game_is_running(g_exe)) set_say("! Raw mouse: close Splinter Cell first.");
+    else if (on && st != 1) set_say("! Raw mouse is part of the SCCT Fix: install it first.");
     else {
         scctfix_paths(src, dst, bak, ini, sizeof src);
-        int r = ini_set(ini, "Init", "UseDIMouse", on ? "True" : "False");
-        if (r < 0) set_say("! Raw mouse: couldn't write SplinterCell3.ini.");
-        else if (r == 0) set_say("! Raw mouse: UseDIMouse isn't in SplinterCell3.ini (not changed).");
-        else set_say(on ? "Raw mouse on: the game reads the mouse itself (no acceleration). In co-op your friend needs it on too."
-                        : "Raw mouse off: the game's default mouse again. In co-op your friend needs it off too.");
+        if (ini_set(ini, "Init", "UseDIMouse", "False") < 0) set_say("! Raw mouse: couldn't write SplinterCell3.ini.");
+        else if (!scfini_write(chud_state() == 1, on)) set_say("! Raw mouse: couldn't write System\\SCCTFix.ini.");
+        else set_say(on ? "Raw mouse on: no acceleration, any polling rate (next time the game starts)." : "Raw mouse off: the game's default mouse.");
     }
     mf_recheck();
     settings_publish();
@@ -3037,8 +3061,7 @@ static void set_numbers(const MFile *f, int n, int *w, int *h, int *fov, int *fp
     if (r) { *w = num_at(r, 1); if ((x = strchr(r, 'x'))) *h = num_at(x + 1, 1); }
     *fov = num_at(set_value(f, n, "fov"), 1);
     *fps = num_at(set_value(f, n, "fps"), 1);
-    if (!*fps) *fps = num_at(set_value(f, n, "ws_fps"), 1);
-    *ws = num_at(set_value(f, n, "ws_fov"), 100);
+    *ws = 0;
 }
 static u64 g_uiset_friend;
 static void settings_publish(void)
@@ -3116,7 +3139,10 @@ static void mods_local_text(void)
         if (vf) sfmt(o + k, n - k, !strcmp(vf, "installed") ? "+Versus Fix installed\n" : " Versus Fix not installed\n");
     } else {
         int fx = scctfix_state();
-        sfmt(o + k, n - k, fx == 1 ? "+SCCT Fix installed\n" : "!SCCT Fix not installed - co-op needs it (Settings tab)\n");
+        sfmt(o + k, n - k, fx == 1 ? "+SCCT Fix " SCCTLINK_VERSION " installed\n+Widescreen: built into the SCCT Fix\n"
+                                   : "!SCCT Fix not installed - co-op needs it (Settings tab)\n");
+        k = strlen(o);
+        if (g_otherws[0]) sfmt(o + k, n - k, "!Another widescreen mod (%s): not needed, remove it\n", g_otherws);
     }
 }
 
@@ -3204,7 +3230,11 @@ static void mf_report(Peer *p, bool they_found)
         k = strlen(o);
     } else {
         const char *fx = set_value(theirs, nt, "scctfix");
-        sfmt(o + k, on - k, fx && !strcmp(fx, "installed") ? "+SCCT Fix installed\n" : "!SCCT Fix not installed - co-op needs it (Settings tab)\n");
+        sfmt(o + k, on - k, fx && !strcmp(fx, "installed") ? "+SCCT Fix installed\n+Widescreen: built into the SCCT Fix\n"
+                                                           : "!SCCT Fix not installed - co-op needs it (Settings tab)\n");
+        k = strlen(o);
+        const char *ow = set_value(theirs, nt, "otherws");
+        if (ow && !strcmp(ow, "yes")) sfmt(o + k, on - k, "!Another widescreen mod: not needed, remove it\n");
         k = strlen(o);
     }
     /* the differences: files first (the full list goes to the Log) */
