@@ -740,7 +740,7 @@ static void build(void)
     ctl(ID_SET_FIX, B, WTEXT("Install"), OD, 0, 470, BANNER_Y + 9, 96, 24, g_font);
     ctl(ID_SEC_DISP, T_, WTEXT("DISPLAY"), 0, 0, 28, 444, 300, 16, g_font);
     ctl(ID_SEC_MOUSE, T_, WTEXT("MOUSE"), 0, 0, 28, 554, 300, 16, g_font);
-    ctl(ID_SEC_CLASS, T_, WTEXT("PER CLASS  (spy, merc - must match)"), 0, 0, 28, 608, 400, 16, g_font);
+    ctl(ID_SEC_CLASS, T_, WTEXT("PER CLASS  (spy, merc)"), 0, 0, 28, 608, 400, 16, g_font);
     ctl(ID_SL_RES, T_, WTEXT("Resolution"), ELL, 0, 28, 470, 150, 18, g_font);
     framed(ID_SET_W, E, NUM, 180, 466, 64, 24, 6, 4);
     ctl(ID_SL_X, T_, WTEXT("x"), 0, 0, 250, 470, 12, 18, g_font);
