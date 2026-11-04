@@ -164,7 +164,7 @@ enum {
     ID_SL_MOUSE, ID_SET_SENS, ID_SL_TURN, ID_SET_TURN, ID_SF_MOUSE, ID_SET_RESET,
     /* Versus Fix (Versus only) */
     ID_SL_VFPS, ID_SET_VFPS, ID_SET_VHUD, ID_SET_VRATE, ID_SL_VFOV, ID_SET_VFOVS, ID_SET_VFOVM, ID_SL_VTURN, ID_SET_VTURNS,
-    ID_SET_VTURNM, ID_SF_VFOV,
+    ID_SET_VTURNM, ID_SF_VFOV, ID_SET_CHUD,
     ID_SET_APPLY, ID_STATS,
     ID_GAMEMODE, /* keep last */
 };
@@ -673,6 +673,7 @@ static void build(void)
     ctl(ID_FOV169, B, WTEXT("16:9"), OD, 0, 328, SET_ROW(1), 34, 24, g_font);
     framed(ID_SET_FPS, E, NUM, 180, SET_ROW(2), 64, 24, 6, 4);
     framed(ID_SET_WS, E, WS_TABSTOP | ES_AUTOHSCROLL, 180, SET_ROW(3), 64, 24, 6, 4);
+    ctl(ID_SET_CHUD, B, WTEXT("HUD fix: off"), OD, 0, 250, SET_ROW(3), 112, 24, g_font); /* co-op: the SCCT Fix's */
     /* the mouse: co-op "sensitivity / aim turn speed", Versus "sensitivity / multiplier" */
     framed(ID_SET_SENS, E, WS_TABSTOP | ES_AUTOHSCROLL, 180, SET_ROW(4), 64, 24, 6, 4);
     ctl(ID_SL_TURN, T_, WTEXT("Aim turn"), ELL, 0, 250, SET_ROW(4) + 4, 56, 18, g_font);
@@ -700,11 +701,12 @@ static void build(void)
 /* The Settings tab in Versus: resolution and the mouse (moved up under it); the
    co-op-only rows and buttons are hidden. */
 static bool set_versus_only(int id) { return id >= ID_SL_VFPS && id <= ID_SF_VFOV; }
+/* (ID_SET_CHUD: co-op only, see set_coop_only) */
 static bool set_coop_only(int id)
 {
     return (id >= ID_SL_FOV && id <= ID_SL_WS) || id == ID_SET_FOV || id == ID_SET_FPS || id == ID_SET_WS ||
-           (id >= ID_SF_FOV && id <= ID_SF_WS) || id == ID_SET_FRIEND || id == ID_SET_FIX || id == ID_SET_MOUSE ||
-           (id >= ID_FOV43 && id <= ID_FOV169);
+           (id >= ID_SF_FOV && id <= ID_SF_WS) || id == ID_SET_FRIEND || id == ID_SET_MOUSE ||
+           (id >= ID_FOV43 && id <= ID_FOV169) || id == ID_SET_CHUD;
 }
 static void move_ctl(int id, int x, int y) { SetWindowPos(g_c[id], 0, S_(x), S_(y), 0, 0, 0x1 | 0x4 | 0x10 /* no size, z-order, activate */); }
 static void place_mouse_row(bool versus)
@@ -932,7 +934,9 @@ static void show_settings(const UiSettings *n)
     for (int i = ID_FOV43; i <= ID_FOV169; i++) EnableWindow(g_c[i], n->have_fov);
     EnableWindow(g_c[ID_SET_WS], n->have_ws);
     if (vs) set_text(ID_SET_FIX, n->vfix == 1 ? "Remove Versus Fix" : "Install Versus Fix");
-    else set_text(ID_SET_FIX, n->scctfix == 1 ? "Remove SCCT Fix" : "Install SCCT Fix");
+    else set_text(ID_SET_FIX, n->scctfix == 1 ? "Remove SCCT Fix" : n->scctfix == 3 ? "Update SCCT Fix" : "Install SCCT Fix");
+    set_text(ID_SET_CHUD, n->chud == 1 ? "HUD fix: on" : "HUD fix: off");
+    EnableWindow(g_c[ID_SET_CHUD], n->chud >= 0);
     set_text(ID_SET_MOUSE, n->rawmouse == 1 ? "Raw mouse: on" : "Raw mouse: off");
     g_set_warn = n->note_warn;
     if (vs && n->note[0]) set_text(ID_SET_NOTE, n->note);
@@ -1432,6 +1436,11 @@ static void on_command(int id, int code)
         set_text(ID_SET_NOTE, "Working...");
         if (g_shown.versus) push_cmd(CMD_VFIX, g_set.vfix == 1 ? 0 : 1);
         else push_cmd(CMD_SCCTFIX, g_set.scctfix == 1 ? 0 : 1);
+        break;
+    case ID_SET_CHUD:
+        g_set_warn = false;
+        set_text(ID_SET_NOTE, "Working...");
+        push_cmd(CMD_CHUD, g_set.chud == 1 ? 0 : 1);
         break;
     case ID_SET_VHUD: g_vf_hud = !g_vf_hud; vf_switch_texts(); set_text(ID_SET_NOTE, "Click Apply to save."); break;
     case ID_SET_VRATE: g_vf_rate = !g_vf_rate; vf_switch_texts(); set_text(ID_SET_NOTE, "Click Apply to save."); break;

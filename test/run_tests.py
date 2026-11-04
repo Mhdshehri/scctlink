@@ -669,7 +669,7 @@ def main():
         check(hm.wait_for(r"! Settings: FOV must be between 50 and 130", timeout=5) is not None, "a wrong value is refused")
         check(rd(uini) == b"[Engine.PlayerController]\r\nDesiredFOV=90.000000\r\n", "...and nothing is written")
         # the SCCT Fix button
-        fixsrc = os.path.join(ROOT, "package", "SCCTFix-d3d9.dll")
+        fixsrc = os.path.join(ROOT, "build", "fix", "d3d9.dll")  # ours, built from fix/d3d9fix.c
         fixhere = os.path.join(exe_a, "SCCTFix-d3d9.dll")  # next to SCCTLink
         shutil.copy(fixsrc, fixhere)
         shutil.copy(fixsrc, os.path.join(exe_b, "SCCTFix-d3d9.dll"))
@@ -688,6 +688,17 @@ def main():
         check(hm.wait_for(r"SCCT Fix removed", timeout=10) is not None and rd(sysd3d) == b"MZanother-d3d9-mod"
               and not os.path.exists(sysd3d + ".scctlink-backup") and b"StartupFullscreen=True" in rd(ga, "System", "SplinterCell3.ini"),
               "Remove SCCT Fix: the earlier d3d9.dll is put back, fullscreen again")
+        shutil.copy(os.path.join(ROOT, "package", "SCCTFix-d3d9.dll"), sysd3d)  # the original SCCT Fix
+        at = hm.mark()
+        hm.p.stdin.write("F\n1\n"); hm.p.stdin.flush()
+        check(hm.wait_for(r"SCCT Fix installed", timeout=10, since=at) is not None and rd(sysd3d) == rd(fixsrc)
+              and not os.path.exists(sysd3d + ".scctlink-backup"), "the original SCCT Fix is replaced by ours (no backup of it)")
+        at = hm.mark()
+        hm.p.stdin.write("B\n1\n"); hm.p.stdin.flush()
+        check(hm.wait_for(r"\[settings\] chud 1", timeout=10, since=at) is not None and b"Fix=1\r\n" in rd(ga, "System", "SCCTFix.ini"),
+              "co-op HUD fix on: System\\SCCTFix.ini [HUD] Fix=1 (read by our SCCT Fix)")
+        hm.p.stdin.write("F\n0\n"); hm.p.stdin.flush()
+        check(hm.wait_for(r"SCCT Fix removed", timeout=10, since=at) is not None, "removed again")
         # the live stats window's numbers
         check(jm.wait_for(r"\[stats\] user1191   ping \d+ ms   loss [\d.-]+%?   \d+/\d+ pkt/s", timeout=10) is not None,
               "live stats: ping, loss and packets per second for the linked friend")

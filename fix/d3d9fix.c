@@ -14,10 +14,15 @@
  *   - Alt+Tab: the game grabs Alt+Tab for itself (RegisterHotKey "UnrealAltTab")
  *     and minimizes on focus loss; both are blocked.
  *   - Crash log: a crash's code and address are written to SCCTFix.log.
+ *   - HUD fix (optional, SCCTFix.ini [HUD] Fix=1): the game draws its HUD and
+ *     menus in 640x480 steps, x scaled by width/640 and y by height/480, so on
+ *     a wide screen everything is stretched sideways. With it, x is scaled
+ *     like y. Drawing only: the co-op simulation isn't touched.
  *
  * This is a line-for-line rewrite of the original SCCT Fix d3d9.dll (made with
  * its author's permission): same names, same values, same order of calls, so
- * it behaves exactly the same in co-op. Nothing else is changed in the game.
+ * it behaves exactly the same in co-op. With the HUD fix off (the default)
+ * nothing else is changed in the game.
  *
  * Build: fix/build_fix.sh (clang + lld, 32-bit, no C runtime).
  */
@@ -62,8 +67,10 @@ IMP BOOL WINAPI ShowWindow(HWND, int);
 IMP BOOL WINAPI UnregisterHotKey(HWND, int);
 IMP int __cdecl wsprintfA(char *, const char *, ...);
 IMP UINT WINAPI timeBeginPeriod(UINT);
+IMP UINT WINAPI GetPrivateProfileIntA(const char *, const char *, int, const char *);
 
-/* No C runtime: the compiler may still copy structs with these. */
+/* No C runtime: the compiler may still copy structs with these (and marks float use with _fltused). */
+int _fltused = 0x9875;
 void *memcpy(void *d, const void *s, unsigned n)
 {
     unsigned char *o = d;
@@ -197,6 +204,31 @@ static void windowed(PRESENT_PARAMS *pp)
     if (pp->BackBufferFormat - D3DFMT_A8R8G8B8 >= 2) pp->BackBufferFormat = D3DFMT_X8R8G8B8;
 }
 
+/* ---- the HUD fix ----
+   splintercell3.exe (Steam copy, fixed address 0x10900000) scales its HUD and
+   menus with two constants, used together in every place that draws them:
+       0x110d5cb8: 1/640 (x)      0x110cceb4: 1/480 (y)
+   e.g. 10a3dbbb: fmul dword ptr [0x110d5cb8]  (d8 0d b8 5c 0d 11)
+   Making the x one height/(480*width) scales x like y: no stretching. */
+static int g_hud = -1; /* -1: not read yet */
+static char g_ini[300];
+static void hud_fix(UINT w, UINT h)
+{
+    if (g_hud < 0) g_hud = GetPrivateProfileIntA("HUD", "Fix", 0, g_ini);
+    if (!g_hud || !w || !h) return;
+    unsigned char *ref = (unsigned char *)0x10a3dbbb, *k = (unsigned char *)0x110d5cb8;
+    static const unsigned char want[6] = { 0xd8, 0x0d, 0xb8, 0x5c, 0x0d, 0x11 };
+    for (int i = 0; i < 6; i++) if (ref[i] != want[i]) return; /* not the Steam copy's code: left alone */
+    float now = *(float *)k;
+    if (now < 0.0001f || now > 0.01f) return; /* not a scale */
+    float v = (float)h / (480.0f * (float)w);
+    DWORD old;
+    VirtualProtect(k, 4, 4, &old);
+    *(float *)k = v;
+    VirtualProtect(k, 4, old, &old);
+    log_write("HUD fix: on\r\n", 13);
+}
+
 static void log_mode(const char *what, const PRESENT_PARAMS *pp, HRESULT hr)
 {
     char b[160];
@@ -244,6 +276,7 @@ static HRESULT WINAPI hook_Reset(void *dev, PRESENT_PARAMS *in)
     windowed(&pp);
     HRESULT hr = g_reset(dev, &pp);
     log_mode("Reset", &pp, hr);
+    if (hr >= 0) hud_fix(pp.BackBufferWidth, pp.BackBufferHeight);
     return hr;
 }
 
@@ -258,6 +291,7 @@ static HRESULT WINAPI hook_CreateDevice(void *d3d, UINT adapter, UINT type, HWND
     borderless(g_hwnd);
     HRESULT hr = g_create_device(d3d, adapter, type, focus, flags, &pp, out);
     log_mode("CreateDevice", &pp, hr);
+    if (hr >= 0) hud_fix(pp.BackBufferWidth, pp.BackBufferHeight);
     if (out && hr >= 0 && *out) {
         void *o = hook_slot(*out, 16, (void *)hook_Reset);
         if (o) g_reset = (ResetFn)o;
@@ -303,6 +337,8 @@ BOOL WINAPI DllEntry(HINSTANCE dll, DWORD reason, void *reserved)
     char path[280];
     DWORD n = GetModuleFileNameA(0, path, 280); /* splintercell3.exe: SCCTFix.log goes next to it */
     while (n && path[n - 1] != '\\') n--;
+    memcpy(g_ini, path, n);
+    memcpy(g_ini + n, "SCCTFix.ini", 12);
     memcpy(path + n, "SCCTFix.log", 12);
     g_log = CreateFileA(path, 0x40000000 /* GENERIC_WRITE */, 1 /* FILE_SHARE_READ */, 0, 2 /* CREATE_ALWAYS */,
                         0x80000000 /* FILE_FLAG_WRITE_THROUGH */, 0);

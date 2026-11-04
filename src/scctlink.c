@@ -2308,7 +2308,8 @@ static int ini_set(const char *path, const char *section, const char *key, const
    SHA-256 is exactly this one (checked: no network functions, starts no
    programs, only writes System\SCCTFix.log). */
 #define SCCTFIX_FILE "SCCTFix-d3d9.dll"
-#define SCCTFIX_SHA "2f05d8e9e7aaf750eb2889c7ba57dd453820e3a794b9ba74c43730446a84cae9"
+#define SCCTFIX_SHA "162255f10db01e864f79beb1005cccfedb6e7de0f1e377ccf28ce6b68454ac23" /* ours: fix/d3d9fix.c (fix/build_fix.sh) */
+#define SCCTFIX_OLD_SHA "2f05d8e9e7aaf750eb2889c7ba57dd453820e3a794b9ba74c43730446a84cae9" /* the original; ours replaces it */
 bool sha256_file(const char *path, char hex[65]);
 static void scctfix_paths(char *src, char *dst, char *bak, char *ini, size_t n)
 {
@@ -2317,14 +2318,14 @@ static void scctfix_paths(char *src, char *dst, char *bak, char *ini, size_t n)
     sfmt(bak, n, "%s.scctlink-backup", dst);
     sfmt(ini, n, "%s" PATHSEP "System" PATHSEP "SplinterCell3.ini", g_mf_dir);
 }
-/* -1 no game folder, 0 not there, 1 installed, 2 another d3d9.dll is there */
+/* -1 no game folder, 0 not there, 1 installed, 2 another d3d9.dll is there, 3 the original SCCT Fix (replaced on install) */
 static int scctfix_state(void)
 {
     if (!g_steam_ok || g_nmfs <= 0 || !g_mf_dir[0]) return -1;
     char src[900], dst[900], bak[900], ini[900], hex[65];
     scctfix_paths(src, dst, bak, ini, sizeof src);
     if (!sha256_file(dst, hex)) return 0;
-    return strcmp(hex, SCCTFIX_SHA) ? 2 : 1;
+    return !strcmp(hex, SCCTFIX_SHA) ? 1 : !strcmp(hex, SCCTFIX_OLD_SHA) ? 3 : 2;
 }
 static bool copy_file(const char *from, const char *to)
 {
@@ -2350,12 +2351,17 @@ static void scctfix_(bool install)
     if (game_is_running(g_exe)) { set_say("! SCCT Fix: close Splinter Cell first."); return; }
     scctfix_paths(src, dst, bak, ini, sizeof src);
     if (!install) {
+        if (st == 3) st = 1; /* the original SCCT Fix: removed the same way */
         if (st != 1) { set_say(st == 2 ? "! SCCT Fix: the d3d9.dll in System is another mod, not the SCCT Fix - left alone." : "SCCT Fix: not installed."); return; }
         if (remove(dst) != 0) { set_say("! SCCT Fix: couldn't remove it."); return; }
         if (file_exists(bak) && rename(bak, dst) == 0) say("SCCT Fix: the earlier d3d9.dll was put back.");
         ini_set(ini, "WinDrv.WindowsClient", "StartupFullscreen", "True");
         set_say("SCCT Fix removed (the game starts in fullscreen again).");
         return;
+    }
+    if (st == 3) { /* the original SCCT Fix: ours takes its place */
+        if (remove(dst) != 0) { set_say("! SCCT Fix: couldn't replace the older SCCT Fix."); return; }
+        st = 0;
     }
     if (st != 1) {
         if (!sha256_file(src, hex)) { set_say("! SCCT Fix: " SCCTFIX_FILE " is missing (it must be next to SCCTLink.exe)."); return; }
@@ -2377,6 +2383,35 @@ static void scctfix_(bool install)
         say("! SCCT Fix: couldn't set StartupFullscreen=False in SplinterCell3.ini.");
     set_say(st == 1 ? "SCCT Fix: already installed (StartupFullscreen=False checked)."
                     : "SCCT Fix installed: 60 FPS cap, borderless window (StartupFullscreen=False). Both players need it.");
+}
+/* The SCCT Fix's HUD fix (co-op): System\SCCTFix.ini [HUD] Fix=1. It only
+   changes how the HUD is drawn, so the two players may differ. */
+static void chud_path(char *p, size_t n) { sfmt(p, n, "%s" PATHSEP "System" PATHSEP "SCCTFix.ini", g_mf_dir); }
+static int chud_state(void)
+{
+    if (!g_steam_ok || g_nmfs <= 0 || !g_mf_dir[0]) return -1;
+    char p[900], v[8];
+    chud_path(p, sizeof p);
+    return ini_get(p, "HUD", "Fix", v, sizeof v) && v[0] == '1';
+}
+static void chud(bool on)
+{
+    g_uiset.note[0] = 0;
+    g_uiset.note_warn = false;
+    char p[900];
+    if (chud_state() < 0) set_say("! HUD fix: the game's folder wasn't found (only Steam copies).");
+    else {
+        chud_path(p, sizeof p);
+        FILE *f = fopen(p, "wb");
+        const char *t = on ? "; SCCT Fix settings - written by SCCTLink.\r\n[HUD]\r\n; 1 = the HUD isn't stretched on wide screens.\r\nFix=1\r\n"
+                           : "; SCCT Fix settings - written by SCCTLink.\r\n[HUD]\r\n; 1 = the HUD isn't stretched on wide screens.\r\nFix=0\r\n";
+        bool ok = f && fwrite(t, 1, strlen(t), f) == strlen(t);
+        if (f && fclose(f) != 0) ok = false;
+        if (!ok) set_say("! HUD fix: couldn't write System\\SCCTFix.ini.");
+        else set_say(on ? "HUD fix on: the HUD keeps its shape on wide screens (with the SCCT Fix; next time the game starts)."
+                        : "HUD fix off.");
+    }
+    settings_publish();
 }
 static void scctfix(bool install)
 {
@@ -2956,6 +2991,7 @@ static void settings_publish(void)
     u->vmult = u->found ? num_at(set_value(g_mfs, g_nmfs, "v_mult"), 100) : 0;
     u->have_vprofile = g_vprf[0] != 0;
     u->vfix = u->found ? vfix_state() : -1;
+    u->chud = u->found ? chud_state() : -1;
     vfix_read(u);
     const char *rm = u->found ? set_value(g_mfs, g_nmfs, "rawmouse") : 0;
     u->rawmouse = rm ? !strcmp(rm, "on") : -1;
@@ -3603,6 +3639,7 @@ static void handle_cmd(const Cmd *c)
     case CMD_APPLY_SETTINGS: apply_settings(c->arg); break;
     case CMD_SCCTFIX: scctfix(c->arg != 0); break;
     case CMD_VFIX: vfix(c->arg != 0); break;
+    case CMD_CHUD: chud(c->arg != 0); break;
     case CMD_APPLY_VFIX: apply_vfix(c->arg, false); break;
     case CMD_APPLY_VFIX2: apply_vfix(c->arg, true); break;
     case CMD_RAWMOUSE: rawmouse(c->arg != 0); break;

@@ -14,7 +14,8 @@ mkdef() { # name, then exports
 }
 mkdef kernel32 CreateFileA@28 DisableThreadLibraryCalls@4 GetModuleFileNameA@12 GetModuleHandleA@4 \
     GetProcAddress@8 GetSystemDirectoryA@8 GlobalFindAtomA@4 LoadLibraryA@4 QueryPerformanceCounter@4 \
-    QueryPerformanceFrequency@4 SetUnhandledExceptionFilter@4 Sleep@4 VirtualProtect@16 WriteFile@20
+    QueryPerformanceFrequency@4 SetUnhandledExceptionFilter@4 Sleep@4 VirtualProtect@16 WriteFile@20 \
+    GetPrivateProfileIntA@16
 mkdef user32 GetMonitorInfoA@8 GetWindowLongA@8 GetWindowRect@8 IsIconic@4 MonitorFromWindow@8 \
     RegisterHotKey@16 SetWindowLongA@12 SetWindowPos@28 ShowWindow@8 UnregisterHotKey@8 wsprintfA
 mkdef winmm timeBeginPeriod@4

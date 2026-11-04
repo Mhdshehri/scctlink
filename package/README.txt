@@ -1,4 +1,4 @@
-SCCTLink 0.9.9.2 - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
+SCCTLink 0.9.9.3 - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
 ==============================================================================
 
 No VPN (no Hamachi, Radmin or ZeroTier), no port forwarding, no IP addresses.
@@ -13,7 +13,7 @@ Both players need:
   * each other on their Steam friends list
   * this folder unzipped somewhere (Desktop is fine). Keep SCCTLink.exe,
     steam_api.dll and SCCTFix-d3d9.dll together.
-  * the SAME SCCTLink version (0.9.9.2).
+  * the SAME SCCTLink version (0.9.9.3).
 
 
 HOW TO PLAY
@@ -129,9 +129,9 @@ the game at 60 FPS, runs it in a borderless window, keeps Alt+Tab working and
 writes System\SCCTFix.log if the game crashes. With it on both PCs, co-op
 works: shooting, jumping, changing maps, no disconnects.
   * Close the game first. BOTH players need it - the Mods tab compares it.
-  * SCCTLink only copies the file if its SHA-256 is exactly the checked one:
-    2f05d8e9e7aaf750eb2889c7ba57dd453820e3a794b9ba74c43730446a84cae9
-    (it has no network functions, starts no programs, only writes its log).
+  * SCCTLink only copies the file if its SHA-256 is exactly the one it pins
+    (see SHA256SUMS.txt). It's built from the source in fix/d3d9fix.c: no
+    network functions, starts no programs, only writes its log.
   * If another d3d9.dll is there (another mod), it is renamed to
     d3d9.dll.scctlink-backup. "Remove SCCT Fix" puts it back and sets
     fullscreen again.
@@ -267,6 +267,9 @@ and the SCCT Fix are hidden.
 0.9.9: Settings: mouse sensitivity, aim turn speed and Reset; Versus gets its
 own Settings (mouse sensitivity, mouse multiplier); the Mods tab says on top
 whether all party members match.
+0.9.9.3 (testing): the SCCT Fix is now our own build (fix/d3d9fix.c, same
+behaviour as the original) with an optional HUD fix for wide screens (co-op
+Settings: "HUD fix"); "Update SCCT Fix" replaces the original.
 0.9.9.2 (testing): the Versus Fix (Settings tab, Versus): no 30 FPS limit,
 the mouse as 125 reports a second (fast mice made Versus' aim zigzag), FOV
 for spies and mercenaries, a wider resolution, the HUD not stretched,
