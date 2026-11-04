@@ -191,21 +191,64 @@ static void *g_mice[4]; /* the game makes more than one mouse device */
 static int g_nmice;
 static int is_mouse(void *d) { for (int i = 0; i < g_nmice; i++) if (g_mice[i] == d) return 1; return 0; }
 static const DWORD GUID_SYSMOUSE[4] = { 0x6F1D2B60, 0x11CFD5A0, 0x4544C7BF, 0x00005453 }; /* {6F1D2B60-D5A0-11CF-BFC7-444553540000} */
+/* ---- the mouse as Versus expects it: 125 reports a second ----
+   Versus mishandles fast mice: with more than 125 reports a second (500/1000 Hz
+   gaming mice) each report is tiny, and the aim gets slow and zigzags
+   ("pixel jumping"); at 125 Hz it's fine (known fix: set the mouse to 125 Hz).
+   So the fix regroups what the game reads: each read's movement is summed and
+   handed back as one report per 8 ms that passed (125 a second), the same total
+   movement. Buttons and the wheel are passed on unchanged. [Mouse] Rate125=0
+   in SCCTVersusFix.ini turns it off. */
+static int g_rate125 = 1;
+static long long g_last_read;
 static long WINAPI hook_GetDeviceData(void *dev, DWORD size, DWORD *data, DWORD *n, DWORD flags)
 {
+    DWORD cap = n ? *n : 0;
     long hr = g_get_data(dev, size, data, n, flags);
-    if (is_mouse(dev) && hr >= 0 && data && n && size >= 8) {
-        g_mreads++;
-        for (DWORD i = 0; i < *n; i++) {
-            DWORD *e = (DWORD *)((char *)data + i * size); /* DIDEVICEOBJECTDATA: offset, data, ... */
+    if (!is_mouse(dev) || hr < 0 || !data || !n || size < 16 || (flags & 1 /* DIGDD_PEEK */) || !g_rate125) return hr;
+    g_mreads++;
+    long dx = 0, dy = 0;
+    DWORD keep = 0, stamp = 0, seq = 0, moves = 0;
+    for (DWORD i = 0; i < *n; i++) {
+        DWORD *e = (DWORD *)((char *)data + i * size); /* DIDEVICEOBJECTDATA: offset, data, time stamp, sequence */
+        if (e[0] == 0 || e[0] == 4) { /* DIMOFS_X / DIMOFS_Y */
             long v = (long)e[1];
-            if (e[0] == 0) { g_mdx += v; g_mframe_dx += v; } /* DIMOFS_X */
-            else if (e[0] == 4) g_mdy += v;                /* DIMOFS_Y */
-            else continue;
+            if (e[0] == 0) dx += v; else dy += v;
+            stamp = e[2]; seq = e[3];
+            moves++;
             g_mevents++;
             if ((v < 0 ? -v : v) > g_mmax) g_mmax = v < 0 ? -v : v;
+            continue;
+        }
+        if (keep != i) memcpy((char *)data + keep * size, e, size); /* buttons, wheel: in order, first */
+        keep++;
+    }
+    g_mdx += dx; g_mdy += dy; g_mframe_dx += dx;
+    long long now;
+    QueryPerformanceCounter(&now);
+    long long since = g_last_read ? now - g_last_read : 0;
+    g_last_read = now;
+    if (!moves) { *n = keep; return hr; }
+    /* how many 8 ms reports this read stands for (at least 1, at most what fits) */
+    DWORD reports = g_qpf ? (DWORD)((since * 125 + g_qpf / 2) / g_qpf) : 1;
+    if (reports < 1) reports = 1;
+    if (reports > 16) reports = 16;
+    while (reports > 1 && keep + 2 * reports > cap) reports--;
+    if (keep + 2 > cap) { *n = keep; return hr; } /* no room (never seen): drop nothing important */
+    long sx = dx, sy = dy;
+    for (DWORD r = 0; r < reports; r++) {
+        long px = (long)(sx * (long long)(r + 1) / (long)reports) - (long)(sx * (long long)r / (long)reports);
+        long py = (long)(sy * (long long)(r + 1) / (long)reports) - (long)(sy * (long long)r / (long)reports);
+        DWORD vals[2] = { (DWORD)px, (DWORD)py }, offs[2] = { 0, 4 };
+        for (int k = 0; k < 2; k++) {
+            if (!vals[k]) continue;
+            DWORD *e = (DWORD *)((char *)data + keep * size);
+            memset(e, 0, size);
+            e[0] = offs[k]; e[1] = vals[k]; e[2] = stamp; e[3] = seq;
+            keep++;
         }
     }
+    *n = keep;
     return hr;
 }
 static long WINAPI hook_GetDeviceState(void *dev, DWORD size, void *state)
@@ -518,6 +561,7 @@ BOOL WINAPI DllEntry(HINSTANCE dll, DWORD reason, void *reserved)
        only for that program). Versus sleeps between frames, so with 15.6 ms steps it lands on
        ~22 FPS, even in the menu. The SCCT Fix does the same for co-op. */
     timeBeginPeriod(1);
+    g_rate125 = read_int("Mouse", "Rate125", 1) != 0;
     patch_limiter();
     patch_dinput();
     if (patch_import("kernel32.dll", "Sleep", (void *)hook_Sleep)) log_line("watching Sleep\r\n");
