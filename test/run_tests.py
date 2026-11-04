@@ -812,7 +812,7 @@ def main():
 
         print("[20] Settings: co-op mouse (sensitivity, aim turn speed), Versus settings, Reset")
         st = dict(base)
-        st["System/SplinterCell3.ini"] = (b"[GENERAL]\r\nLogosVideo=logos_PC.bik\r\nSplashVideo=introteaser_PC.bik\r\nESRBVideo=ESRB.bik\r\n"
+        st["System/SplinterCell3.ini"] = (b"[GENERAL]\r\nLogosVideo=none\r\nSplashVideo=introteaser_PC.bik\r\nESRBVideo=\r\n"
                                           b"IntroVideo=01_lighthouse_intro.bik\r\n"
                                           b"[Init]\r\nUseDIMouse=True\r\n[SIMULATION]\r\nMAXFPS=144\r\n"
                                           b"[WinDrv.WindowsClient]\r\nFullscreenViewportX=1920\r\nFullscreenViewportY=1080\r\n")
@@ -872,16 +872,24 @@ def main():
         se.p.stdin.write("Z\n1\n"); se.p.stdin.flush()
         check(se.wait_for(r"\[settings\] versus 2560x1440 sens 1000 mult 600 profile 1", timeout=10, since=mk) is not None,
               "Reset (Versus): sensitivity 10, multiplier 6, resolution kept")
+        vids = os.path.join(gs, "Data", "Videos")
+        os.makedirs(vids, exist_ok=True)
+        for v in ("logos_PC.bik", "introteaser_PC.bik", "ESRB.bik", "01_lighthouse_intro.bik"):
+            with open(os.path.join(vids, v), "wb") as f:
+                f.write(b"BIK" + v.encode())
         mk = se.mark()
         se.p.stdin.write("I\n1\n"); se.p.stdin.flush()
         check(se.wait_for(r"\[settings\] chud \d skipintro 1", timeout=10, since=mk) is not None, "Skip intro on")
+        check(os.path.exists(os.path.join(vids, "logos_PC.bik.scctlink-off")) and not os.path.exists(os.path.join(vids, "logos_PC.bik"))
+              and os.path.exists(os.path.join(vids, "ESRB.bik.scctlink-off")) and os.path.exists(os.path.join(vids, "01_lighthouse_intro.bik")),
+              "...the startup videos set aside (renamed), the story's intro kept")
         s3 = rd(sysd, "SplinterCell3.ini")
-        check(b"LogosVideo=\r\n" in s3 and b"SplashVideo=\r\n" in s3 and b"ESRBVideo=\r\n" in s3
-              and b"IntroVideo=01_lighthouse_intro.bik" in s3, "...the startup videos' names emptied, the story's intro kept")
+        check(b"LogosVideo=logos_PC.bik\r\n" in s3 and b"ESRBVideo=ESRB.bik\r\n" in s3, "...names an earlier test emptied are back in SplinterCell3.ini")
         mk = se.mark()
         se.p.stdin.write("I\n0\n"); se.p.stdin.flush()
         check(se.wait_for(r"\[settings\] chud \d skipintro 0", timeout=10, since=mk) is not None
-              and b"SplashVideo=introteaser_PC.bik\r\n" in rd(sysd, "SplinterCell3.ini"), "Skip intro off: the names are back")
+              and os.path.exists(os.path.join(vids, "logos_PC.bik")) and not os.path.exists(os.path.join(vids, "logos_PC.bik.scctlink-off")),
+              "Skip intro off: the videos have their names back")
         se.stop()
 
         print("[21] Versus Fix: install, its settings (SCCTVersusFix.ini), the Mods tab, remove")

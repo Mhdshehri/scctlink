@@ -1943,6 +1943,11 @@ static void mf_add(void *ctx, const char *name, bool is_dir, u64 size, u64 mtime
         return;
     }
     if (mf_skip(name) || g_nmfs >= MF_MAX || strlen(key) >= sizeof g_mfs[0].path) return;
+    /* the startup videos, there or set aside by "Skip intro": each player's own choice */
+    size_t kl = strlen(key);
+    if ((kl > 13 && !strcmp(key + kl - 13, ".scctlink-off")) || !strcmp(key, "data/videos/logos_pc.bik") ||
+        !strcmp(key, "data/videos/introteaser_pc.bik") || !strcmp(key, "data/videos/esrb.bik"))
+        return;
     MFile *f = &g_mfs[g_nmfs++];
     memcpy(f->path, key, strlen(key) + 1);
     f->size = size;
@@ -2308,7 +2313,7 @@ static int ini_set(const char *path, const char *section, const char *key, const
    SHA-256 is exactly this one (checked: no network functions, starts no
    programs, only writes System\SCCTFix.log). */
 #define SCCTFIX_FILE "SCCTFix-d3d9.dll"
-#define SCCTFIX_SHA "2c5fa6a505c3867db282523c5c00a7f66a6bfa5bc598078ee654a2445a9fd2f5" /* ours: fix/d3d9fix.c (fix/build_fix.sh) */
+#define SCCTFIX_SHA "2228214d27cb77ad2b13e63510bad49bab834eba7ce8665e8a55371419994ea4" /* ours: fix/d3d9fix.c (fix/build_fix.sh) */
 #define SCCTFIX_OLD_SHA "2f05d8e9e7aaf750eb2889c7ba57dd453820e3a794b9ba74c43730446a84cae9" /* the original; ours replaces it */
 bool sha256_file(const char *path, char hex[65]);
 static void scctfix_paths(char *src, char *dst, char *bak, char *ini, size_t n)
@@ -2413,42 +2418,60 @@ static void chud(bool on)
     }
     settings_publish();
 }
-/* Skip the startup videos (Ubisoft logos, teaser, rating screen): SplinterCell3.ini
-   [GENERAL] names them; empty names skip them. The story's videos stay. */
+/* Skip the startup videos (Ubisoft logos, teaser, rating screen): the files in
+   Data\Videos get ".scctlink-off" added to their names, so the game doesn't find
+   them and goes straight to the menu; turning it off gives them their names
+   back. The story's videos stay. (Empty names in SplinterCell3.ini don't work:
+   the game uses its own names then, so those are put back if a test emptied them.) */
 static const char *const INTRO_KEYS[3] = { "LogosVideo", "SplashVideo", "ESRBVideo" };
 static const char *const INTRO_FILES[3] = { "logos_PC.bik", "introteaser_PC.bik", "ESRB.bik" };
+static void intro_path(char *p, size_t n, int i, bool off)
+{
+    sfmt(p, n, "%s" PATHSEP "Data" PATHSEP "Videos" PATHSEP "%s%s", g_mf_dir, INTRO_FILES[i], off ? ".scctlink-off" : "");
+}
 static int skipintro_state(void)
 {
     if (!g_steam_ok || g_nmfs <= 0 || !g_mf_dir[0]) return -1;
-    char p[900], v[64];
-    sfmt(p, sizeof p, "%s" PATHSEP "System" PATHSEP "SplinterCell3.ini", g_mf_dir);
-    if (!ini_get(p, "GENERAL", "SplashVideo", v, sizeof v)) {
-        FILE *f = fopen(p, "rb"); /* the key is there with an empty value: skipped */
-        if (!f) return -1;
-        fclose(f);
-        return 1;
+    char p[900];
+    int on = 0, off = 0;
+    for (int i = 0; i < 3; i++) {
+        intro_path(p, sizeof p, i, true);
+        if (file_exists(p)) off++;
+        intro_path(p, sizeof p, i, false);
+        if (file_exists(p)) on++;
     }
-    return 0;
+    if (!on && !off) return -1;
+    return off > 0 && !on;
 }
-static void skipintro(bool on)
+static void skipintro(bool skip)
 {
     g_uiset.note[0] = 0;
     g_uiset.note_warn = false;
-    if (skipintro_state() < 0) set_say("! Intro: the game's folder wasn't found (only Steam copies).");
+    if (skipintro_state() < 0) set_say("! Intro: the game's videos weren't found (only Steam copies).");
     else if (game_is_running("splintercell3")) set_say("! Intro: close Splinter Cell first.");
     else {
-        char p[900];
-        sfmt(p, sizeof p, "%s" PATHSEP "System" PATHSEP "SplinterCell3.ini", g_mf_dir);
-        int n = 0;
+        char a[900], b2[900], ini[900];
+        int moved = 0;
         bool err = false;
         for (int i = 0; i < 3; i++) {
-            int r = ini_set(p, "GENERAL", INTRO_KEYS[i], on ? "" : INTRO_FILES[i]);
-            if (r < 0) err = true; else n += r;
+            intro_path(a, sizeof a, i, false);
+            intro_path(b2, sizeof b2, i, true);
+            const char *from = skip ? a : b2, *to = skip ? b2 : a;
+            if (!file_exists(from)) continue;
+            if (file_exists(to)) { remove(from); continue; } /* (both there: keep one) */
+            if (rename(from, to) == 0) moved++; else err = true;
         }
-        if (err) set_say("! Intro: couldn't write SplinterCell3.ini.");
-        else if (!n) set_say("! Intro: the videos aren't named in SplinterCell3.ini (not changed).");
-        else set_say(on ? "Intro videos skipped: the game starts straight at the menu." : "Intro videos back on.");
+        sfmt(ini, sizeof ini, "%s" PATHSEP "System" PATHSEP "SplinterCell3.ini", g_mf_dir);
+        for (int i = 0; i < 3; i++) { /* names a test emptied: back */
+            char v[64];
+            if (!ini_get(ini, "GENERAL", INTRO_KEYS[i], v, sizeof v) || !strcmp(v, "none"))
+                ini_set(ini, "GENERAL", INTRO_KEYS[i], INTRO_FILES[i]);
+        }
+        if (err) set_say("! Intro: couldn't rename the videos in Data\\Videos.");
+        else set_say(skip ? "Intro videos skipped: the game starts straight at the menu." : "Intro videos back on.");
+        (void)moved;
     }
+    mf_recheck();
     settings_publish();
 }
 static void scctfix(bool install)
