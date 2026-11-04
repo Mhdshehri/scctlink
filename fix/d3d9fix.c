@@ -69,6 +69,7 @@ IMP BOOL WINAPI UnregisterHotKey(HWND, int);
 IMP int __cdecl wsprintfA(char *, const char *, ...);
 IMP UINT WINAPI timeBeginPeriod(UINT);
 IMP UINT WINAPI GetPrivateProfileIntA(const char *, const char *, int, const char *);
+IMP DWORD WINAPI GetPrivateProfileStringA(const char *, const char *, const char *, char *, DWORD, const char *);
 
 /* No C runtime: the compiler may still copy structs with these (and marks float use with _fltused). */
 int _fltused = 0x9875;
@@ -215,28 +216,43 @@ static void windowed(PRESENT_PARAMS *pp)
 static float g_hudx = 0.0015625f; /* 1/640 until the screen size is known */
 static int g_hud = -1;           /* -1: not read yet */
 static char g_ini[300];
+/* Which places to change (testing): SCCTFix.ini [HUD] Sites=, letters of
+       A 10a3d916  B 10a3dbbb  (UGameEngine::SEC_LoadMenus)
+       C 10a4a8a3 + 10a4a8bb    (a rectangle in 640x480 steps: x1 and x2)
+       D 10c864b3  E 10c86e09  F 10c8720b
+   default "C". */
 static void hud_fix(UINT w, UINT h)
 {
-    static const DWORD sites[3] = { 0x10c864b3, 0x10c86e09, 0x10c8720b };
+    static const struct { char id; DWORD at; } sites[] = {
+        { 'A', 0x10a3d916 }, { 'B', 0x10a3dbbb }, { 'C', 0x10a4a8a3 }, { 'C', 0x10a4a8bb },
+        { 'D', 0x10c864b3 }, { 'E', 0x10c86e09 }, { 'F', 0x10c8720b },
+    };
     static const unsigned char want[6] = { 0xd8, 0x0d, 0xb8, 0x5c, 0x0d, 0x11 };
     static int patched;
+    char use[16];
     if (g_hud < 0) g_hud = GetPrivateProfileIntA("HUD", "Fix", 0, g_ini);
     if (!g_hud || !w || !h) return;
     g_hudx = (float)h / (480.0f * (float)w);
     if (patched) return;
-    for (int k = 0; k < 3; k++) {
-        unsigned char *ins = (unsigned char *)sites[k];
-        for (int i = 0; i < 6; i++) if (ins[i] != want[i]) return; /* not the Steam copy's code: left alone */
-    }
-    for (int k = 0; k < 3; k++) {
-        unsigned char *ins = (unsigned char *)sites[k];
+    patched = 1;
+    GetPrivateProfileStringA("HUD", "Sites", "C", use, sizeof use, g_ini);
+    char b[64];
+    int n = 0;
+    for (unsigned k = 0; k < sizeof sites / sizeof *sites; k++) {
+        int on = 0;
+        for (int j = 0; use[j]; j++) if ((use[j] & ~32) == sites[k].id) on = 1;
+        unsigned char *ins = (unsigned char *)sites[k].at;
+        int ok = 1;
+        for (int i = 0; i < 6; i++) if (ins[i] != want[i]) ok = 0; /* not the Steam copy's code: left alone */
+        if (!on || !ok) continue;
         DWORD old, a = (DWORD)&g_hudx;
         VirtualProtect(ins + 2, 4, 0x40 /* PAGE_EXECUTE_READWRITE */, &old);
         memcpy(ins + 2, &a, 4);
         VirtualProtect(ins + 2, 4, old, &old);
+        n++;
     }
-    patched = 1;
-    log_write("HUD fix: on\r\n", 13);
+    wsprintfA(b, "HUD fix: on (%s, %d places)\r\n", use, n);
+    log_write(b, slen(b));
 }
 
 static void log_mode(const char *what, const PRESENT_PARAMS *pp, HRESULT hr)
