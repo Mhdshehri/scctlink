@@ -2057,6 +2057,7 @@ static const SetDef SETS[] = {
     { "v_res", "Versus resolution", false },
     { "v_sens", "Versus mouse sensitivity", false },
     { "v_mult", "Versus mouse multiplier", false },
+    { "vfix", "Versus Fix", false },
 };
 #define NSETS ((int)(sizeof SETS / sizeof *SETS))
 
@@ -2157,6 +2158,7 @@ static void put_num(const char *key, const char *v, int scale) /* "0.5" -> "0.50
 }
 
 static int scctfix_state(void);
+static int vfix_state(void);
 static void settings_collect(void)
 {
     char sys[800], path[900], x[24], y[24], v[24];
@@ -2219,6 +2221,8 @@ static void settings_collect(void)
     }
     if (g_vprf[0] && ini_get(g_vprf, 0, "MouseSensitivity", v, sizeof v)) put_num("v_sens", v, 100);
     if (g_vkbd[0] && ini_get(g_vkbd, 0, VKBD_X, v, sizeof v)) put_num("v_mult", v, 100);
+    int vfs = vfix_state();
+    if (vfs >= 0) set_add("vfix", vfs == 1 ? "installed" : "not installed");
 }
 
 /* Write value for key (in section, or anywhere if section is 0) into an .ini
@@ -2380,6 +2384,154 @@ static void scctfix(bool install)
     g_uiset.note_warn = false;
     scctfix_(install);
     mf_recheck(); /* the file list changed: show it and tell the friends */
+    settings_publish();
+}
+
+/* ---------- the Versus Fix ----------
+   Our own d3d8.dll for Versus (source: fix/d3d8versus.c): no 30 FPS limit, the
+   mouse as 125 reports a second (fast mice make Versus' aim zigzag), FOV for
+   spies and mercenaries, a wider resolution, the HUD not stretched, turning
+   speed. It reads SCCTVersusFix.ini next to it, which SCCTLink writes. It ships
+   next to SCCTLink.exe as SCCTVersusFix-d3d8.dll and is only copied if its
+   SHA-256 is exactly this one (the build is reproducible: fix/build_fix.sh). */
+#define VFIX_FILE "SCCTVersusFix-d3d8.dll"
+#define VFIX_SHA "84b1da2a6d27e051cd3102ae0cef9be838189ad3e1d90082eea0361215d7d5a6"
+static void vfix_paths(char *src, char *dst, char *bak, char *ini, size_t n)
+{
+    sfmt(src, n, "%s" PATHSEP VFIX_FILE, exe_dir());
+    sfmt(dst, n, "%s" PATHSEP "Versus" PATHSEP "System" PATHSEP "d3d8.dll", g_mf_dir);
+    sfmt(bak, n, "%s.scctlink-backup", dst);
+    sfmt(ini, n, "%s" PATHSEP "Versus" PATHSEP "System" PATHSEP "SCCTVersusFix.ini", g_mf_dir);
+}
+/* -1 no game folder or no Versus, 0 not there, 1 installed, 2 another d3d8.dll is there */
+static int vfix_state(void)
+{
+    if (!g_steam_ok || g_nmfs <= 0 || !g_mf_dir[0]) return -1;
+    char src[900], dst[900], bak[900], ini[900], hex[65], exe[900];
+    vfix_paths(src, dst, bak, ini, sizeof src);
+    sfmt(exe, sizeof exe, "%s" PATHSEP "Versus" PATHSEP "System" PATHSEP "SCCT_Versus.exe", g_mf_dir);
+    if (!file_exists(exe)) return -1;
+    if (!sha256_file(dst, hex)) return 0;
+    return strcmp(hex, VFIX_SHA) ? 2 : 1;
+}
+/* the settings, as SCCTVersusFix.ini has them (the game's own when it's missing) */
+static void vfix_read(UiSettings *u)
+{
+    char src[900], dst[900], bak[900], ini[900], v[32];
+    vfix_paths(src, dst, bak, ini, sizeof src);
+    u->vf_fps = 60; u->vf_w = u->vf_h = 0; u->vf_hud = true; u->vf_rate125 = true;
+    u->vf_spyfov = u->vf_mercfov = 0; u->vf_spyturn = u->vf_mercturn = 100;
+    if (ini_get(ini, "Display", "MaxFPS", v, sizeof v)) u->vf_fps = num_at(v, 1);
+    if (ini_get(ini, "Display", "Resolution", v, sizeof v)) {
+        u->vf_w = num_at(v, 1);
+        const char *x = strchr(v, 'x');
+        u->vf_h = x ? num_at(x + 1, 1) : 0;
+    }
+    if (ini_get(ini, "Display", "HUD", v, sizeof v)) u->vf_hud = v[0] != '0';
+    if (ini_get(ini, "Mouse", "Rate125", v, sizeof v)) u->vf_rate125 = v[0] != '0';
+    if (ini_get(ini, "FOV", "Spy", v, sizeof v)) u->vf_spyfov = num_at(v, 1);
+    if (ini_get(ini, "FOV", "Merc", v, sizeof v)) u->vf_mercfov = num_at(v, 1);
+    if (ini_get(ini, "Turning", "Spy", v, sizeof v)) u->vf_spyturn = num_at(v, 100);
+    if (ini_get(ini, "Turning", "Merc", v, sizeof v)) u->vf_mercturn = num_at(v, 100);
+}
+/* SCCTVersusFix.ini is our own file: written whole */
+static bool vfix_write(const UiSettings *u)
+{
+    char src[900], dst[900], bak[900], ini[900];
+    vfix_paths(src, dst, bak, ini, sizeof src);
+    char t[1500], res[24] = "";
+    if (u->vf_w && u->vf_h) sfmt(res, sizeof res, "%dx%d", u->vf_w, u->vf_h);
+    sfmt(t, sizeof t,
+         "; SCCT Versus Fix settings - written by SCCTLink (Settings tab, Versus).\r\n"
+         "[Display]\r\n"
+         "; Versus holds itself at half the screen's refresh (30 FPS at 60 Hz). 0 = no limit.\r\n"
+         "MaxFPS=%d\r\n"
+         "; Replaces the game menu's last resolution (1600x1200). Empty = the game's own list.\r\n"
+         "Resolution=%s\r\n"
+         "; 1 = the HUD keeps its shape on wide screens.\r\n"
+         "HUD=%d\r\n"
+         "[Mouse]\r\n"
+         "; 1 = the game gets the mouse as 125 reports a second (faster mice make Versus' aim zigzag).\r\n"
+         "Rate125=%d\r\n"
+         "[FOV]\r\n"
+         "; 0 = the game's own (spy 75, mercenary 95).\r\n"
+         "Spy=%d\r\n"
+         "Merc=%d\r\n"
+         "[Turning]\r\n"
+         "; 1.00 = the game's own top turning speed.\r\n"
+         "Spy=%d.%02d\r\n"
+         "Merc=%d.%02d\r\n"
+         "SpyVertical=1.00\r\n"
+         "MercVertical=1.00\r\n",
+         u->vf_fps, res, u->vf_hud ? 1 : 0, u->vf_rate125 ? 1 : 0, u->vf_spyfov, u->vf_mercfov,
+         u->vf_spyturn / 100, u->vf_spyturn % 100, u->vf_mercturn / 100, u->vf_mercturn % 100);
+    FILE *f = fopen(ini, "wb");
+    if (!f) return false;
+    bool ok = fwrite(t, 1, strlen(t), f) == strlen(t);
+    return fclose(f) == 0 && ok;
+}
+static void vfix_(bool install)
+{
+    char src[900], dst[900], bak[900], ini[900], hex[65];
+    int st = vfix_state();
+    if (st < 0) { set_say("! Versus Fix: Versus wasn't found in the game's folder (only Steam copies)."); return; }
+    if (game_is_running("SCCT_Versus")) { set_say("! Versus Fix: close Versus first."); return; }
+    vfix_paths(src, dst, bak, ini, sizeof src);
+    if (!install) {
+        if (st != 1) { set_say(st == 2 ? "! Versus Fix: the d3d8.dll in Versus\\System is another mod - left alone." : "Versus Fix: not installed."); return; }
+        if (remove(dst) != 0) { set_say("! Versus Fix: couldn't remove it."); return; }
+        if (file_exists(bak) && rename(bak, dst) == 0) say("Versus Fix: the earlier d3d8.dll was put back.");
+        set_say("Versus Fix removed (Versus is back to its own settings).");
+        return;
+    }
+    if (st != 1) {
+        if (!sha256_file(src, hex)) { set_say("! Versus Fix: " VFIX_FILE " is missing (it must be next to SCCTLink.exe)."); return; }
+        if (strcmp(hex, VFIX_SHA)) { set_say("! Versus Fix: " VFIX_FILE " is not the expected file, so it was NOT installed."); return; }
+        if (st == 2) {
+            if (file_exists(bak)) { set_say("! Versus Fix: there is another d3d8.dll and already a backup - move it out yourself first."); return; }
+            if (rename(dst, bak) != 0) { set_say("! Versus Fix: couldn't move the other d3d8.dll aside."); return; }
+            say("Versus Fix: the other d3d8.dll was renamed to d3d8.dll.scctlink-backup.");
+        }
+        if (!copy_file(src, dst) || !sha256_file(dst, hex) || strcmp(hex, VFIX_SHA)) {
+            remove(dst);
+            if (st == 2) rename(bak, dst);
+            set_say("! Versus Fix: couldn't copy it into Versus\\System.");
+            return;
+        }
+    }
+    if (!file_exists(ini)) { UiSettings d; memset(&d, 0, sizeof d); vfix_read(&d); vfix_write(&d); }
+    set_say(st == 1 ? "Versus Fix: already installed." : "Versus Fix installed: no 30 FPS limit, smooth mouse, FOV, resolution, HUD. Settings below.");
+}
+static void vfix(bool install)
+{
+    g_uiset.note[0] = 0;
+    g_uiset.note_warn = false;
+    vfix_(install);
+    mf_recheck();
+    settings_publish();
+}
+static void apply_vfix(u64 a, bool turns)
+{
+    g_uiset.note[0] = 0;
+    g_uiset.note_warn = false;
+    UiSettings u;
+    memset(&u, 0, sizeof u);
+    vfix_read(&u);
+    if (turns) {
+        int s = (int)(a & 65535), m = (int)(a >> 16 & 65535);
+        if (s < 10 || s > 1000 || m < 10 || m > 1000) { set_say("! Versus Fix: turning speed must be between 0.1 and 10."); settings_publish(); return; }
+        u.vf_spyturn = s; u.vf_mercturn = m;
+    } else {
+        int fps = (int)(a & 2047), w = (int)(a >> 11 & 8191), h = (int)(a >> 24 & 8191), sf = (int)(a >> 39 & 255), mf = (int)(a >> 47 & 255);
+        if (fps && (fps < 30 || fps > 1000)) { set_say("! Versus Fix: Max FPS must be 0 (no limit) or 30 to 1000."); settings_publish(); return; }
+        if ((w || h) && (w < 640 || h < 480 || w > 9999 || h > 9999)) { set_say("! Versus Fix: that resolution doesn't look right."); settings_publish(); return; }
+        if ((sf && (sf < 40 || sf > 150)) || (mf && (mf < 40 || mf > 150))) { set_say("! Versus Fix: FOV must be 40 to 150 (0 = the game's own)."); settings_publish(); return; }
+        u.vf_fps = fps; u.vf_w = w; u.vf_h = h; u.vf_hud = (a >> 37) & 1; u.vf_rate125 = (a >> 38) & 1; u.vf_spyfov = sf; u.vf_mercfov = mf;
+    }
+    if (vfix_state() < 0) set_say("! Versus Fix: Versus wasn't found in the game's folder (only Steam copies).");
+    else if (!vfix_write(&u)) set_say("! Versus Fix: couldn't write SCCTVersusFix.ini.");
+    else set_say(vfix_state() == 1 ? "Versus Fix: saved. FPS, mouse and resolution apply when Versus starts; FOV and turning within a few seconds."
+                                   : "Versus Fix: saved. Install the Versus Fix to use them.");
     settings_publish();
 }
 
@@ -2548,9 +2700,18 @@ static void reset_settings(bool versus)
         } else {
             if (g_vprf[0]) err |= ini_set(g_vprf, 0, "MouseSensitivity", "10.00") < 0;
             if (g_vkbd[0]) { err |= ini_set(g_vkbd, 0, VKBD_X, "6.0") < 0; err |= ini_set(g_vkbd, 0, VKBD_Y, "6.0") < 0; }
+            if (vfix_state() >= 0) { /* the Versus Fix: back to its defaults */
+                UiSettings d;
+                memset(&d, 0, sizeof d);
+                char a[900], b2[900], c2[900], ini[900];
+                vfix_paths(a, b2, c2, ini, sizeof a);
+                remove(ini);
+                vfix_read(&d);
+                err |= !vfix_write(&d);
+            }
             set_say(err ? "! Reset: some files couldn't be written (are they read-only?)."
-                        : !g_vprf[0] ? "! Reset: no Versus profile found yet - nothing to reset."
-                        : "Reset: Versus settings are the game's own again: mouse sensitivity 10, mouse multiplier 6 (the resolution is kept).");
+                        : "Reset: Versus is back to the game's own settings (mouse sensitivity 10, multiplier 6) and the Versus Fix "
+                          "to its defaults (60 FPS, mouse 125 Hz, HUD fix, game FOV and turning).");
         }
         mf_recheck();
     }
@@ -2794,6 +2955,8 @@ static void settings_publish(void)
     u->vsens = u->found ? num_at(set_value(g_mfs, g_nmfs, "v_sens"), 100) : 0;
     u->vmult = u->found ? num_at(set_value(g_mfs, g_nmfs, "v_mult"), 100) : 0;
     u->have_vprofile = g_vprf[0] != 0;
+    u->vfix = u->found ? vfix_state() : -1;
+    vfix_read(u);
     const char *rm = u->found ? set_value(g_mfs, g_nmfs, "rawmouse") : 0;
     u->rawmouse = rm ? !strcmp(rm, "on") : -1;
     ui_settings(u);
@@ -2843,6 +3006,9 @@ static void mods_local_text(void)
         int vm = versus_mod(g_mfs, g_nmfs);
         sfmt(o + k, n - k, vm == 1 ? "+SCCT Versus Reloaded installed (modded SCCT_Versus.exe)\n"
                            : vm == 0 ? " No Versus mod (plain Versus)\n" : "!Versus wasn't found in the game's folder\n");
+        k = strlen(o);
+        const char *vf = set_value(g_mfs, g_nmfs, "vfix");
+        if (vf) sfmt(o + k, n - k, !strcmp(vf, "installed") ? "+Versus Fix installed\n" : " Versus Fix not installed\n");
     } else {
         int fx = scctfix_state();
         sfmt(o + k, n - k, fx == 1 ? "+SCCT Fix installed\n" : "!SCCT Fix not installed - co-op needs it (Settings tab)\n");
@@ -2927,6 +3093,9 @@ static void mf_report(Peer *p, bool they_found)
         int vm = versus_mod(theirs, nt);
         sfmt(o + k, on - k, vm == 1 ? "+SCCT Versus Reloaded installed (modded SCCT_Versus.exe)\n"
                             : vm == 0 ? " No Versus mod (plain Versus)\n" : "!Versus wasn't found in the game's folder\n");
+        k = strlen(o);
+        const char *vf = set_value(theirs, nt, "vfix");
+        if (vf) sfmt(o + k, on - k, !strcmp(vf, "installed") ? "+Versus Fix installed\n" : " Versus Fix not installed\n");
         k = strlen(o);
     } else {
         const char *fx = set_value(theirs, nt, "scctfix");
@@ -3433,6 +3602,9 @@ static void handle_cmd(const Cmd *c)
         break;
     case CMD_APPLY_SETTINGS: apply_settings(c->arg); break;
     case CMD_SCCTFIX: scctfix(c->arg != 0); break;
+    case CMD_VFIX: vfix(c->arg != 0); break;
+    case CMD_APPLY_VFIX: apply_vfix(c->arg, false); break;
+    case CMD_APPLY_VFIX2: apply_vfix(c->arg, true); break;
     case CMD_RAWMOUSE: rawmouse(c->arg != 0); break;
     case CMD_APPLY_MOUSE: apply_mouse(c->arg); break;
     case CMD_APPLY_VERSUS: apply_versus(c->arg); break;

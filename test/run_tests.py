@@ -861,6 +861,52 @@ def main():
               "Reset (Versus): sensitivity 10, multiplier 6, resolution kept")
         se.stop()
 
+        print("[21] Versus Fix: install, its settings (SCCTVersusFix.ini), the Mods tab, remove")
+        vf = dict(base)
+        vf["Versus/System/SCCT_Versus.exe"] = b"MZ" + b"v" * 4000
+        vf["Versus/System/Default.ini"] = b"[WinDrv.WindowsClient]\r\nFullscreenViewportX=1600\r\n"
+        gv = game_dir("vfix", vf)
+        exe_v = os.path.join(d, "exe_v")
+        os.makedirs(exe_v, exist_ok=True)
+        shutil.copy(os.path.join(ROOT, "build", "fix", "d3d8.dll"), os.path.join(exe_v, "SCCTVersusFix-d3d8.dll"))
+        vsys = os.path.join(gv, "Versus", "System")
+        vx = relay(A, "VX", 1200, "", ["idle", "--versus"], d, {"MOCK_GAME_DIR": gv, "MOCK_EXE_DIR": exe_v}, stdin=subprocess.PIPE)
+        procs.append(vx)
+        check(vx.wait_for(r"\[settings\] vfix 0 fps 60 res 0x0 hud 1 rate125 1 fov 0 0 turn 100 100", timeout=10) is not None,
+              "Versus Fix not installed yet; its defaults: 60 FPS, HUD fix, mouse 125 Hz, the game's FOV and turning")
+        mk = vx.mark()
+        vx.p.stdin.write("Y\n1\n"); vx.p.stdin.flush()
+        check(vx.wait_for(r"Versus Fix installed", timeout=10, since=mk) is not None
+              and vx.wait_for(r"\[settings\] vfix 1 ", timeout=5, since=mk) is not None, "Versus Fix installed")
+        with open(os.path.join(vsys, "d3d8.dll"), "rb") as f, open(os.path.join(ROOT, "build", "fix", "d3d8.dll"), "rb") as g:
+            check(f.read() == g.read(), "...as Versus\\System\\d3d8.dll, the exact file")
+        check(os.path.exists(os.path.join(vsys, "SCCTVersusFix.ini")), "...with SCCTVersusFix.ini (its defaults)")
+        check(vx.wait_for(r"\[mods\] \+Versus Fix installed", timeout=5, since=mk) is not None, "the Mods tab shows it")
+        mk = vx.mark()
+        vx.p.stdin.write("P\n120 1920 1080 1 0 90 110\n"); vx.p.stdin.flush()
+        check(vx.wait_for(r"\[settings\] vfix 1 fps 120 res 1920x1080 hud 1 rate125 0 fov 90 110 turn 100 100", timeout=10, since=mk)
+              is not None, "Versus Fix settings saved: 120 FPS, 1920x1080, mouse as it comes, FOV 90 / 110")
+        mk = vx.mark()
+        vx.p.stdin.write("N\n250 300\n"); vx.p.stdin.flush()
+        check(vx.wait_for(r"\[settings\] vfix 1 fps 120 res 1920x1080 hud 1 rate125 0 fov 90 110 turn 250 300", timeout=10, since=mk)
+              is not None, "turning speed saved")
+        with open(os.path.join(vsys, "SCCTVersusFix.ini"), "rb") as f:
+            ini = f.read()
+        check(b"MaxFPS=120\r\n" in ini and b"Resolution=1920x1080\r\n" in ini and b"Rate125=0\r\n" in ini
+              and b"Spy=90\r\n" in ini and b"Merc=110\r\n" in ini and b"Spy=2.50\r\n" in ini and b"Merc=3.00\r\n" in ini,
+              "SCCTVersusFix.ini has them, as the fix reads them")
+        mk = vx.mark()
+        vx.p.stdin.write("Y\n0\n"); vx.p.stdin.flush()
+        check(vx.wait_for(r"Versus Fix removed", timeout=10, since=mk) is not None and not os.path.exists(os.path.join(vsys, "d3d8.dll")),
+              "Versus Fix removed")
+        with open(os.path.join(exe_v, "SCCTVersusFix-d3d8.dll"), "ab") as f:
+            f.write(b"x")  # a changed file is never installed
+        mk = vx.mark()
+        vx.p.stdin.write("Y\n1\n"); vx.p.stdin.flush()
+        check(vx.wait_for(r"is not the expected file, so it was NOT installed", timeout=10, since=mk) is not None
+              and not os.path.exists(os.path.join(vsys, "d3d8.dll")), "a file that isn't the pinned one is refused")
+        vx.stop()
+
         print("[13] bad internet: 10% packet loss each way and 60 ms delay each way")
         h10, j10, hg10, jg10 = session("    (setup)", d, A, B, extra={"MOCK_LOSS": "10", "MOCK_DELAY_MS": "60"}, n_stream=1000)
         procs += [h10, j10, hg10, jg10]

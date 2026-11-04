@@ -1,4 +1,4 @@
-SCCTLink 0.9.9.1 - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
+SCCTLink 0.9.9.2 - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
 ==============================================================================
 
 No VPN (no Hamachi, Radmin or ZeroTier), no port forwarding, no IP addresses.
@@ -13,7 +13,7 @@ Both players need:
   * each other on their Steam friends list
   * this folder unzipped somewhere (Desktop is fine). Keep SCCTLink.exe,
     steam_api.dll and SCCTFix-d3d9.dll together.
-  * the SAME SCCTLink version (0.9.9.1).
+  * the SAME SCCTLink version (0.9.9.2).
 
 
 HOW TO PLAY
@@ -267,6 +267,10 @@ and the SCCT Fix are hidden.
 0.9.9: Settings: mouse sensitivity, aim turn speed and Reset; Versus gets its
 own Settings (mouse sensitivity, mouse multiplier); the Mods tab says on top
 whether all party members match.
+0.9.9.2 (testing): the Versus Fix (Settings tab, Versus): no 30 FPS limit,
+the mouse as 125 reports a second (fast mice made Versus' aim zigzag), FOV
+for spies and mercenaries, a wider resolution, the HUD not stretched,
+turning speed.
 0.9.9.1: Live stats shows Versus' frame rate (Direct3D 8, read from the
 graphics kernel's events); Versus' resolution field removed (Versus resets it).
 0.9.8.2: Raw mouse button in the Settings tab (no mouse acceleration); the

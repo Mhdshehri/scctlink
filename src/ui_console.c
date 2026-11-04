@@ -37,6 +37,8 @@ void ui_settings(const UiSettings *s)
     printf("[settings] rawmouse %d friend %d\n", s->rawmouse, s->friend_ ? s->frawmouse : -2);
     printf("[settings] mouse sens %d turn %d friend %d %d\n", s->sens, s->turn, s->friend_ ? s->fsens : -2, s->friend_ ? s->fturn : -2);
     printf("[settings] versus %dx%d sens %d mult %d profile %d\n", s->vw, s->vh, s->vsens, s->vmult, s->have_vprofile);
+    printf("[settings] vfix %d fps %d res %dx%d hud %d rate125 %d fov %d %d turn %d %d\n", s->vfix, s->vf_fps, s->vf_w, s->vf_h,
+           s->vf_hud, s->vf_rate125, s->vf_spyfov, s->vf_mercfov, s->vf_spyturn, s->vf_mercturn);
     printf("[settings] scctfix %d mine %dx%d fov %d fps %d ws %d", s->scctfix, s->w, s->h, s->fov, s->fps, s->wsfov);
     if (s->friend_) printf(" | %s %dx%d fov %d fps %d ws %d", s->friend_name, s->fw, s->fh, s->ffov, s->ffps, s->fwsfov);
     printf("\n");
@@ -136,6 +138,27 @@ bool ui_poll(Cmd *c)
         }
         c->kind = vs ? CMD_APPLY_VERSUS : CMD_APPLY_MOUSE;
         c->arg = vs ? versus_pack(v[0], v[1], v[2], v[3]) : mouse_pack(v[0], v[1]);
+        break;
+    }
+    case 'y': case 'Y': /* the Versus Fix button: then "1" (install) or "0" (remove) */
+        c->kind = CMD_VFIX;
+        c->arg = read_line(line, sizeof line) && line[0] == '1';
+        break;
+    case 'p': case 'P': /* Versus Fix settings: "fps w h hud rate125 spyfov mercfov" */
+    case 'n': case 'N': { /* Versus Fix turning: "spy*100 merc*100" */
+        int v[7] = { 0, 0, 0, 0, 0, 0, 0 };
+        bool turns = (key | 32) == 'n';
+        if (read_line(line, sizeof line)) {
+            int k = 0;
+            for (char *p = line; *p && k < 7;) {
+                while (*p == ' ') p++;
+                if (!*p) break;
+                v[k++] = atoi(p);
+                while (*p && *p != ' ') p++;
+            }
+        }
+        c->kind = turns ? CMD_APPLY_VFIX2 : CMD_APPLY_VFIX;
+        c->arg = turns ? ((u64)(v[0] & 65535) | (u64)(v[1] & 65535) << 16) : vfix_pack(v[0], v[1], v[2], v[3], v[4], v[5], v[6]);
         break;
     }
     case 'z': case 'Z': /* Reset: then "0" (co-op) or "1" (Versus) */
