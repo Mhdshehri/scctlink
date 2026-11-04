@@ -230,15 +230,15 @@ static long WINAPI hook_GetDeviceData(void *dev, DWORD size, DWORD *data, DWORD 
     g_last_read = now;
     if (!moves) { *n = keep; return hr; }
     /* how many 8 ms reports this read stands for (at least 1, at most what fits) */
-    DWORD reports = g_qpf ? (DWORD)((since * 125 + g_qpf / 2) / g_qpf) : 1;
+    DWORD reports = g_qpf ? (DWORD)((float)since * 125.0f / (float)g_qpf + 0.5f) : 1; /* (float: no 64-bit division helper here) */
     if (reports < 1) reports = 1;
     if (reports > 16) reports = 16;
     while (reports > 1 && keep + 2 * reports > cap) reports--;
     if (keep + 2 > cap) { *n = keep; return hr; } /* no room (never seen): drop nothing important */
     long sx = dx, sy = dy;
     for (DWORD r = 0; r < reports; r++) {
-        long px = (long)(sx * (long long)(r + 1) / (long)reports) - (long)(sx * (long long)r / (long)reports);
-        long py = (long)(sy * (long long)(r + 1) / (long)reports) - (long)(sy * (long long)r / (long)reports);
+        long px = sx * (long)(r + 1) / (long)reports - sx * (long)r / (long)reports;
+        long py = sy * (long)(r + 1) / (long)reports - sy * (long)r / (long)reports;
         DWORD vals[2] = { (DWORD)px, (DWORD)py }, offs[2] = { 0, 4 };
         for (int k = 0; k < 2; k++) {
             if (!vals[k]) continue;
