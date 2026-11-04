@@ -48,7 +48,7 @@ Chaos Theory's co-op runs the same simulation on both PCs (Quazal's *SyncSim*) a
 
 **Install SCCT Fix** (Settings tab) copies `SCCTFix-d3d9.dll` into the game's `System` folder as `d3d9.dll` and sets `StartupFullscreen=False` in `SplinterCell3.ini`. The DLL caps the game at 60 FPS, runs it in a borderless window, keeps Alt+Tab working and writes `System\SCCTFix.log` if the game crashes. With it on both PCs, co-op works: shooting, jumping, changing maps, no disconnects.
 
-- The SCCT Fix is built from source in this repo (`fix/d3d9fix.c`, `fix/build_fix.sh`): a line-for-line rewrite of the original made with its author's permission, plus an optional HUD fix for wide screens (Settings → **HUD fix**). SCCTLink copies the DLL only if its SHA-256 is the pinned one. It imports no network functions, starts no programs and writes no file except its log. The **Versus Fix** (`fix/d3d8versus.c`) is built and pinned the same way.
+- The SCCT Fix is built from source in this repo (`fix/d3d9fix.c`, `fix/build_fix.sh`): a line-for-line rewrite of the original made with its author's permission, plus an optional HUD fix for wide screens (Settings → **HUD fix**), ported from ThirteenAG's [FusionFix](https://github.com/ThirteenAG/WidescreenFixesPack) (MIT, see `THIRD-PARTY.txt`). SCCTLink copies the DLL only if its SHA-256 is the pinned one. It imports no network functions, starts no programs and writes no file except its log. The **Versus Fix** (`fix/d3d8versus.c`) is built and pinned the same way.
 - A `d3d9.dll` that is already there (another mod) is kept as `d3d9.dll.scctlink-backup`. **Remove SCCT Fix** puts it back and sets fullscreen again.
 - The **Mods** tab checks that your friend has it too.
 

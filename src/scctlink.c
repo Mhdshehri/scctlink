@@ -2313,7 +2313,7 @@ static int ini_set(const char *path, const char *section, const char *key, const
    SHA-256 is exactly this one (checked: no network functions, starts no
    programs, only writes System\SCCTFix.log). */
 #define SCCTFIX_FILE "SCCTFix-d3d9.dll"
-#define SCCTFIX_SHA "2228214d27cb77ad2b13e63510bad49bab834eba7ce8665e8a55371419994ea4" /* ours: fix/d3d9fix.c (fix/build_fix.sh) */
+#define SCCTFIX_SHA "b5624f3f18d4c775f1aca05c8e0fffabcc2aaf523321073f558f2a9d815985da" /* ours: fix/d3d9fix.c (fix/build_fix.sh) */
 #define SCCTFIX_OLD_SHA "2f05d8e9e7aaf750eb2889c7ba57dd453820e3a794b9ba74c43730446a84cae9" /* the original; ours replaces it */
 bool sha256_file(const char *path, char hex[65]);
 static void scctfix_paths(char *src, char *dst, char *bak, char *ini, size_t n)
@@ -2330,7 +2330,14 @@ static int scctfix_state(void)
     char src[900], dst[900], bak[900], ini[900], hex[65];
     scctfix_paths(src, dst, bak, ini, sizeof src);
     if (!sha256_file(dst, hex)) return 0;
-    return !strcmp(hex, SCCTFIX_SHA) ? 1 : !strcmp(hex, SCCTFIX_OLD_SHA) ? 3 : 2;
+    /* earlier builds of ours (testing versions) are replaced like the original */
+    static const char *const ours[] = { "162255f10db01e864f79beb1005cccfedb6e7de0f1e377ccf28ce6b68454ac23",
+                                        "2c5fa6a505c3867db282523c5c00a7f66a6bfa5bc598078ee654a2445a9fd2f5",
+                                        "2228214d27cb77ad2b13e63510bad49bab834eba7ce8665e8a55371419994ea4" };
+    if (!strcmp(hex, SCCTFIX_SHA)) return 1;
+    if (!strcmp(hex, SCCTFIX_OLD_SHA)) return 3;
+    for (size_t i = 0; i < sizeof ours / sizeof *ours; i++) if (!strcmp(hex, ours[i])) return 3;
+    return 2;
 }
 static bool copy_file(const char *from, const char *to)
 {

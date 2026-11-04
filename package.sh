@@ -17,8 +17,8 @@ rm -rf dist && mkdir -p "$D"
 cp build/win/SCCTLink.exe "$DLL" "$D/"
 cp build/fix/d3d9.dll "$D/SCCTFix-d3d9.dll"
 cp build/fix/d3d8.dll "$D/SCCTVersusFix-d3d8.dll"
-sed "s/\r*$/\r/" package/README.txt > "$D/README.txt"; sed "s/\r*$/\r/" LICENSE > "$D/LICENSE.txt"  # Windows line endings
-(cd "$D" && sha256sum SCCTLink.exe steam_api.dll SCCTFix-d3d9.dll SCCTVersusFix-d3d8.dll README.txt LICENSE.txt > SHA256SUMS.txt)
+sed "s/\r*$/\r/" package/README.txt > "$D/README.txt"; sed "s/\r*$/\r/" LICENSE > "$D/LICENSE.txt"; sed "s/\r*$/\r/" THIRD-PARTY.txt > "$D/THIRD-PARTY.txt"  # Windows line endings
+(cd "$D" && sha256sum SCCTLink.exe steam_api.dll SCCTFix-d3d9.dll SCCTVersusFix-d3d8.dll README.txt LICENSE.txt THIRD-PARTY.txt > SHA256SUMS.txt)
 find "$D" -exec touch -d 2026-10-27T00:00:00Z {} +
 (cd dist && TZ=UTC zip -X -q -r "SCCTLink-$VER.zip" "SCCTLink-$VER")
 sha256sum "dist/SCCTLink-$VER.zip"
