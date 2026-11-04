@@ -282,6 +282,7 @@ def main():
         h7 = relay(A, "H7", 1031, "1032,1033,1034", ["host"], d)
         procs.append(h7)
         check(h7.wait_for(r"Lobby is ready") is not None, "host ready")
+        check(h7.wait_for(r"\[coop-flag\] 1", timeout=3) is not None, "co-op session: the flag for the SCCT Fix is up (60 FPS)")
         code = re.search(r"code (\S+),", h7.log).group(1)
         lobn = LOBBY_HIGH | int("".join("{:05b}".format("0123456789ABCDEFGHJKMNPQRSTVWXYZ".index(ch)) for ch in code.replace("-", "")), 2)
         lob = str(lobn)
@@ -784,6 +785,7 @@ def main():
               and hv.wait_for(r"only on your PC: versus/system/dinput8\.dll", timeout=5) is not None, "the Versus files that differ are listed")
         check("system/d3d9.dll" not in hv.log and "system/d3d9.dll" not in jv.log,
               "a co-op file (System\\d3d9.dll) is not compared in Versus")
+        check("[coop-flag] 1" not in hv.log and "[coop-flag] 1" not in jv.log, "Versus: no co-op flag (the SCCT Fix isn't used)")
         hv.stop(); jv.stop()
 
         print("[19] Raw mouse: part of the SCCT Fix (SCCTFix.ini [Mouse] Raw), the game's DirectInput mouse off")
@@ -822,6 +824,18 @@ def main():
         check(rm.wait_for(r"\[settings\] rawmouse 0 ", timeout=10, since=mk) is not None, "Raw mouse off again")
         with open(fix_m, "rb") as f:
             check(b"Raw=0\r\n" in f.read(), "...Raw=0 in SCCTFix.ini")
+        check(rm.wait_for(r"\[settings\] chud \d skipintro -?\d spfps 60", timeout=5) is not None, "single-player FPS: 60 until it's changed")
+        mk = rm.mark()
+        rm.p.stdin.write("E\n-1\n"); rm.p.stdin.flush()
+        check(rm.wait_for(r"\[settings\] chud \d skipintro -?\d spfps -1", timeout=10, since=mk) is not None
+              and rm.wait_for(r"Single player: your screen's refresh rate", timeout=5, since=mk) is not None, "single-player FPS: the screen's")
+        with open(fix_m, "rb") as f:
+            t = f.read()
+        check(b"SingleFPS=-1\r\n" in t and b"Raw=0\r\n" in t, "...SingleFPS=-1 in SCCTFix.ini, the other settings kept")
+        mk = rm.mark()
+        rm.p.stdin.write("E\n0\n"); rm.p.stdin.flush()
+        check(rm.wait_for(r"spfps 0\n", timeout=10, since=mk) is not None, "single-player FPS: no limit")
+        check("[coop-flag] 1" not in rm.log, "...not in a session: no co-op flag")
         rm.stop()
 
         print("[20] Settings: co-op mouse (sensitivity, aim turn speed), Versus settings, Reset")

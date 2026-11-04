@@ -58,6 +58,9 @@ void clipboard_set(const char *text);
 int clipboard_get(char *out, int n); /* text on the clipboard, 0 if none */
 #define KEY_PASTE 22                  /* key_poll() value for Ctrl+V */
 void open_url(const char *url);
+/* While on: the named event Local\\SCCTLinkCoop exists (this PC only). The SCCT
+   Fix in the game sees it and keeps 60 FPS during a co-op session. */
+void plat_coop_flag(bool on);
 void show_in_folder(const char *path); /* opens the file's folder with the file selected */
 bool file_exists(const char *path);
 /* Files and folders directly inside dir (not recursive, no "." / ".."). */

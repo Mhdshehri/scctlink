@@ -2049,7 +2049,7 @@ typedef struct { const char *key, *label; bool must_match; } SetDef;
 static const SetDef SETS[] = {
     { "res", "Resolution", false },
     { "fov", "FOV", true },
-    { "fps", "FPS limit (game)", true },
+    { "fps", "FPS limit (game)", false }, /* [SIMULATION] MAXFPS: the game doesn't read it; the SCCT Fix sets the rate */
     { "otherws", "Another widescreen mod (remove it: the SCCT Fix has its own)", true },
     { "scctfix", "SCCT Fix (60 FPS cap, borderless)", true },
     { "fullscreen", "Starts in fullscreen", true },
@@ -2315,7 +2315,7 @@ static int ini_set(const char *path, const char *section, const char *key, const
    SHA-256 is exactly this one (checked: no network functions, starts no
    programs, only writes System\SCCTFix.log). */
 #define SCCTFIX_FILE "SCCTFix-d3d9.dll"
-#define SCCTFIX_SHA "9b73fe61a3eba66ebd91ffdbc20a59b0a217b3fba61d5facf7b327f2514c0a97" /* ours: fix/d3d9fix.c (fix/build_fix.sh) */
+#define SCCTFIX_SHA "ab388fcc1ec495675a3ad4fa3c96b426654f4201a7672d58f597f8afa709cf86" /* ours: fix/d3d9fix.c (fix/build_fix.sh) */
 #define SCCTFIX_OLD_SHA "2f05d8e9e7aaf750eb2889c7ba57dd453820e3a794b9ba74c43730446a84cae9" /* the original; ours replaces it */
 bool sha256_file(const char *path, char hex[65]);
 static void scctfix_paths(char *src, char *dst, char *bak, char *ini, size_t n)
@@ -2336,7 +2336,8 @@ static int scctfix_state(void)
     static const char *const ours[] = { "162255f10db01e864f79beb1005cccfedb6e7de0f1e377ccf28ce6b68454ac23",
                                         "2c5fa6a505c3867db282523c5c00a7f66a6bfa5bc598078ee654a2445a9fd2f5",
                                         "2228214d27cb77ad2b13e63510bad49bab834eba7ce8665e8a55371419994ea4",
-                                        "b5624f3f18d4c775f1aca05c8e0fffabcc2aaf523321073f558f2a9d815985da" };
+                                        "b5624f3f18d4c775f1aca05c8e0fffabcc2aaf523321073f558f2a9d815985da",
+                                        "9b73fe61a3eba66ebd91ffdbc20a59b0a217b3fba61d5facf7b327f2514c0a97" };
     if (!strcmp(hex, SCCTFIX_SHA)) return 1;
     if (!strcmp(hex, SCCTFIX_OLD_SHA)) return 3;
     for (size_t i = 0; i < sizeof ours / sizeof *ours; i++) if (!strcmp(hex, ours[i])) return 3;
@@ -2358,7 +2359,8 @@ static bool copy_file(const char *from, const char *to)
 static void set_say(const char *fmt, ...);
 static void mf_recheck(void);
 static UiSettings g_uiset;
-static bool scfini_write(int hud, int raw);
+static bool scfini_write(int hud, int raw, int spfps);
+static int spfps_state(void);
 static void chud_path(char *p, size_t n);
 static const char *ini_path_fix(void)
 {
@@ -2403,13 +2405,13 @@ static void scctfix_(bool install)
     }
     /* first install: its settings on (widescreen HUD, raw mouse) */
     if (st != 1 && !file_exists(ini_path_fix())) {
-        if (scfini_write(1, 1)) ini_set(ini, "Init", "UseDIMouse", "False");
+        if (scfini_write(1, 1, 60)) ini_set(ini, "Init", "UseDIMouse", "False");
     }
     /* the tested setup also starts the game in a window (the fix makes it borderless) */
     if (ini_set(ini, "WinDrv.WindowsClient", "StartupFullscreen", "False") < 0)
         say("! SCCT Fix: couldn't set StartupFullscreen=False in SplinterCell3.ini.");
     set_say(st == 1 ? "SCCT Fix: already installed (StartupFullscreen=False checked)."
-                    : "SCCT Fix installed: 60 FPS sync, borderless window, widescreen HUD, raw mouse. Both players need it.");
+                    : "SCCT Fix installed: 60 FPS sync, borderless window, widescreen HUD, raw mouse, no intro videos. Both players need it.");
 }
 /* The SCCT Fix's HUD fix (co-op): System\SCCTFix.ini [HUD] Fix=1. It only
    changes how the HUD is drawn, so the two players may differ. */
@@ -2422,14 +2424,16 @@ static int chud_state(void)
     return ini_get(p, "HUD", "Fix", v, sizeof v) && v[0] == '1';
 }
 /* SCCTFix.ini: written whole, with both of its settings. */
-static bool scfini_write(int hud, int raw)
+static bool scfini_write(int hud, int raw, int spfps)
 {
-    char p[900], t[600];
+    char p[900], t[900];
     chud_path(p, sizeof p);
     sfmt(t, sizeof t, "; SCCT Fix settings - written by SCCTLink.\r\n"
                       "[HUD]\r\n; 1 = the HUD, menus and text keep their shape on wide screens (4:3 in the middle).\r\nFix=%d\r\n"
-                      "[Mouse]\r\n; 1 = the mouse is read as Windows Raw Input: no acceleration, any polling rate.\r\nRaw=%d\r\n",
-         hud, raw);
+                      "[Mouse]\r\n; 1 = the mouse is read as Windows Raw Input: no acceleration, any polling rate.\r\nRaw=%d\r\n"
+                      "[Display]\r\n; single player only: 60, -1 = the screen's refresh rate, 0 = no limit.\r\n"
+                      "; In an SCCTLink co-op session the SCCT Fix keeps 60 by itself.\r\nSingleFPS=%d\r\n",
+         hud, raw, spfps);
     FILE *f = fopen(p, "wb");
     bool ok = f && fwrite(t, 1, strlen(t), f) == strlen(t);
     if (f && fclose(f) != 0) ok = false;
@@ -2442,12 +2446,39 @@ static int raw_state(void)
     chud_path(p, sizeof p);
     return ini_get(p, "Mouse", "Raw", v, sizeof v) && v[0] == '1';
 }
+/* Single player's FPS limit (60 if not set). */
+static int spfps_state(void)
+{
+    char p[900], v[16];
+    chud_path(p, sizeof p);
+    if (!ini_get(p, "Display", "SingleFPS", v, sizeof v)) return 60;
+    const char *c = v;
+    while (*c == ' ') c++;
+    bool neg = *c == '-';
+    if (neg) c++;
+    int n = 0;
+    while (*c >= '0' && *c <= '9' && n < 100000) n = n * 10 + (*c++ - '0');
+    if (neg) n = -n;
+    return n == -1 || n == 0 ? n : n < 30 ? 30 : n > 1000 ? 1000 : n;
+}
+static void spfps(int v)
+{
+    g_uiset.note[0] = 0;
+    g_uiset.note_warn = false;
+    if (chud_state() < 0) set_say("! FPS: the game's folder wasn't found (only Steam copies).");
+    else if (scctfix_state() != 1) set_say("! The single-player FPS limit is part of the SCCT Fix: install it first.");
+    else if (!scfini_write(chud_state() == 1, raw_state() == 1, v)) set_say("! FPS: couldn't write System\\SCCTFix.ini.");
+    else if (v == 60) set_say("Single player: 60 FPS (as in co-op).");
+    else set_say(v == -1 ? "Single player: your screen's refresh rate. In an SCCTLink co-op session the SCCT Fix keeps 60 by itself."
+                         : "Single player: no FPS limit. In an SCCTLink co-op session the SCCT Fix keeps 60 by itself.");
+    settings_publish();
+}
 static void chud(bool on)
 {
     g_uiset.note[0] = 0;
     g_uiset.note_warn = false;
     if (chud_state() < 0) set_say("! Widescreen HUD: the game's folder wasn't found (only Steam copies).");
-    else if (!scfini_write(on, raw_state() == 1)) set_say("! Widescreen HUD: couldn't write System\\SCCTFix.ini.");
+    else if (!scfini_write(on, raw_state() == 1, spfps_state())) set_say("! Widescreen HUD: couldn't write System\\SCCTFix.ini.");
     else set_say(on ? "Widescreen HUD on: the HUD and menus keep their shape (next time the game starts)." : "Widescreen HUD off.");
     settings_publish();
 }
@@ -2511,7 +2542,15 @@ static void scctfix(bool install)
 {
     g_uiset.note[0] = 0;
     g_uiset.note_warn = false;
+    bool first = install && scctfix_state() != 1 && !file_exists(ini_path_fix());
     scctfix_(install);
+    if (first && scctfix_state() == 1 && skipintro_state() == 0) { /* first install: no intro videos either */
+        char saved[400];
+        sfmt(saved, sizeof saved, "%s", g_uiset.note);
+        bool w = g_uiset.note_warn;
+        skipintro(true);
+        if (!g_uiset.note_warn) { sfmt(g_uiset.note, sizeof g_uiset.note, "%s", saved); g_uiset.note_warn = w; }
+    }
     mf_recheck(); /* the file list changed: show it and tell the friends */
     settings_publish();
 }
@@ -2680,7 +2719,7 @@ static void rawmouse(bool on)
     else {
         scctfix_paths(src, dst, bak, ini, sizeof src);
         if (ini_set(ini, "Init", "UseDIMouse", "False") < 0) set_say("! Raw mouse: couldn't write SplinterCell3.ini.");
-        else if (!scfini_write(chud_state() == 1, on)) set_say("! Raw mouse: couldn't write System\\SCCTFix.ini.");
+        else if (!scfini_write(chud_state() == 1, on, spfps_state())) set_say("! Raw mouse: couldn't write System\\SCCTFix.ini.");
         else set_say(on ? "Raw mouse on: no acceleration, any polling rate (next time the game starts)." : "Raw mouse off: the game's default mouse.");
     }
     mf_recheck();
@@ -3083,6 +3122,7 @@ static void settings_publish(void)
     u->have_vprofile = g_vprf[0] != 0;
     u->vfix = u->found ? vfix_state() : -1;
     u->chud = u->found ? chud_state() : -1;
+    u->spfps = u->found && u->chud >= 0 ? spfps_state() : -2;
     u->skipintro = u->found ? skipintro_state() : -1;
     vfix_read(u);
     const char *rm = u->found ? set_value(g_mfs, g_nmfs, "rawmouse") : 0;
@@ -3139,7 +3179,7 @@ static void mods_local_text(void)
         if (vf) sfmt(o + k, n - k, !strcmp(vf, "installed") ? "+Versus Fix installed\n" : " Versus Fix not installed\n");
     } else {
         int fx = scctfix_state();
-        sfmt(o + k, n - k, fx == 1 ? "+SCCT Fix " SCCTLINK_VERSION " installed\n+Widescreen: built into the SCCT Fix\n"
+        sfmt(o + k, n - k, fx == 1 ? "+SCCT Fix " SCCTLINK_VERSION " installed\n+Widescreen: built into the SCCT Fix\n+FPS: 60 during co-op (automatic)\n"
                                    : "!SCCT Fix not installed - co-op needs it (Settings tab)\n");
         k = strlen(o);
         if (g_otherws[0]) sfmt(o + k, n - k, "!Another widescreen mod (%s): not needed, remove it\n", g_otherws);
@@ -3230,7 +3270,7 @@ static void mf_report(Peer *p, bool they_found)
         k = strlen(o);
     } else {
         const char *fx = set_value(theirs, nt, "scctfix");
-        sfmt(o + k, on - k, fx && !strcmp(fx, "installed") ? "+SCCT Fix installed\n+Widescreen: built into the SCCT Fix\n"
+        sfmt(o + k, on - k, fx && !strcmp(fx, "installed") ? "+SCCT Fix installed\n+Widescreen: built into the SCCT Fix\n+FPS: 60 during co-op (automatic)\n"
                                                            : "!SCCT Fix not installed - co-op needs it (Settings tab)\n");
         k = strlen(o);
         const char *ow = set_value(theirs, nt, "otherws");
@@ -3644,7 +3684,7 @@ static void scctfix_warn(void)
 {
     if (g_versus || scctfix_state() == 1 || scctfix_state() < 0) return;
     say("! The SCCT Fix isn't installed. Co-op disconnects as soon as someone draws a weapon without it.");
-    say("  Close the game, open the Settings tab and click \"Install SCCT Fix\" (both players).");
+    say("  Close the game, open the Settings tab and click \"Install\" at the top (SCCT Fix, both players).");
 }
 
 static void make_status(UiState *st)
@@ -3731,6 +3771,7 @@ static void handle_cmd(const Cmd *c)
     case CMD_STATUS: status(false); break;
     case CMD_DETAILS: status(true); ring_dump("Details"); break;
     case CMD_RECHECK:
+        if (!g_steam_ok && (g_steam_ok = steam_start())) { mf_make(); scctfix_warn(); } /* Steam started after SCCTLink */
         if (!g_steam_ok) { say("Steam isn't running, so the game's folder can't be found."); break; }
         mf_recheck();
         say("Game files checked again.");
@@ -3739,6 +3780,7 @@ static void handle_cmd(const Cmd *c)
     case CMD_SCCTFIX: scctfix(c->arg != 0); break;
     case CMD_VFIX: vfix(c->arg != 0); break;
     case CMD_CHUD: chud(c->arg != 0); break;
+    case CMD_SPFPS: spfps(c->arg == 0xffff ? -1 : c->arg == 0 ? 0 : (int)c->arg); break;
     case CMD_SKIPINTRO: skipintro(c->arg != 0); break;
     case CMD_APPLY_VFIX: apply_vfix(c->arg, false); break;
     case CMD_APPLY_VFIX2: apply_vfix(c->arg, true); break;
@@ -3806,6 +3848,7 @@ void engine_run(const EngineOpts *o, Cmd first)
         }
         u64 t = now_ms();
         if (g_mode != prev_mode) { last_scan = 0; last_friends = 0; prev_mode = g_mode; }
+        plat_coop_flag(g_mode != MODE_IDLE && !g_versus); /* the SCCT Fix: 60 FPS while in a co-op session */
         if (g_mode != MODE_IDLE) {
             scan_game(0);
             u64 sig = ports_signature();

@@ -166,7 +166,7 @@ enum {
     ID_SL_VFPS, ID_SET_VFPS, ID_SET_VHUD, ID_SET_VRATE, ID_SL_VFOV, ID_SET_VFOVS, ID_SET_VFOVM, ID_SL_VTURN, ID_SET_VTURNS,
     ID_SET_VTURNM, ID_SF_VFOV, ID_SET_CHUD, ID_SET_INTRO,
     /* the Settings tab's banner, section titles and notes */
-    ID_SET_BANNER, ID_SET_BANSUB, ID_SEC_DISP, ID_SEC_MOUSE, ID_SEC_CLASS, ID_SET_RAWNOTE, ID_SET_VRATENOTE,
+    ID_SET_BANNER, ID_SET_BANSUB, ID_SEC_DISP, ID_SEC_MOUSE, ID_SEC_CLASS, ID_SET_RAWNOTE, ID_SET_VRATENOTE, ID_SET_SPFPS,
     ID_SET_APPLY, ID_STATS,
     ID_GAMEMODE, /* keep last */
 };
@@ -755,8 +755,10 @@ static void build(void)
     ctl(ID_FOV1610, B, WTEXT("16:10"), OD, 0, 285, 494, 40, 24, g_font);
     ctl(ID_FOV169, B, WTEXT("16:9"), OD, 0, 328, 494, 34, 24, g_font);
     ctl(ID_SF_FOV, T_, WTEXT(""), ELL, 0, 370, 498, 206, 18, g_font);
-    ctl(ID_SET_CHUD, B, WTEXT("Widescreen HUD"), OD, 0, 28, 522, 220, 24, g_font);
-    ctl(ID_SET_INTRO, B, WTEXT("Skip intro videos"), OD, 0, 300, 522, 220, 24, g_font);
+    ctl(ID_SET_CHUD, B, WTEXT("Widescreen HUD"), OD, 0, 28, 522, 172, 24, g_font);
+    ctl(ID_SET_INTRO, B, WTEXT("Skip intro videos"), OD, 0, 206, 522, 180, 24, g_font);
+    /* single player's frame rate (co-op is always 60): click for 60 / the screen's / no limit */
+    ctl(ID_SET_SPFPS, B, WTEXT("Single player: 60 FPS"), OD, 0, 392, 522, 180, 24, g_font);
     ctl(ID_SET_MOUSE, B, WTEXT("Raw mouse"), OD, 0, 28, 576, 150, 24, g_font);
     ctl(ID_SET_RAWNOTE, T_, WTEXT("no acceleration, any polling rate (in the SCCT Fix)"), ELL, 0, 186, 580, 390, 18, g_font);
     /* not shown any more (the SCCT Fix keeps 60 FPS; no other widescreen fix is needed), still read for the check */
@@ -802,7 +804,7 @@ static bool set_versus_only(int id) { return (id >= ID_SL_VFPS && id <= ID_SF_VF
 static bool set_coop_only(int id)
 {
     return id == ID_SL_FOV || id == ID_SET_FOV || id == ID_SF_FOV || id == ID_SET_FRIEND || id == ID_SET_MOUSE ||
-           (id >= ID_FOV43 && id <= ID_FOV169) || id == ID_SET_CHUD || id == ID_SET_INTRO || id == ID_SET_RAWNOTE;
+           (id >= ID_FOV43 && id <= ID_FOV169) || id == ID_SET_CHUD || id == ID_SET_INTRO || id == ID_SET_RAWNOTE || id == ID_SET_SPFPS;
 }
 static void move_ctl(int id, int x, int y) { SetWindowPos(g_c[id], 0, S_(x), S_(y), 0, 0, 0x1 | 0x4 | 0x10 /* no size, z-order, activate */); }
 /* a framed text box: the frame at x, y, the box inside it */
@@ -882,7 +884,7 @@ static void build_howto(const UiState *s, char *o, int n)
             "- Only people on your Steam friends list can link. Kick removes someone until you click Stop.\r\n"
             "- Game running as administrator? Then run SCCTLink as administrator too (both the same).\r\n"
             "- Same SCCTLink version, same game files and same mods on every PC (see the Mods tab).\r\n"
-            "- Co-op: click \"Install SCCT Fix\" in the Settings tab on every PC (60 FPS cap), or it disconnects.",
+            "- Co-op: open the Settings tab and click \"Install\" (SCCT Fix) on every PC, or it disconnects.",
             s->versus ? "VERSUS" : "CO-OP",
             mark(s, 0, open), mark(s, 1, open), game, create, mark(s, 2, open), mark(s, 3, open));
     } else if (s->mode == MODE_JOIN) {
@@ -896,7 +898,7 @@ static void build_howto(const UiState *s, char *o, int n)
             "- Keep SCCTLink open the whole time you play.\r\n"
             "- Game running as administrator? Then run SCCTLink as administrator too (both the same).\r\n"
             "- Same SCCTLink version, same game files and same mods as the host (see the Mods tab).\r\n"
-            "- Co-op: click \"Install SCCT Fix\" in the Settings tab (the host needs it too), or it disconnects.\r\n"
+            "- Co-op: open the Settings tab and click \"Install\" (SCCT Fix; the host needs it too), or it disconnects.\r\n"
             "- Can't join? Click Details, then Log -> Copy log, and send it with the host's log.",
             s->versus ? "VERSUS" : "CO-OP",
             mark(s, 0, open), mark(s, 1, open), mark(s, 2, open), game, joinm, mark(s, 3, open));
@@ -911,7 +913,7 @@ static void build_howto(const UiState *s, char *o, int n)
             "SCCTLink version, and to be Steam friends with the host.\r\n\r\n"
             "Before your first game: Steam -> right-click the game -> Properties -> Installed Files\r\n"
             "-> Verify integrity of game files. Use the same mods on every PC.\r\n"
-            "For co-op, everyone clicks \"Install SCCT Fix\" in the Settings tab (with the game closed).\r\n\r\n"
+            "For co-op, everyone opens the Settings tab and clicks \"Install\" (SCCT Fix, with the game closed).\r\n\r\n"
             "In the steps, [x] = done and [>] = what to do now.\r\n"
             "Everything SCCTLink does is in the Log (a dot on Log = something needs a look).\r\n"
             "The Mods tab compares your game files and mods with your friend's when you link.");
@@ -1077,6 +1079,9 @@ static void show_settings(const UiSettings *n)
     bool fixed = !vs && n->scctfix == 1;
     EnableWindow(g_c[ID_SET_CHUD], n->chud >= 0 && fixed);
     EnableWindow(g_c[ID_SET_INTRO], n->skipintro >= 0);
+    set_text(ID_SET_SPFPS, n->spfps == -1 ? "Single player: screen's Hz" : n->spfps == 0 ? "Single player: no limit"
+                         : n->spfps > 0 && n->spfps != 60 ? "Single player: custom FPS" : "Single player: 60 FPS");
+    EnableWindow(g_c[ID_SET_SPFPS], fixed && n->spfps > -2);
     RedrawWindow(g_c[ID_SET_CHUD], 0, 0, 0x1 | 0x4);
     RedrawWindow(g_c[ID_SET_INTRO], 0, 0, 0x1 | 0x4);
     RedrawWindow(g_c[ID_SET_MOUSE], 0, 0, 0x1 | 0x4);
@@ -1580,6 +1585,11 @@ static void on_command(int id, int code)
         set_text(ID_SET_NOTE, "Working...");
         push_cmd(CMD_SKIPINTRO, g_set.skipintro == 1 ? 0 : 1);
         break;
+    case ID_SET_SPFPS: /* 60 -> the screen's -> no limit -> 60 */
+        g_set_warn = false;
+        set_text(ID_SET_NOTE, "Working...");
+        push_cmd(CMD_SPFPS, g_set.spfps == 60 ? 0xffff : g_set.spfps == -1 ? 0 : 60);
+        break;
     case ID_SET_CHUD:
         g_set_warn = false;
         set_text(ID_SET_NOTE, "Working...");
@@ -1589,7 +1599,7 @@ static void on_command(int id, int code)
     case ID_SET_VRATE: g_vf_rate = !g_vf_rate; vf_switch_texts(); set_text(ID_SET_NOTE, "Click Apply to save."); break;
     case ID_SET_RESET:
         if (MessageBoxW(g_wnd, g_shown.versus ? WTEXT("Put Versus back to the game's own settings?\n\nMouse sensitivity 10, multiplier 6; the Versus Fix: 60 FPS, mouse 125 Hz, HUD fix on, the game's FOV and turning, the game's resolution list.")
-                                              : WTEXT("Put co-op's settings back to the game's own?\n\nFOV 75, FPS limit 60, mouse sensitivity 100, aim turn speed 0.50.\nThe resolution and the SCCT Fix's switches are kept."),
+                                              : WTEXT("Put co-op's settings back to the game's own?\n\nFOV 75, mouse sensitivity 100, aim turn speed 0.50.\nThe resolution and the SCCT Fix's switches are kept."),
                         WTEXT("SCCTLink - Reset"), 0x1 | 0x20 /* OK, Cancel, question */) != 1)
             break;
         g_set_warn = false;
@@ -1691,6 +1701,12 @@ int main(int argc, char **argv)
     g_dpi = GetDeviceCaps(dc, LOGPIXELSY);
     ReleaseDC(0, dc);
     if (g_dpi < 96) g_dpi = 96;
+    { /* a small screen (a laptop at 150 %, 1366x768): draw a little smaller so the whole window fits */
+        int fit = GetSystemMetrics(62 /* SM_CYMAXIMIZED: the screen's height for a window */) - 16;
+        int need = BOX_Y + BOX_H + 14 + 32; /* the window at 96 dpi, with its title bar */
+        if (fit > 300 && need * g_dpi / 96 > fit) g_dpi = fit * 96 / need;
+        if (g_dpi < 72) g_dpi = 72;
+    }
     const WCHAR *face = WTEXT("Segoe UI");
     g_font = CreateFontW(-S_(12), 0, 0, 0, FW_NORMAL, 0, 0, 0, 1, 0, 0, CLEARTYPE_QUALITY, 0, face);
     g_bold = CreateFontW(-S_(12), 0, 0, 0, FW_BOLD, 0, 0, 0, 1, 0, 0, CLEARTYPE_QUALITY, 0, face);

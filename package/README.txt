@@ -23,8 +23,13 @@ Everyone double-clicks SCCTLink.exe. Windows asks "Do you want to allow..."
 inside Program Files). A window opens (dark, with a Light mode switch at the
 top right).
 
-FIRST TIME, CO-OP: close the game, open the Settings tab and click
-"Install SCCT Fix". Both players do this once.
+FIRST TIME, CO-OP: start the game once from Steam (so it makes its settings
+files) and close it. Then in SCCTLink open the Settings tab and click
+"Install" in the SCCT Fix banner at the top. Both players do this once. It
+turns on the widescreen HUD and raw mouse too.
+If Windows says "Windows protected your PC" the first time: click
+"More info", then "Run anyway" (SCCTLink isn't signed with a paid
+certificate; the files' SHA-256 checksums are in SHA256SUMS.txt).
 
   * The button next to "Join a friend" says Co-op or Versus. Click it to
     switch. Everyone picks the same one.
@@ -115,7 +120,12 @@ Settings = on top, the fix of this mode: installed (green) or not (red),
            The SCCT Fix has the widescreen HUD built in: you don't need
            another widescreen mod (the Mods tab says so if one is there -
            remove it, the two change the same code). No FPS limit to set
-           in co-op: the SCCT Fix keeps both PCs at 60.
+           in co-op: the SCCT Fix keeps both PCs at 60. For single player
+           the button "Single player: 60 FPS" switches to your screen's
+           refresh rate or no limit; as soon as you Host or Join a co-op
+           game in SCCTLink, the SCCT Fix goes back to 60 by itself (and
+           back to your choice when you Stop). Without SCCTLink (direct LAN
+           co-op) keep it at 60.
            Raw mouse (part of the SCCT Fix, on when it's installed): the
            mouse is read as Windows Raw Input - no acceleration, fast moves
            aren't cut short, any polling rate. Each player's own choice.
@@ -129,7 +139,7 @@ Without it, co-op disconnects as soon as someone draws a weapon or does an
 action. Chaos Theory's co-op runs the same simulation on both PCs and ends
 the session the moment they drift apart.
 
-"Install SCCT Fix" copies SCCTFix-d3d9.dll into the game's System folder as
+"Install" (SCCT Fix, top of the Settings tab) copies SCCTFix-d3d9.dll into the game's System folder as
 d3d9.dll and sets StartupFullscreen=False in SplinterCell3.ini. The DLL caps
 the game at 60 FPS, runs it in a borderless window, keeps Alt+Tab working and
 writes System\SCCTFix.log if the game crashes. With it on both PCs, co-op
@@ -139,7 +149,7 @@ works: shooting, jumping, changing maps, no disconnects.
     (see SHA256SUMS.txt). It's built from the source in fix/d3d9fix.c: no
     network functions, starts no programs, only writes its log.
   * If another d3d9.dll is there (another mod), it is renamed to
-    d3d9.dll.scctlink-backup. "Remove SCCT Fix" puts it back and sets
+    d3d9.dll.scctlink-backup. "Remove" puts it back and sets
     fullscreen again.
 
 
@@ -161,7 +171,7 @@ BEFORE YOU PLAY (avoids disconnects)
   * Install the SCCT Fix on both PCs (co-op).
   * Same files on both PCs: same patch, same language, same mods (or none).
     The Mods tab shows every difference.
-  * Same FOV and FPS limits on both PCs (the Mods tab flags differences; the
+  * Same FOV on both PCs (the Mods tab flags differences; the
     Settings tab or "Use friend's" fixes them).
   * If co-op saves/settings act strange: back up, then delete the game's
     settings folder in %PROGRAMDATA%\Ubisoft\ on both PCs so both start fresh.
@@ -191,7 +201,7 @@ SAFETY
     steam_appid.txt, scctlink.log and scctlink_cache.txt (checksums of the game
     files, so it opens quickly) in its own folder. In the game folder it
     only writes when you click "Apply" (the .ini files, with backups) or
-    "Install/Remove SCCT Fix" (System\d3d9.dll and StartupFullscreen).
+    "Install" / "Remove" (SCCT Fix) (System\d3d9.dll and StartupFullscreen).
   * Only the host's Steam friends who joined the lobby get through (others
     are refused by Steam before any data arrives). The lobby is friends-only;
     anyone else is blocked and shown in the window.
@@ -224,7 +234,7 @@ TROUBLESHOOTING
   Co-op disconnects when someone draws a weapon -> install the SCCT Fix on
     both PCs (Settings tab), then check the Mods tab: everything must match.
   "different SCCTLink version" -> both need the same SCCTLink zip.
-  "Install SCCT Fix" says the file is missing or not the expected one ->
+  "Install" (SCCT Fix) says the file is missing or not the expected one ->
     unzip SCCTLink again; SCCTFix-d3d9.dll must be next to SCCTLink.exe.
 
 
@@ -278,7 +288,11 @@ ported from ThirteenAG's FusionFix: no acceleration, any polling rate); the
 Settings tab is rebuilt (a banner for the fix, sections, I / O switches,
 Reset on its own); no FPS limit or widescreen FOV factor in co-op any more
 (the SCCT Fix keeps 60 FPS and has its own widescreen HUD); the Mods tab
-says when another widescreen mod is there.
+says when another widescreen mod is there; single player can have more FPS
+("Single player: 60 FPS / screen's Hz / no limit") - during an SCCTLink co-op
+session the SCCT Fix goes back to 60 by itself; the first install also skips
+the intro videos; the window fits small screens; "Check again" finds Steam
+if it was started after SCCTLink.
 0.9.9.6 (testing): new co-op HUD fix, ported from ThirteenAG's FusionFix (MIT,
 see THIRD-PARTY.txt): the HUD, menus and text are drawn 4:3 in the middle
 instead of stretched; full-screen pictures, the scope and the loading bar

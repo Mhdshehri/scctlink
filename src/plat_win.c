@@ -40,6 +40,7 @@ IMP BOOL WINAPI CreateProcessA(const char *app, char *cmd, void *pa, void *ta, B
 IMP BOOL WINAPI Process32First(HANDLE snap, void *entry);
 IMP BOOL WINAPI Process32Next(HANDLE snap, void *entry);
 IMP BOOL WINAPI CloseHandle(HANDLE h);
+IMP HANDLE WINAPI CreateEventA(void *sa, BOOL manual, BOOL initial, const char *name);
 IMP DWORD WINAPI GetCurrentProcessId(void);
 #define LOAD_LIBRARY_SEARCH_SYSTEM32 0x800
 IMP BOOL WINAPI OpenClipboard(HANDLE w);
@@ -752,4 +753,11 @@ void dir_list(const char *dir, DirFn fn, void *ctx)
         fn(ctx, fd.name, (fd.attr & 0x10) != 0, ((u64)fd.size_hi << 32) | fd.size_lo, ((u64)fd.t[5] << 32) | fd.t[4]); /* last write time */
     } while (FindNextFileA(h, &fd));
     FindClose(h);
+}
+
+void plat_coop_flag(bool on)
+{
+    static HANDLE e;
+    if (on && !e) e = CreateEventA(0, 1, 0, "Local\\SCCTLinkCoop");
+    else if (!on && e) { CloseHandle(e); e = 0; }
 }

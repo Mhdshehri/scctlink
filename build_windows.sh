@@ -19,7 +19,7 @@ mkdef kernel32 Sleep@4 GetTickCount64@0 SetConsoleCtrlHandler@8 GetModuleFileNam
     SetConsoleOutputCP@4 GetStdHandle@4 GetConsoleMode@8 SetConsoleMode@8 \
     GetNumberOfConsoleInputEvents@8 ReadConsoleInputW@16 LoadLibraryExA@12 GetProcAddress@8 \
     CreateToolhelp32Snapshot@8 Process32First@8 Process32Next@8 CloseHandle@4 GetCurrentProcessId@0 \
-    GetFileAttributesA@4 CreateProcessA@40 \
+    GetFileAttributesA@4 CreateProcessA@40 CreateEventA@16 \
     CreateThread@24 WaitForSingleObject@8 InitializeCriticalSection@4 EnterCriticalSection@4 \
     LeaveCriticalSection@4 MultiByteToWideChar@24 WideCharToMultiByte@32 GetModuleHandleW@4 GlobalFree@4 \
     FindFirstFileA@8 FindNextFileA@8 FindClose@4

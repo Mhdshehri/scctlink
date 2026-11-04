@@ -371,3 +371,12 @@ void dir_list(const char *dir, DirFn fn, void *ctx)
     }
     closedir(d);
 }
+
+void plat_coop_flag(bool on)
+{
+    static int last = -1;
+    if (last == (int)on) return;
+    last = on;
+    printf("[coop-flag] %d\n", (int)on); /* the tests read it */
+    fflush(stdout);
+}

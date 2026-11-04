@@ -8,6 +8,8 @@
  *   - 60 FPS cap: Present() waits until the next 1/60 s is due. Co-op runs the
  *     same simulation on both PCs in lockstep, and a frame rate far above 60
  *     made the two drift apart (the game disconnects when you draw a weapon).
+ *     Single player may choose another limit (SCCTFix.ini [Display]
+ *     SingleFPS); during an SCCTLink co-op session it is 60 regardless.
  *   - Borderless window: CreateDevice()/Reset() always ask for a window (no
  *     exclusive fullscreen, no V-Sync), and the window is made to fill its
  *     monitor with no border.
@@ -617,14 +619,69 @@ static void *hook_slot(void *obj, int slot, void *hook)
     return orig;
 }
 
+/* ---- the frame rate ----
+   Co-op: always 60 (the two PCs run the same simulation in lockstep). Single
+   player may choose (SCCTFix.ini [Display] SingleFPS: 60, -1 = the screen's
+   refresh rate, 0 = no limit). While SCCTLink is in a co-op session it holds a
+   named event, Local\SCCTLinkCoop (on this PC only, nothing on the network);
+   once a second the fix looks for it, and while it is there the limit is 60
+   whatever the setting. If SCCTLink runs as administrator and the game
+   doesn't, opening it is refused - which still means it is there. */
+IMP HANDLE WINAPI OpenEventA(DWORD, BOOL, const char *);
+IMP BOOL WINAPI CloseHandle(HANDLE);
+IMP DWORD WINAPI GetLastError(void);
+IMP BOOL WINAPI EnumDisplaySettingsA(const char *, DWORD, void *);
+static int g_fps = 60;        /* the limit now (0: none) */
+static LONGLONG g_fps_check;  /* when to look again */
+static int coop_session(void)
+{
+    HANDLE e = OpenEventA(0x00100000 /* SYNCHRONIZE */, 0, "Local\\SCCTLinkCoop");
+    if (e) { CloseHandle(e); return 1; }
+    return GetLastError() == 5 /* ERROR_ACCESS_DENIED: there, but SCCTLink is administrator */;
+}
+static int screen_hz(void)
+{
+    struct { DWORD size; RECT mon, work; DWORD flags; char device[32]; } mi;
+    struct { char name[32]; WORD spec, drv, size, extra; DWORD fields; BYTE u[16]; short color, duplex, yres, tt, collate;
+             char form[32]; WORD logpix; DWORD bits, w, h, flags, hz; BYTE rest[32]; } dm;
+    memset(&mi, 0, sizeof mi);
+    memset(&dm, 0, sizeof dm);
+    mi.size = sizeof mi;
+    dm.size = 156;
+    if (g_hwnd && GetMonitorInfoA(MonitorFromWindow(g_hwnd, 1), (MONITORINFO *)&mi) &&
+        EnumDisplaySettingsA(mi.device, (DWORD)-1 /* ENUM_CURRENT_SETTINGS */, &dm) && dm.hz > 1 && dm.hz < 1000)
+        return (int)dm.hz;
+    return 60;
+}
+static void fps_update(LONGLONG now)
+{
+    if (now < g_fps_check) return;
+    g_fps_check = now + g_freq;
+    int want = 60, coop = coop_session();
+    if (!coop) {
+        int v = GetPrivateProfileIntA("Display", "SingleFPS", 60, g_ini);
+        want = v == -1 ? screen_hz() : v == 0 ? 0 : v < 30 ? 30 : v > 1000 ? 1000 : v;
+    }
+    if (want == g_fps) return;
+    g_fps = want;
+    if (want) g_frame = (DWORD)g_freq / (DWORD)want;
+    g_next = 0;
+    char b[80];
+    if (coop) wsprintfA(b, "FPS: 60 (co-op session)\r\n");
+    else if (want) wsprintfA(b, "FPS: %d (single player)\r\n", want);
+    else wsprintfA(b, "FPS: no limit (single player)\r\n");
+    log_write(b, slen(b));
+}
+
 static HRESULT WINAPI hook_Present(void *dev, const void *src, const void *dst, HWND w, const void *dirty)
 {
     HRESULT hr = g_present(dev, src, dst, w, dirty);
     LONGLONG now;
     QueryPerformanceCounter(&now);
+    fps_update(now);
     if (!g_next) g_next = now;
     g_next += g_frame;
-    if (now >= g_next) g_next = now; /* late: don't try to catch up */
+    if (!g_fps || now >= g_next) g_next = now; /* no limit, or late: don't try to catch up */
     else
         while (g_next - now > 0) {
             if (g_next - now > g_spin) Sleep(1);
