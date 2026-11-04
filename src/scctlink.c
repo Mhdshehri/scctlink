@@ -2308,7 +2308,7 @@ static int ini_set(const char *path, const char *section, const char *key, const
    SHA-256 is exactly this one (checked: no network functions, starts no
    programs, only writes System\SCCTFix.log). */
 #define SCCTFIX_FILE "SCCTFix-d3d9.dll"
-#define SCCTFIX_SHA "162255f10db01e864f79beb1005cccfedb6e7de0f1e377ccf28ce6b68454ac23" /* ours: fix/d3d9fix.c (fix/build_fix.sh) */
+#define SCCTFIX_SHA "2c5fa6a505c3867db282523c5c00a7f66a6bfa5bc598078ee654a2445a9fd2f5" /* ours: fix/d3d9fix.c (fix/build_fix.sh) */
 #define SCCTFIX_OLD_SHA "2f05d8e9e7aaf750eb2889c7ba57dd453820e3a794b9ba74c43730446a84cae9" /* the original; ours replaces it */
 bool sha256_file(const char *path, char hex[65]);
 static void scctfix_paths(char *src, char *dst, char *bak, char *ini, size_t n)
@@ -2413,6 +2413,44 @@ static void chud(bool on)
     }
     settings_publish();
 }
+/* Skip the startup videos (Ubisoft logos, teaser, rating screen): SplinterCell3.ini
+   [GENERAL] names them; empty names skip them. The story's videos stay. */
+static const char *const INTRO_KEYS[3] = { "LogosVideo", "SplashVideo", "ESRBVideo" };
+static const char *const INTRO_FILES[3] = { "logos_PC.bik", "introteaser_PC.bik", "ESRB.bik" };
+static int skipintro_state(void)
+{
+    if (!g_steam_ok || g_nmfs <= 0 || !g_mf_dir[0]) return -1;
+    char p[900], v[64];
+    sfmt(p, sizeof p, "%s" PATHSEP "System" PATHSEP "SplinterCell3.ini", g_mf_dir);
+    if (!ini_get(p, "GENERAL", "SplashVideo", v, sizeof v)) {
+        FILE *f = fopen(p, "rb"); /* the key is there with an empty value: skipped */
+        if (!f) return -1;
+        fclose(f);
+        return 1;
+    }
+    return 0;
+}
+static void skipintro(bool on)
+{
+    g_uiset.note[0] = 0;
+    g_uiset.note_warn = false;
+    if (skipintro_state() < 0) set_say("! Intro: the game's folder wasn't found (only Steam copies).");
+    else if (game_is_running("splintercell3")) set_say("! Intro: close Splinter Cell first.");
+    else {
+        char p[900];
+        sfmt(p, sizeof p, "%s" PATHSEP "System" PATHSEP "SplinterCell3.ini", g_mf_dir);
+        int n = 0;
+        bool err = false;
+        for (int i = 0; i < 3; i++) {
+            int r = ini_set(p, "GENERAL", INTRO_KEYS[i], on ? "" : INTRO_FILES[i]);
+            if (r < 0) err = true; else n += r;
+        }
+        if (err) set_say("! Intro: couldn't write SplinterCell3.ini.");
+        else if (!n) set_say("! Intro: the videos aren't named in SplinterCell3.ini (not changed).");
+        else set_say(on ? "Intro videos skipped: the game starts straight at the menu." : "Intro videos back on.");
+    }
+    settings_publish();
+}
 static void scctfix(bool install)
 {
     g_uiset.note[0] = 0;
@@ -2430,7 +2468,7 @@ static void scctfix(bool install)
    next to SCCTLink.exe as SCCTVersusFix-d3d8.dll and is only copied if its
    SHA-256 is exactly this one (the build is reproducible: fix/build_fix.sh). */
 #define VFIX_FILE "SCCTVersusFix-d3d8.dll"
-#define VFIX_SHA "84b1da2a6d27e051cd3102ae0cef9be838189ad3e1d90082eea0361215d7d5a6"
+#define VFIX_SHA "3661f8434c4b8a3e2d87756a08c6a35322bd26b9a42d9c1fee43a4034ace204d"
 static void vfix_paths(char *src, char *dst, char *bak, char *ini, size_t n)
 {
     sfmt(src, n, "%s" PATHSEP VFIX_FILE, exe_dir());
@@ -2992,6 +3030,7 @@ static void settings_publish(void)
     u->have_vprofile = g_vprf[0] != 0;
     u->vfix = u->found ? vfix_state() : -1;
     u->chud = u->found ? chud_state() : -1;
+    u->skipintro = u->found ? skipintro_state() : -1;
     vfix_read(u);
     const char *rm = u->found ? set_value(g_mfs, g_nmfs, "rawmouse") : 0;
     u->rawmouse = rm ? !strcmp(rm, "on") : -1;
@@ -3640,6 +3679,7 @@ static void handle_cmd(const Cmd *c)
     case CMD_SCCTFIX: scctfix(c->arg != 0); break;
     case CMD_VFIX: vfix(c->arg != 0); break;
     case CMD_CHUD: chud(c->arg != 0); break;
+    case CMD_SKIPINTRO: skipintro(c->arg != 0); break;
     case CMD_APPLY_VFIX: apply_vfix(c->arg, false); break;
     case CMD_APPLY_VFIX2: apply_vfix(c->arg, true); break;
     case CMD_RAWMOUSE: rawmouse(c->arg != 0); break;

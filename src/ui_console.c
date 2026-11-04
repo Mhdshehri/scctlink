@@ -37,7 +37,7 @@ void ui_settings(const UiSettings *s)
     printf("[settings] rawmouse %d friend %d\n", s->rawmouse, s->friend_ ? s->frawmouse : -2);
     printf("[settings] mouse sens %d turn %d friend %d %d\n", s->sens, s->turn, s->friend_ ? s->fsens : -2, s->friend_ ? s->fturn : -2);
     printf("[settings] versus %dx%d sens %d mult %d profile %d\n", s->vw, s->vh, s->vsens, s->vmult, s->have_vprofile);
-    printf("[settings] chud %d\n", s->chud);
+    printf("[settings] chud %d skipintro %d\n", s->chud, s->skipintro);
     printf("[settings] vfix %d fps %d res %dx%d hud %d rate125 %d fov %d %d turn %d %d\n", s->vfix, s->vf_fps, s->vf_w, s->vf_h,
            s->vf_hud, s->vf_rate125, s->vf_spyfov, s->vf_mercfov, s->vf_spyturn, s->vf_mercturn);
     printf("[settings] scctfix %d mine %dx%d fov %d fps %d ws %d", s->scctfix, s->w, s->h, s->fov, s->fps, s->wsfov);
@@ -141,6 +141,10 @@ bool ui_poll(Cmd *c)
         c->arg = vs ? versus_pack(v[0], v[1], v[2], v[3]) : mouse_pack(v[0], v[1]);
         break;
     }
+    case 'i': case 'I': /* skip the intro videos: then "1" or "0" */
+        c->kind = CMD_SKIPINTRO;
+        c->arg = read_line(line, sizeof line) && line[0] == '1';
+        break;
     case 'b': case 'B': /* the co-op HUD fix: then "1" or "0" */
         c->kind = CMD_CHUD;
         c->arg = read_line(line, sizeof line) && line[0] == '1';

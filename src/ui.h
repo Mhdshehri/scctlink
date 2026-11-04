@@ -6,7 +6,7 @@
 #pragma once
 #include "mini.h"
 
-#define SCCTLINK_VERSION "0.9.9.3"
+#define SCCTLINK_VERSION "0.9.9.4"
 
 typedef enum {
     CMD_NONE,
@@ -23,6 +23,7 @@ typedef enum {
     CMD_STATS,       /* arg 1: the live stats window is open (measure the game's frame rate), 0: closed */
     CMD_SCCTFIX,      /* arg 1: put the SCCT Fix (d3d9.dll + StartupFullscreen=False) into the game's System folder, 0: take it out */
     CMD_RAWMOUSE,     /* arg 1: UseDIMouse=True in SplinterCell3.ini (the game reads the mouse itself, no acceleration), 0: False */
+    CMD_SKIPINTRO,    /* arg 1: no startup videos (SplinterCell3.ini [GENERAL]), 0: the game's own */
     CMD_CHUD,         /* arg 1/0: the SCCT Fix's HUD fix (co-op; System\\SCCTFix.ini) */
     CMD_VFIX,         /* arg 1: install the Versus Fix (Versus\System\d3d8.dll), 0: remove it */
     CMD_APPLY_VFIX,   /* arg = vfix_pack(): the Versus Fix's settings (SCCTVersusFix.ini) */
@@ -73,6 +74,7 @@ typedef struct {
     int sens, turn, fsens, fturn; /* co-op: mouse sensitivity, aim turn speed (m_turnMul) x100; f*: the friend's */
     int vw, vh, vsens, vmult;   /* Versus: resolution, mouse sensitivity x100, mouse multiplier x100 (0 = not found) */
     bool have_vprofile;         /* a Versus profile was found (its mouse settings can be changed) */
+    int skipintro;              /* co-op startup videos skipped: 1, 0, -1 no game folder */
     int chud;                   /* co-op HUD fix: 1 on, 0 off, -1 no game folder */
     int vfix;                   /* the Versus Fix: 0 not there, 1 installed, 2 another d3d8.dll, -1 no Versus */
     int vf_fps, vf_w, vf_h, vf_spyfov, vf_mercfov, vf_spyturn, vf_mercturn; /* 0 = the game's own; turns x100 */

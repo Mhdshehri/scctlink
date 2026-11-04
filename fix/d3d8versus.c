@@ -242,55 +242,90 @@ static DICreateDevFn g_di_create_dev;
 static GetDataFn g_get_data;
 static void *g_mice[4]; /* the game makes more than one mouse device */
 static int g_nmice, g_rate125 = 1;
-static long long g_last_read;
 static const DWORD GUID_SYSMOUSE[4] = { 0x6F1D2B60, 0x11CFD5A0, 0x4544C7BF, 0x00005453 }; /* {6F1D2B60-D5A0-11CF-BFC7-444553540000} */
 static int is_mouse(void *d)
 {
     for (int i = 0; i < g_nmice; i++) if (g_mice[i] == d) return 1;
     return 0;
 }
-static long WINAPI hook_GetDeviceData(void *dev, DWORD size, DWORD *data, DWORD *n, DWORD flags)
+/* Versus reads the mouse one event at a time (it asks for 1, again and again,
+   until none are left). So at the first read of a frame the fix takes all of
+   the mouse's events from DirectInput itself, regroups the movement into one
+   report per 8 ms that passed, and then hands those out one by one. */
+#define QMAX 96
+static struct MouseQ {
+    void *dev;
+    DWORD ev[QMAX][5]; /* DIDEVICEOBJECTDATA: offset, data, time stamp, sequence, app data */
+    int n, pos;
+    long long last;
+} g_q[4];
+static struct MouseQ *mouse_q(void *dev)
 {
-    DWORD cap = n ? *n : 0;
-    long hr = g_get_data(dev, size, data, n, flags);
-    if (!g_rate125 || !is_mouse(dev) || hr < 0 || !data || !n || size < 16 || (flags & 1 /* DIGDD_PEEK */)) return hr;
-    long dx = 0, dy = 0;
-    DWORD keep = 0, stamp = 0, seq = 0, moves = 0;
-    for (DWORD i = 0; i < *n; i++) {
-        DWORD *e = (DWORD *)((char *)data + i * size); /* DIDEVICEOBJECTDATA: offset, data, time stamp, sequence */
-        if (e[0] == 0 || e[0] == 4) { /* DIMOFS_X / DIMOFS_Y */
-            if (e[0] == 0) dx += (long)e[1]; else dy += (long)e[1];
-            stamp = e[2]; seq = e[3];
-            moves++;
-            continue;
+    for (int i = 0; i < 4; i++) if (g_q[i].dev == dev) return &g_q[i];
+    for (int i = 0; i < 4; i++) if (!g_q[i].dev) { g_q[i].dev = dev; return &g_q[i]; }
+    return 0;
+}
+static long fill_q(struct MouseQ *q, void *dev, DWORD size)
+{
+    static DWORD raw[256 * 5];
+    long dx = 0, dy = 0, hr = 0;
+    DWORD stamp = 0, seq = 0;
+    q->n = q->pos = 0;
+    for (int round = 0; round < 8; round++) { /* everything DirectInput has (normally one round) */
+        DWORD got = 256;
+        hr = g_get_data(dev, 20, raw, &got, 0);
+        if (hr < 0) return hr;
+        for (DWORD i = 0; i < got; i++) {
+            DWORD *e = raw + i * 5;
+            if (e[0] == 0 || e[0] == 4) { /* DIMOFS_X / DIMOFS_Y */
+                if (e[0] == 0) dx += (long)e[1]; else dy += (long)e[1];
+                stamp = e[2]; seq = e[3];
+            } else if (q->n < QMAX) { /* buttons, wheel: as they came */
+                memcpy(q->ev[q->n++], e, 20);
+            }
         }
-        if (keep != i) memcpy((char *)data + keep * size, e, size);
-        keep++;
+        if (got < 256) break;
     }
     long long now;
     QueryPerformanceCounter(&now);
-    long long since = g_last_read ? now - g_last_read : 0;
-    g_last_read = now;
-    if (!moves) { *n = keep; return hr; }
+    long long since = q->last ? now - q->last : 0;
+    q->last = now;
+    if (!dx && !dy) return hr;
     DWORD reports = g_qpf ? (DWORD)((float)since * 125.0f / (float)g_qpf + 0.5f) : 1;
     if (reports < 1) reports = 1;
     if (reports > 16) reports = 16;
-    while (reports > 1 && keep + 2 * reports > cap) reports--;
-    if (keep + 2 > cap) { *n = keep; return hr; }
     for (DWORD r = 0; r < reports; r++) {
         long px = dx * (long)(r + 1) / (long)reports - dx * (long)r / (long)reports;
         long py = dy * (long)(r + 1) / (long)reports - dy * (long)r / (long)reports;
-        DWORD vals[2] = { (DWORD)px, (DWORD)py }, offs[2] = { 0, 4 };
-        for (int k = 0; k < 2; k++) {
+        long vals[2] = { px, py };
+        for (int k = 0; k < 2 && q->n < QMAX; k++) {
             if (!vals[k]) continue;
-            DWORD *e = (DWORD *)((char *)data + keep * size);
-            memset(e, 0, size);
-            e[0] = offs[k]; e[1] = vals[k]; e[2] = stamp; e[3] = seq;
-            keep++;
+            DWORD *e = q->ev[q->n++];
+            e[0] = k ? 4 : 0; e[1] = (DWORD)vals[k]; e[2] = stamp; e[3] = seq + r; e[4] = 0;
         }
     }
-    *n = keep;
+    (void)size;
     return hr;
+}
+static long WINAPI hook_GetDeviceData(void *dev, DWORD size, DWORD *data, DWORD *n, DWORD flags)
+{
+    struct MouseQ *q;
+    if (!g_rate125 || !is_mouse(dev) || !n || size < 16 || size > 20 || !(q = mouse_q(dev)))
+        return g_get_data(dev, size, data, n, flags);
+    if (!data) { q->n = q->pos = 0; return g_get_data(dev, size, data, n, flags); } /* flush: pass on */
+    long hr = 0;
+    if (q->pos >= q->n) { /* a new frame: take everything from DirectInput */
+        hr = fill_q(q, dev, size);
+        if (hr < 0) { *n = 0; return hr; }
+    }
+    DWORD want = *n, give = 0;
+    while (give < want && q->pos + (int)give < q->n) {
+        memcpy((char *)data + give * size, q->ev[q->pos + give], size);
+        give++;
+    }
+    if (!(flags & 1 /* DIGDD_PEEK */)) q->pos += (int)give;
+    *n = give;
+    return give && hr == 1 /* DI_BUFFEROVERFLOW */ ? hr : 0;
 }
 static long WINAPI hook_DICreateDevice(void *di, const DWORD *guid, void **out, void *outer)
 {

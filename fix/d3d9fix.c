@@ -14,10 +14,11 @@
  *   - Alt+Tab: the game grabs Alt+Tab for itself (RegisterHotKey "UnrealAltTab")
  *     and minimizes on focus loss; both are blocked.
  *   - Crash log: a crash's code and address are written to SCCTFix.log.
- *   - HUD fix (optional, SCCTFix.ini [HUD] Fix=1): the game draws its HUD and
- *     menus in 640x480 steps, x scaled by width/640 and y by height/480, so on
- *     a wide screen everything is stretched sideways. With it, x is scaled
- *     like y. Drawing only: the co-op simulation isn't touched.
+ *   - HUD fix (optional, SCCTFix.ini [HUD] Fix=1): the game draws its HUD in
+ *     640x480 steps, x scaled by width/640 and y by height/480, so on a wide
+ *     screen it is stretched sideways. With it, the in-game HUD's x is scaled
+ *     like y (menus and videos as before). Drawing only: the co-op simulation
+ *     isn't touched.
  *
  * This is a line-for-line rewrite of the original SCCT Fix d3d9.dll (made with
  * its author's permission): same names, same values, same order of calls, so
@@ -205,27 +206,36 @@ static void windowed(PRESENT_PARAMS *pp)
 }
 
 /* ---- the HUD fix ----
-   splintercell3.exe (Steam copy, fixed address 0x10900000) scales its HUD and
-   menus with two constants, used together in every place that draws them:
-       0x110d5cb8: 1/640 (x)      0x110cceb4: 1/480 (y)
-   e.g. 10a3dbbb: fmul dword ptr [0x110d5cb8]  (d8 0d b8 5c 0d 11)
-   Making the x one height/(480*width) scales x like y: no stretching. */
-static int g_hud = -1; /* -1: not read yet */
+   splintercell3.exe (Steam copy, fixed address 0x10900000) scales what it draws
+   in 640x480 steps: x by width * (1/640) (constant at 0x110d5cb8), y by
+   height * (1/480). The same constant also sizes the menus and the videos, so
+   only the three places that draw the in-game HUD are pointed at our own number
+   (each "fmul dword ptr [0x110d5cb8]", d8 0d b8 5c 0d 11), and that number is
+   height / (480 * width): x scaled like y, no stretching. */
+static float g_hudx = 0.0015625f; /* 1/640 until the screen size is known */
+static int g_hud = -1;           /* -1: not read yet */
 static char g_ini[300];
 static void hud_fix(UINT w, UINT h)
 {
+    static const DWORD sites[3] = { 0x10c864b3, 0x10c86e09, 0x10c8720b };
+    static const unsigned char want[6] = { 0xd8, 0x0d, 0xb8, 0x5c, 0x0d, 0x11 };
+    static int patched;
     if (g_hud < 0) g_hud = GetPrivateProfileIntA("HUD", "Fix", 0, g_ini);
     if (!g_hud || !w || !h) return;
-    unsigned char *ref = (unsigned char *)0x10a3dbbb, *k = (unsigned char *)0x110d5cb8;
-    static const unsigned char want[6] = { 0xd8, 0x0d, 0xb8, 0x5c, 0x0d, 0x11 };
-    for (int i = 0; i < 6; i++) if (ref[i] != want[i]) return; /* not the Steam copy's code: left alone */
-    float now = *(float *)k;
-    if (now < 0.0001f || now > 0.01f) return; /* not a scale */
-    float v = (float)h / (480.0f * (float)w);
-    DWORD old;
-    VirtualProtect(k, 4, 4, &old);
-    *(float *)k = v;
-    VirtualProtect(k, 4, old, &old);
+    g_hudx = (float)h / (480.0f * (float)w);
+    if (patched) return;
+    for (int k = 0; k < 3; k++) {
+        unsigned char *ins = (unsigned char *)sites[k];
+        for (int i = 0; i < 6; i++) if (ins[i] != want[i]) return; /* not the Steam copy's code: left alone */
+    }
+    for (int k = 0; k < 3; k++) {
+        unsigned char *ins = (unsigned char *)sites[k];
+        DWORD old, a = (DWORD)&g_hudx;
+        VirtualProtect(ins + 2, 4, 0x40 /* PAGE_EXECUTE_READWRITE */, &old);
+        memcpy(ins + 2, &a, 4);
+        VirtualProtect(ins + 2, 4, old, &old);
+    }
+    patched = 1;
     log_write("HUD fix: on\r\n", 13);
 }
 
