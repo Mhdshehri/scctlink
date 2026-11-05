@@ -478,8 +478,38 @@ void fps_stop(void)
     g_fps_on = false;
 }
 
+/* The SCCT Fix / Versus Fix count the frames they show (Local\\SCCTFixFrames):
+   exact, so that comes first; Windows' own counting is the fallback. */
+IMP HANDLE WINAPI OpenFileMappingA(DWORD access, BOOL inherit, const char *name);
+IMP void *WINAPI MapViewOfFile(HANDLE m, DWORD access, DWORD hi, DWORD lo, size_t n);
+static int fix_fps(void)
+{
+    static volatile DWORD *sh;
+    static DWORD last;
+    static u64 at;
+    if (!sh) {
+        HANDLE m = OpenFileMappingA(4 /* FILE_MAP_READ */, 0, "Local\\SCCTFixFrames");
+        if (!m) return -1;
+        sh = MapViewOfFile(m, 4, 0, 0, 16);
+        CloseHandle(m); /* the view keeps it */
+        if (!sh) return -1;
+        last = sh[1];
+        at = GetTickCount64();
+        return -2;
+    }
+    if (sh[0] != 0x58464353) return -1;
+    u64 t = GetTickCount64();
+    if (t - at < 250) return -2;
+    DWORD f = sh[1];
+    int r = (int)((unsigned)(f - last) * 1000u / (unsigned)(t - at));
+    last = f;
+    at = t;
+    return r;
+}
 int fps_get(void)
 {
+    int ff = fix_fps();
+    if (ff != -1) return ff;
     if (!g_fps_on) return -1;
     u64 t = GetTickCount64();
     if (t - g_fps_at < 250) return -2; /* too soon: keep the last value */

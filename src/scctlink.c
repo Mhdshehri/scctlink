@@ -2315,7 +2315,7 @@ static int ini_set(const char *path, const char *section, const char *key, const
    SHA-256 is exactly this one (checked: no network functions, starts no
    programs, only writes System\SCCTFix.log). */
 #define SCCTFIX_FILE "SCCTFix-d3d9.dll"
-#define SCCTFIX_SHA "ab388fcc1ec495675a3ad4fa3c96b426654f4201a7672d58f597f8afa709cf86" /* ours: fix/d3d9fix.c (fix/build_fix.sh) */
+#define SCCTFIX_SHA "3f73be91b530d629e3c255d6294785160a7db360cd7d145649cc96e11531e910" /* ours: fix/d3d9fix.c (fix/build_fix.sh) */
 #define SCCTFIX_OLD_SHA "2f05d8e9e7aaf750eb2889c7ba57dd453820e3a794b9ba74c43730446a84cae9" /* the original; ours replaces it */
 bool sha256_file(const char *path, char hex[65]);
 static void scctfix_paths(char *src, char *dst, char *bak, char *ini, size_t n)
@@ -2337,7 +2337,8 @@ static int scctfix_state(void)
                                         "2c5fa6a505c3867db282523c5c00a7f66a6bfa5bc598078ee654a2445a9fd2f5",
                                         "2228214d27cb77ad2b13e63510bad49bab834eba7ce8665e8a55371419994ea4",
                                         "b5624f3f18d4c775f1aca05c8e0fffabcc2aaf523321073f558f2a9d815985da",
-                                        "9b73fe61a3eba66ebd91ffdbc20a59b0a217b3fba61d5facf7b327f2514c0a97" };
+                                        "9b73fe61a3eba66ebd91ffdbc20a59b0a217b3fba61d5facf7b327f2514c0a97",
+                                        "ab388fcc1ec495675a3ad4fa3c96b426654f4201a7672d58f597f8afa709cf86" };
     if (!strcmp(hex, SCCTFIX_SHA)) return 1;
     if (!strcmp(hex, SCCTFIX_OLD_SHA)) return 3;
     for (size_t i = 0; i < sizeof ours / sizeof *ours; i++) if (!strcmp(hex, ours[i])) return 3;
@@ -2563,7 +2564,7 @@ static void scctfix(bool install)
    next to SCCTLink.exe as SCCTVersusFix-d3d8.dll and is only copied if its
    SHA-256 is exactly this one (the build is reproducible: fix/build_fix.sh). */
 #define VFIX_FILE "SCCTVersusFix-d3d8.dll"
-#define VFIX_SHA "3661f8434c4b8a3e2d87756a08c6a35322bd26b9a42d9c1fee43a4034ace204d"
+#define VFIX_SHA "9c8a57a03e8f38d6aec15fc17fdb2647e4f3bd6a8b4b39e36f25efc0d99b0a1b"
 static void vfix_paths(char *src, char *dst, char *bak, char *ini, size_t n)
 {
     sfmt(src, n, "%s" PATHSEP VFIX_FILE, exe_dir());
@@ -2580,7 +2581,13 @@ static int vfix_state(void)
     sfmt(exe, sizeof exe, "%s" PATHSEP "Versus" PATHSEP "System" PATHSEP "SCCT_Versus.exe", g_mf_dir);
     if (!file_exists(exe)) return -1;
     if (!sha256_file(dst, hex)) return 0;
-    return strcmp(hex, VFIX_SHA) ? 2 : 1;
+    if (!strcmp(hex, VFIX_SHA)) return 1;
+    static const char *const ours[] = { /* earlier builds of ours: replaced on install ("Update") */
+        "84b1da2a6d27e051cd3102ae0cef9be838189ad3e1d90082eea0361215d7d5a6",
+        "3661f8434c4b8a3e2d87756a08c6a35322bd26b9a42d9c1fee43a4034ace204d",
+        "7b2645692fdae5369bfab7029a80b38fbd3759f322fe22abeff9f0ff3db43549" };
+    for (size_t i = 0; i < sizeof ours / sizeof *ours; i++) if (!strcmp(hex, ours[i])) return 3;
+    return 2;
 }
 /* the settings, as SCCTVersusFix.ini has them (the game's own when it's missing) */
 static void vfix_read(UiSettings *u)
@@ -2646,11 +2653,16 @@ static void vfix_(bool install)
     if (game_is_running("SCCT_Versus")) { set_say("! Versus Fix: close Versus first."); return; }
     vfix_paths(src, dst, bak, ini, sizeof src);
     if (!install) {
+        if (st == 3) st = 1; /* an earlier build of ours: removed the same way */
         if (st != 1) { set_say(st == 2 ? "! Versus Fix: the d3d8.dll in Versus\\System is another mod - left alone." : "Versus Fix: not installed."); return; }
         if (remove(dst) != 0) { set_say("! Versus Fix: couldn't remove it."); return; }
         if (file_exists(bak) && rename(bak, dst) == 0) say("Versus Fix: the earlier d3d8.dll was put back.");
         set_say("Versus Fix removed (Versus is back to its own settings).");
         return;
+    }
+    if (st == 3) { /* an earlier build of ours: the new one takes its place */
+        if (remove(dst) != 0) { set_say("! Versus Fix: couldn't replace the older Versus Fix."); return; }
+        st = 0;
     }
     if (st != 1) {
         if (!sha256_file(src, hex)) { set_say("! Versus Fix: " VFIX_FILE " is missing (it must be next to SCCTLink.exe)."); return; }

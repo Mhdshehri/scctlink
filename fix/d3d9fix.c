@@ -673,9 +673,23 @@ static void fps_update(LONGLONG now)
     log_write(b, slen(b));
 }
 
+/* The frame counter for SCCTLink's live stats: a small shared memory block,
+   Local\\SCCTFixFrames (this PC only): [0] 'SCFX', [1] frames drawn. SCCTLink
+   reads it once a second; Windows' own counting (ETW) gets this game wrong. */
+IMP HANDLE WINAPI CreateFileMappingA(HANDLE, void *, DWORD, DWORD, DWORD, const char *);
+IMP void *WINAPI MapViewOfFile(HANDLE, DWORD, DWORD, DWORD, unsigned long);
+static volatile DWORD *g_shared;
+static void shared_open(void)
+{
+    HANDLE m = CreateFileMappingA((HANDLE)-1, 0, 4 /* PAGE_READWRITE */, 0, 4096, "Local\\SCCTFixFrames");
+    if (m) g_shared = MapViewOfFile(m, 2 /* FILE_MAP_WRITE */, 0, 0, 16);
+    if (g_shared) g_shared[0] = 0x58464353; /* "SCFX" */
+}
+
 static HRESULT WINAPI hook_Present(void *dev, const void *src, const void *dst, HWND w, const void *dirty)
 {
     HRESULT hr = g_present(dev, src, dst, w, dirty);
+    if (g_shared) g_shared[1]++;
     LONGLONG now;
     QueryPerformanceCounter(&now);
     fps_update(now);
@@ -774,6 +788,7 @@ BOOL WINAPI DllEntry(HINSTANCE dll, DWORD reason, void *reserved)
     g_spin = (DWORD)g_freq / 500;
     timeBeginPeriod(1);
     SetUnhandledExceptionFilter((void *)on_crash);
+    shared_open();
     patch_import("RegisterHotKey", (void *)hook_RegisterHotKey);
     patch_import("ShowWindow", (void *)hook_ShowWindow);
     return 1;

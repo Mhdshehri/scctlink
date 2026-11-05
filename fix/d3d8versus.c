@@ -197,6 +197,20 @@ static void set_frame_rate(int refresh)
     log_line(b);
 }
 
+/* The frame counter for SCCTLink's live stats: a small shared memory block,
+   Local\\SCCTFixFrames (this PC only): [0] 'SCFX', [1] frames drawn. SCCTLink
+   reads it once a second; Windows' own counting (ETW) gets this game wrong. */
+IMP HANDLE WINAPI CreateFileMappingA(HANDLE, void *, DWORD, DWORD, DWORD, const char *);
+IMP void *WINAPI MapViewOfFile(HANDLE, DWORD, DWORD, DWORD, SIZE_T);
+static volatile DWORD *g_shared;
+typedef long(WINAPI *Present8Fn)(void *, const void *, const void *, void *, const void *);
+static Present8Fn g_present8;
+static long WINAPI hook_Present8(void *dev, const void *src, const void *dst, void *w, const void *dirty)
+{
+    long hr = g_present8(dev, src, dst, w, dirty);
+    if (g_shared) g_shared[1]++;
+    return hr;
+}
 /* ---- Direct3D 8: straight to the real one; its CreateDevice is watched ---- */
 typedef long(WINAPI *CreateDevFn)(void *, UINT, UINT, void *, DWORD, DWORD *, void **);
 static CreateDevFn g_create_dev;
@@ -204,6 +218,10 @@ static long WINAPI hook_CreateDevice(void *d3d, UINT ad, UINT type, void *wnd, D
 {
     if (g_limiter_patched) set_frame_rate((int)pp[11] ? (int)pp[11] : 60);
     long hr = g_create_dev(d3d, ad, type, wnd, flags, pp, out);
+    if (hr >= 0 && out && *out && !g_present8) { /* IDirect3DDevice8::Present (all devices share the table) */
+        void *o = hook_slot(*out, 15, (void *)hook_Present8);
+        if (o) g_present8 = (Present8Fn)o;
+    }
     char b[120]; /* D3DPRESENT_PARAMETERS (8): width, height, ..., windowed at 7 */
     wsprintfA(b, "screen: %lux%lu%s\r\n", pp[0], pp[1], pp[7] ? " (window)" : "");
     log_line(b);
@@ -575,6 +593,9 @@ BOOL WINAPI DllEntry(HINSTANCE dll, DWORD reason, void *reserved)
     log_line(g_limiter_patched ? "frame limiter: found\r\n" : "frame limiter: not found\r\n");
     patch_dinput();
     log_line(g_rate125 ? "mouse: 125 reports a second\r\n" : "mouse: as it comes\r\n");
+    HANDLE m = CreateFileMappingA((HANDLE)-1, 0, 4 /* PAGE_READWRITE */, 0, 4096, "Local\\SCCTFixFrames");
+    if (m) g_shared = MapViewOfFile(m, 2 /* FILE_MAP_WRITE */, 0, 0, 16);
+    if (g_shared) g_shared[0] = 0x58464353; /* "SCFX" */
     HANDLE t = CreateThread(0, 0, worker, 0, 0, 0);
     if (t) CloseHandle(t);
     return 1;

@@ -14,7 +14,7 @@ mkdef() { # name, then exports
 }
 mkdef kernel32 CreateFileA@28 DisableThreadLibraryCalls@4 GetModuleFileNameA@12 GetModuleHandleA@4 \
     GetProcAddress@8 GetSystemDirectoryA@8 GlobalFindAtomA@4 LoadLibraryA@4 QueryPerformanceCounter@4 \
-    QueryPerformanceFrequency@4 SetUnhandledExceptionFilter@4 Sleep@4 VirtualProtect@16 WriteFile@20 VirtualAlloc@16 CreateThread@24 OpenEventA@12 CloseHandle@4 GetLastError@0 \
+    QueryPerformanceFrequency@4 SetUnhandledExceptionFilter@4 Sleep@4 VirtualProtect@16 WriteFile@20 VirtualAlloc@16 CreateThread@24 OpenEventA@12 CloseHandle@4 GetLastError@0 CreateFileMappingA@24 MapViewOfFile@20 \
     GetPrivateProfileIntA@16 GetPrivateProfileStringA@24
 mkdef user32 GetMonitorInfoA@8 GetWindowLongA@8 GetWindowRect@8 IsIconic@4 MonitorFromWindow@8 \
     RegisterHotKey@16 SetWindowLongA@12 SetWindowPos@28 ShowWindow@8 UnregisterHotKey@8 wsprintfA \
@@ -34,7 +34,7 @@ sha256sum "$OUT/d3d9.dll"
 mkdef kernel32v CreateFileA@28 DisableThreadLibraryCalls@4 GetModuleFileNameA@12 GetProcAddress@8 \
     GetSystemDirectoryA@8 LoadLibraryA@4 Sleep@4 WriteFile@20 CloseHandle@4 CreateThread@24 VirtualQuery@12 \
     GetPrivateProfileStringA@24 SetThreadPriority@8 GetCurrentThread@0 GetCurrentProcess@0 \
-    ReadProcessMemory@20 WriteProcessMemory@20 VirtualProtect@16 GetModuleHandleA@4 QueryPerformanceCounter@4 QueryPerformanceFrequency@4
+    ReadProcessMemory@20 WriteProcessMemory@20 VirtualProtect@16 GetModuleHandleA@4 QueryPerformanceCounter@4 QueryPerformanceFrequency@4 CreateFileMappingA@24 MapViewOfFile@20
 sed -i 's/^LIBRARY kernel32v.dll/LIBRARY kernel32.dll/' "$OUT/lib/kernel32v.def"
 llvm-dlltool -m i386 -k -d "$OUT/lib/kernel32v.def" -l "$OUT/lib/kernel32v.lib"
 mkdef winmmv timeBeginPeriod@4

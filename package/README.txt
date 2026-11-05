@@ -292,7 +292,9 @@ says when another widescreen mod is there; single player can have more FPS
 ("Single player: 60 FPS / screen's Hz / no limit") - during an SCCTLink co-op
 session the SCCT Fix goes back to 60 by itself; the first install also skips
 the intro videos; the window fits small screens; "Check again" finds Steam
-if it was started after SCCTLink.
+if it was started after SCCTLink; Live stats count the frames in the SCCT
+Fix / Versus Fix themselves (exact; Windows' own counting was wrong);
+"Update" replaces an older Versus Fix.
 0.9.9.6 (testing): new co-op HUD fix, ported from ThirteenAG's FusionFix (MIT,
 see THIRD-PARTY.txt): the HUD, menus and text are drawn 4:3 in the middle
 instead of stretched; full-screen pictures, the scope and the loading bar
