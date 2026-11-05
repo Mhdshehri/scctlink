@@ -288,6 +288,12 @@ ThirteenAG's FusionFix), so the widescreen HUD is right from the first
 start; Versus starts at the resolution you set (its Default.ini); Live
 stats show the connection only (no FPS), with a thicker dark edge; the
 co-op 60 FPS signal is also a file, System\SCCTLink.coop.
+Settings are also written to the copies the game really reads in
+ProgramData (its own SplinterCell3.ini, each profile's FOV); the SCCT Fix
+always opens a window and is DPI aware (a scaled 2K desktop showed as
+1920x1080); in Versus, Apply sets the window and full-screen size in
+Default.ini and ScreenRes=-1 in your profile (so loading it doesn't pick
+1600x1200 again).
 0.9.9.6 (testing): new co-op HUD fix, ported from ThirteenAG's FusionFix (MIT,
 see THIRD-PARTY.txt): the HUD, menus and text are drawn 4:3 in the middle
 instead of stretched; full-screen pictures, the scope and the loading bar

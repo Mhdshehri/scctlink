@@ -642,6 +642,22 @@ static int __fastcall my_setres(BYTE *dev, void *edx, BYTE *vp, int w, int h, in
     g_res_h = h;
     return r;
 }
+/* The game opens its window at StartupFullscreen from its ini - and the copy it
+   reads may be ProgramData's, which SCCTLink can't always reach. The fix runs
+   it in a window anyway, so OpenWindow's "StartupFullscreen = 1" is made 0
+   (FusionFix does the same): SetRes then gets a window size, made the screen's. */
+static const struct Site start_window = { 0x10cc6d59, 7, { 0xc7, 0x85, 0xd8, 0x00, 0x00, 0x00, 0x01 } };
+/* Windows scales a program that isn't DPI aware: at 125 % or 150 % the game
+   would see a smaller screen (a 2560x1440 one as 2048x1152 or less), render at
+   that and be stretched. So the game is made per-monitor DPI aware. */
+IMP BOOL WINAPI SetProcessDPIAware(void);
+static void dpi_aware(void)
+{
+    typedef BOOL(WINAPI * SetCtxFn)(HANDLE);
+    SetCtxFn f = (SetCtxFn)GetProcAddress(GetModuleHandleA("user32.dll"), "SetProcessDpiAwarenessContext");
+    BOOL ok = f ? f((HANDLE)-4 /* DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 */) : SetProcessDPIAware();
+    log_write(ok ? "DPI aware: yes\r\n" : "DPI aware: no (already set)\r\n", ok ? 16 : 29);
+}
 static const struct Site res_sites[] = {
     { 0x10c8b860, 5, { 0xa1, 0x94, 0x27, 0x23, 0x11 } }, /* SetRes: mov eax, [0x11232794] */
     { 0x10c8b8f8, 5, { 0x8b, 0x46, 0x64, 0x85, 0xc0 } }, /* ...: mov eax, [esi+0x64] (the reset flag); test eax, eax */
@@ -653,6 +669,11 @@ static void screen_res(void)
             log_write("Resolution: not this game's code, left as it is\r\n", 49);
             return;
         }
+    if (site_ok(&start_window)) {
+        DWORD zero = 0;
+        code_write((void *)(start_window.at + 6), &zero, 4);
+        log_write("Window: always (StartupFullscreen ignored)\r\n", 44);
+    }
     if (!stubs_ready()) return;
     BYTE *t = g_stubs + g_stubs_used; /* the trampoline: the replaced mov, then on */
     memcpy(t, (void *)0x10c8b860, 5);
@@ -849,6 +870,7 @@ BOOL WINAPI DllEntry(HINSTANCE dll, DWORD reason, void *reserved)
     SetUnhandledExceptionFilter((void *)on_crash);
     patch_import("RegisterHotKey", (void *)hook_RegisterHotKey);
     patch_import("ShowWindow", (void *)hook_ShowWindow);
+    dpi_aware();
     screen_res(); /* before the game sets up its screen */
     return 1;
 }

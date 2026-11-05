@@ -2078,6 +2078,14 @@ static void set_add(const char *key, const char *value)
 
 /* the user settings file can also live in ProgramData\Ubisoft\... */
 static char g_user_ini[800], g_ws_ini[900];
+/* ProgramData\Ubisoft\Tom Clancy's Splinter Cell Chaos Theory also has the game's
+   own SplinterCell3.ini (the copy the game reads, where it can't write to its
+   folder) and each profile's settings (Profiles\<name>\<name>.ini, with its own
+   FOV): found with the user ini, written alongside. */
+static char g_pd_ini[800];
+#define MAX_PROF 6
+static char g_prof_ini[MAX_PROF][800];
+static int g_nprof;
 static void find_user_ini(const char *dir, int depth);
 static void user_ini_cb(void *ctx, const char *name, bool is_dir, u64 size, u64 mtime)
 {
@@ -2087,8 +2095,15 @@ static void user_ini_cb(void *ctx, const char *name, bool is_dir, u64 size, u64 
     sfmt(path, sizeof path, "%s" PATHSEP "%s", dir, name);
     sfmt(low, sizeof low, "%s", name);
     for (char *c = low; *c; c++) if (*c >= 'A' && *c <= 'Z') *c = (char)(*c + 32);
-    if (is_dir) { if (!g_user_ini[0]) find_user_ini(path, -1); return; }
+    char lp[800];
+    sfmt(lp, sizeof lp, "%s", path);
+    for (char *c = lp; *c; c++) if (*c >= 'A' && *c <= 'Z') *c = (char)(*c + 32);
+    if (is_dir) { if (strstr(lp, "chaos theory") || !strstr(lp, "ubisoft" PATHSEP)) find_user_ini(path, -1); return; }
+    if (!strstr(lp, "chaos theory")) return; /* only Chaos Theory's folder */
     if (!strcmp(low, "splintercell3user.ini") && !g_user_ini[0]) sfmt(g_user_ini, sizeof g_user_ini, "%s", path);
+    else if (!strcmp(low, "splintercell3.ini") && !g_pd_ini[0]) sfmt(g_pd_ini, sizeof g_pd_ini, "%s", path);
+    else if (strstr(lp, PATHSEP "profiles" PATHSEP) && strlen(low) > 4 && !strcmp(low + strlen(low) - 4, ".ini") && g_nprof < MAX_PROF)
+        sfmt(g_prof_ini[g_nprof++], sizeof g_prof_ini[0], "%s", path);
 }
 static void find_user_ini(const char *dir, int depth)
 {
@@ -2166,6 +2181,8 @@ static void settings_collect(void)
     sfmt(sys, sizeof sys, "%s" PATHSEP "System", g_mf_dir);
     /* the user's own settings first (ProgramData), then the game folder's */
     g_user_ini[0] = 0;
+    g_pd_ini[0] = 0;
+    g_nprof = 0;
     g_ws_ini[0] = 0;
     const char *pd = getenv("PROGRAMDATA");
     if (pd && *pd) {
@@ -2316,7 +2333,7 @@ static int ini_set(const char *path, const char *section, const char *key, const
    SHA-256 is exactly this one (checked: no network functions, starts no
    programs, only writes System\SCCTFix.log). */
 #define SCCTFIX_FILE "SCCTFix-d3d9.dll"
-#define SCCTFIX_SHA "74018a1aa44700c3b971e4a6a4973dbe9fe8d3e7e5a842df6124eaf057c11ac6" /* ours: fix/d3d9fix.c (fix/build_fix.sh) */
+#define SCCTFIX_SHA "8017a0f7e4cddd3840e44aca8023c140dd0209d784fabda3337ad754cd0e77bf" /* ours: fix/d3d9fix.c (fix/build_fix.sh) */
 #define SCCTFIX_OLD_SHA "2f05d8e9e7aaf750eb2889c7ba57dd453820e3a794b9ba74c43730446a84cae9" /* the original; ours replaces it */
 bool sha256_file(const char *path, char hex[65]);
 static void scctfix_paths(char *src, char *dst, char *bak, char *ini, size_t n)
@@ -2340,7 +2357,8 @@ static int scctfix_state(void)
                                         "b5624f3f18d4c775f1aca05c8e0fffabcc2aaf523321073f558f2a9d815985da",
                                         "9b73fe61a3eba66ebd91ffdbc20a59b0a217b3fba61d5facf7b327f2514c0a97",
                                         "ab388fcc1ec495675a3ad4fa3c96b426654f4201a7672d58f597f8afa709cf86",
-                                        "3f73be91b530d629e3c255d6294785160a7db360cd7d145649cc96e11531e910" };
+                                        "3f73be91b530d629e3c255d6294785160a7db360cd7d145649cc96e11531e910",
+                                        "74018a1aa44700c3b971e4a6a4973dbe9fe8d3e7e5a842df6124eaf057c11ac6" };
     if (!strcmp(hex, SCCTFIX_SHA)) return 1;
     if (!strcmp(hex, SCCTFIX_OLD_SHA)) return 3;
     for (size_t i = 0; i < sizeof ours / sizeof *ours; i++) if (!strcmp(hex, ours[i])) return 3;
@@ -2384,6 +2402,7 @@ static void scctfix_(bool install)
         if (remove(dst) != 0) { set_say("! SCCT Fix: couldn't remove it."); return; }
         if (file_exists(bak) && rename(bak, dst) == 0) say("SCCT Fix: the earlier d3d9.dll was put back.");
         ini_set(ini, "WinDrv.WindowsClient", "StartupFullscreen", "True");
+        if (g_pd_ini[0]) ini_set(g_pd_ini, "WinDrv.WindowsClient", "StartupFullscreen", "True");
         set_say("SCCT Fix removed (the game starts in fullscreen again).");
         return;
     }
@@ -2411,6 +2430,10 @@ static void scctfix_(bool install)
         if (scfini_write(1, 1, 60)) ini_set(ini, "Init", "UseDIMouse", "False");
     }
     /* the tested setup also starts the game in a window (the fix makes it borderless) */
+    if (g_pd_ini[0]) { /* the copy the game reads: a window, and the raw mouse's DirectInput off */
+        ini_set(g_pd_ini, "WinDrv.WindowsClient", "StartupFullscreen", "False");
+        ini_set(g_pd_ini, "Init", "UseDIMouse", "False");
+    }
     if (ini_set(ini, "WinDrv.WindowsClient", "StartupFullscreen", "False") < 0)
         say("! SCCT Fix: couldn't set StartupFullscreen=False in SplinterCell3.ini.");
     set_say(st == 1 ? "SCCT Fix: already installed (StartupFullscreen=False checked)."
@@ -2566,7 +2589,7 @@ static void scctfix(bool install)
    next to SCCTLink.exe as SCCTVersusFix-d3d8.dll and is only copied if its
    SHA-256 is exactly this one (the build is reproducible: fix/build_fix.sh). */
 #define VFIX_FILE "SCCTVersusFix-d3d8.dll"
-#define VFIX_SHA "3661f8434c4b8a3e2d87756a08c6a35322bd26b9a42d9c1fee43a4034ace204d"
+#define VFIX_SHA "f680d8a6da67f66a752137c2d9b351ae961700f2483ac1f954c8929bda91c205"
 static void vfix_paths(char *src, char *dst, char *bak, char *ini, size_t n)
 {
     sfmt(src, n, "%s" PATHSEP VFIX_FILE, exe_dir());
@@ -2587,6 +2610,7 @@ static int vfix_state(void)
     static const char *const ours[] = { /* earlier builds of ours: replaced on install ("Update") */
         "84b1da2a6d27e051cd3102ae0cef9be838189ad3e1d90082eea0361215d7d5a6",
         "9c8a57a03e8f38d6aec15fc17fdb2647e4f3bd6a8b4b39e36f25efc0d99b0a1b",
+        "3661f8434c4b8a3e2d87756a08c6a35322bd26b9a42d9c1fee43a4034ace204d",
         "7b2645692fdae5369bfab7029a80b38fbd3759f322fe22abeff9f0ff3db43549" };
     for (size_t i = 0; i < sizeof ours / sizeof *ours; i++) if (!strcmp(hex, ours[i])) return 3;
     return 2;
@@ -2692,8 +2716,22 @@ static void vfix(bool install)
     mf_recheck();
     settings_publish();
 }
-/* Versus starts at the resolution in its Default.ini (FullscreenViewportX/Y),
-   before the Versus Fix can change the menu's last entry: so it goes there too. */
+static void vprf_res_cb(void *ctx, const char *name, bool is_dir, u64 size, u64 mtime)
+{
+    (void)size; (void)mtime;
+    size_t L = strlen(name);
+    if (is_dir || L <= 8) return;
+    char low[16];
+    sfmt(low, sizeof low, "%s", name + L - 8);
+    for (char *c = low; *c; c++) if (*c >= 'A' && *c <= 'Z') *c = (char)(*c + 32);
+    if (strcmp(low, "_prf.ini")) return;
+    char p[900];
+    sfmt(p, sizeof p, "%s" PATHSEP "%s", (const char *)ctx, name);
+    ini_set(p, "SBase.SPlayerProfile", "ScreenRes", "-1");
+}
+/* Versus starts at the resolution in its Default.ini (Fullscreen- and
+   WindowedViewportX/Y), before the Versus Fix can change the menu's last entry,
+   and a profile sets its own when it's loaded: so both are set here. */
 static bool vfix_res_ini(int w, int h)
 {
     char p[900], v[16];
@@ -2701,8 +2739,20 @@ static bool vfix_res_ini(int w, int h)
     if (!file_exists(p)) return true; /* made when Versus first runs; the menu works then */
     sfmt(v, sizeof v, "%d", w);
     bool ok = ini_set(p, "WinDrv.WindowsClient", "FullscreenViewportX", v) >= 0;
+    ok &= ini_set(p, "WinDrv.WindowsClient", "WindowedViewportX", v) >= 0;
     sfmt(v, sizeof v, "%d", h);
-    return ini_set(p, "WinDrv.WindowsClient", "FullscreenViewportY", v) >= 0 && ok;
+    ok &= ini_set(p, "WinDrv.WindowsClient", "FullscreenViewportY", v) >= 0;
+    ok &= ini_set(p, "WinDrv.WindowsClient", "WindowedViewportY", v) >= 0;
+    /* each Versus profile picks a line of the menu's list (ScreenRes=n) and sets it
+       when it's loaded; -1 = none, so the resolution above is kept */
+    if (g_vprf[0]) {
+        char dir[900];
+        sfmt(dir, sizeof dir, "%s", g_vprf);
+        char *e = 0;
+        for (char *c = dir; *c; c++) if (*c == PATHSEP[0]) e = c;
+        if (e) { *e = 0; dir_list(dir, vprf_res_cb, dir); }
+    }
+    return ok;
 }
 static void apply_vfix(u64 a, bool turns)
 {
@@ -2745,6 +2795,7 @@ static void rawmouse(bool on)
     else if (on && st != 1) set_say("! Raw mouse is part of the SCCT Fix: install it first.");
     else {
         scctfix_paths(src, dst, bak, ini, sizeof src);
+        if (g_pd_ini[0]) ini_set(g_pd_ini, "Init", "UseDIMouse", "False");
         if (ini_set(ini, "Init", "UseDIMouse", "False") < 0) set_say("! Raw mouse: couldn't write SplinterCell3.ini.");
         else if (!scfini_write(chud_state() == 1, on, spfps_state())) set_say("! Raw mouse: couldn't write System\\SCCTFix.ini.");
         else set_say(on ? "Raw mouse on: no acceleration, any polling rate (next time the game starts)." : "Raw mouse off: the game's default mouse.");
@@ -2883,6 +2934,10 @@ static void reset_settings(bool versus)
                 err |= ini_set(users[i], 0, "DesiredFOV", "75.000000") < 0;
                 err |= ini_set(users[i], 0, "DefaultFOV", "75.000000") < 0;
             }
+            for (int i = 0; i < g_nprof; i++) {
+                err |= ini_set(g_prof_ini[i], "Engine.PlayerController", "DesiredFOV", "75.000000") < 0;
+                err |= ini_set(g_prof_ini[i], "Engine.PlayerController", "DefaultFOV", "75.000000") < 0;
+            }
             err |= ini_set(p, 0, "DesiredFOV", "75.000000") < 0;
             err |= ini_set(p, "SIMULATION", "MAXFPS", "60") < 0;
             err |= ini_set(p, "Init", "UseDIMouse", "False") < 0;
@@ -2941,6 +2996,10 @@ static void apply_settings_(u64 a)
         int n = 0;
         sfmt(v, sizeof v, "%d", w); SET(sys_ini, "WinDrv.WindowsClient", "FullscreenViewportX", v); n += r > 0;
         sfmt(v, sizeof v, "%d", h); SET(sys_ini, "WinDrv.WindowsClient", "FullscreenViewportY", v); n += r > 0;
+        if (g_pd_ini[0]) { /* the copy the game reads */
+            sfmt(v, sizeof v, "%d", w); SET(g_pd_ini, "WinDrv.WindowsClient", "FullscreenViewportX", v); n += r > 0;
+            sfmt(v, sizeof v, "%d", h); SET(g_pd_ini, "WinDrv.WindowsClient", "FullscreenViewportY", v); n += r > 0;
+        }
         for (int i = 0; i < 2; i++) if (users[i][0]) {
             sfmt(v, sizeof v, "%d", w); SET(users[i], "WinDrv.WindowsClient", "FullscreenViewportX", v); n += r > 0;
             sfmt(v, sizeof v, "%d", h); SET(users[i], "WinDrv.WindowsClient", "FullscreenViewportY", v); n += r > 0;
@@ -2960,6 +3019,10 @@ static void apply_settings_(u64 a)
             SET(users[i], 0, "DefaultFOV", v); n += r > 0;
         }
         SET(sys_ini, 0, "DesiredFOV", v); n += r > 0;
+        for (int i = 0; i < g_nprof; i++) { /* each profile has its own */
+            SET(g_prof_ini[i], "Engine.PlayerController", "DesiredFOV", v); n += r > 0;
+            SET(g_prof_ini[i], "Engine.PlayerController", "DefaultFOV", v); n += r > 0;
+        }
         if (n) set_say("Settings: FOV set to %d.", fov);
         else set_say("! Settings: the game's files have no FOV setting to change%s.", g_ws_ini[0] ? " - use the widescreen fix's FOV factor" : "");
     }

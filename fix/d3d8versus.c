@@ -570,6 +570,11 @@ BOOL WINAPI DllEntry(HINSTANCE dll, DWORD reason, void *reserved)
     /* Windows' timer ticks every 15.6 ms unless a program asks for 1 ms (since Windows 10 2004
        only for that program); Versus sleeps between frames, so it would land on ~22 FPS. */
     timeBeginPeriod(1);
+    { /* per-monitor DPI aware: on a scaled desktop (125 %, 150 %) Windows would otherwise show Versus smaller and stretched */
+        typedef BOOL(WINAPI * SetCtxFn)(HANDLE);
+        SetCtxFn f = (SetCtxFn)GetProcAddress(GetModuleHandleA("user32.dll"), "SetProcessDpiAwarenessContext");
+        if (f) f((HANDLE)-4 /* DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 */);
+    }
     g_rate125 = read_int("Mouse", "Rate125", 1) != 0;
     patch_limiter();
     log_line(g_limiter_patched ? "frame limiter: found\r\n" : "frame limiter: not found\r\n");

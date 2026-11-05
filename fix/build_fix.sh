@@ -19,7 +19,7 @@ mkdef kernel32 CreateFileA@28 DisableThreadLibraryCalls@4 GetModuleFileNameA@12 
 mkdef user32 GetMonitorInfoA@8 GetWindowLongA@8 GetWindowRect@8 IsIconic@4 MonitorFromWindow@8 \
     RegisterHotKey@16 SetWindowLongA@12 SetWindowPos@28 ShowWindow@8 UnregisterHotKey@8 wsprintfA \
     RegisterClassExA@4 CreateWindowExA@48 RegisterRawInputDevices@12 GetRawInputData@20 GetMessageA@16 \
-    DispatchMessageA@4 DefWindowProcA@16 GetForegroundWindow@0 GetAncestor@8 SetCursorPos@8 GetClientRect@8 ClientToScreen@8 EnumDisplaySettingsA@12
+    DispatchMessageA@4 DefWindowProcA@16 GetForegroundWindow@0 GetAncestor@8 SetCursorPos@8 GetClientRect@8 ClientToScreen@8 EnumDisplaySettingsA@12 SetProcessDPIAware@0
 mkdef winmm timeBeginPeriod@4
 
 clang --target=i686-pc-windows-msvc -O2 -Wall -Wextra -fno-builtin -fno-stack-protector -ffreestanding \

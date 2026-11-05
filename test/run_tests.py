@@ -608,6 +608,12 @@ def main():
         os.makedirs(pd, exist_ok=True)
         with open(os.path.join(pd, "SplinterCell3User.ini"), "wb") as f:  # the host's own settings live in ProgramData
             f.write(b"[Engine.PlayerController]\r\nDesiredFOV=75.000000\r\n")
+        pdroot = os.path.dirname(pd)
+        with open(os.path.join(pdroot, "SplinterCell3.ini"), "wb") as f:  # the copy of the game's ini it reads
+            f.write(b"[WinDrv.WindowsClient]\r\nFullscreenViewportX=1024\r\nFullscreenViewportY=768\r\nStartupFullscreen=True\r\n")
+        os.makedirs(os.path.join(pd, "KAZ"), exist_ok=True)
+        with open(os.path.join(pd, "KAZ", "KAZ.ini"), "wb") as f:  # a profile: its own FOV
+            f.write(b"[Engine.PlayerInput]\r\nMouseSensitivity=100.000000\r\n[Engine.PlayerController]\r\nDesiredFOV=75.0\r\nDefaultFOV=75.0\r\n")
         ga, gb, gc = game_dir("a", modded), game_dir("b", other), game_dir("c", base)
         exe_a, exe_b = os.path.join(d, "exe_a"), os.path.join(d, "exe_b")  # each PC's SCCTLink folder
         os.makedirs(exe_a, exist_ok=True); os.makedirs(exe_b, exist_ok=True)
@@ -653,6 +659,10 @@ def main():
               and hm.wait_for(r"Settings: FPS limit set to 60", timeout=3) is not None
               and hm.wait_for(r"Settings: the widescreen fix's FOV factor set to 1\.00", timeout=3) is not None,
               "Apply: resolution, FOV, FPS limit and the widescreen fix's FOV factor written")
+        with open(os.path.join(pdroot, "SplinterCell3.ini"), "rb") as f:
+            check(b"FullscreenViewportX=1920\r\nFullscreenViewportY=1080\r\n" in f.read(), "...also in ProgramData's SplinterCell3.ini (the copy the game reads)")
+        with open(os.path.join(pd, "KAZ", "KAZ.ini"), "rb") as f:
+            check(b"DesiredFOV=90.000000\r\nDefaultFOV=90.000000\r\n" in f.read(), "...and the FOV in each profile (Profiles\\<name>\\<name>.ini)")
         rd = lambda *p: open(os.path.join(*p), "rb").read()
         uini = os.path.join(pd, "SplinterCell3User.ini")
         check(rd(uini) == b"[Engine.PlayerController]\r\nDesiredFOV=90.000000\r\n"
@@ -919,13 +929,19 @@ def main():
         print("[21] Versus Fix: install, its settings (SCCTVersusFix.ini), the Mods tab, remove")
         vf = dict(base)
         vf["Versus/System/SCCT_Versus.exe"] = b"MZ" + b"v" * 4000
-        vf["Versus/System/Default.ini"] = b"[WinDrv.WindowsClient]\r\nFullscreenViewportX=1600\r\n"
+        vf["Versus/System/Default.ini"] = (b"[WinDrv.WindowsClient]\r\nWindowedViewportX=640\r\nWindowedViewportY=480\r\n"
+                                           b"FullscreenViewportX=1600\r\nFullscreenViewportY=1200\r\n")
         gv = game_dir("vfix", vf)
+        pdx = os.path.join(gd, "programdata_v")
+        vprof = os.path.join(pdx, "Ubisoft", "Tom Clancy's Splinter Cell Chaos Theory", "Saved Games", "Versus")
+        os.makedirs(vprof, exist_ok=True)
+        with open(os.path.join(vprof, "KaZ_prf.ini"), "wb") as f:
+            f.write(b"[SBase.SPlayerProfile]\r\nMouseSensitivity=10.0\r\nScreenRes=5\r\nGraphQual=2\r\n")
         exe_v = os.path.join(d, "exe_v")
         os.makedirs(exe_v, exist_ok=True)
         shutil.copy(os.path.join(ROOT, "build", "fix", "d3d8.dll"), os.path.join(exe_v, "SCCTVersusFix-d3d8.dll"))
         vsys = os.path.join(gv, "Versus", "System")
-        vx = relay(A, "VX", 1200, "", ["idle", "--versus"], d, {"MOCK_GAME_DIR": gv, "MOCK_EXE_DIR": exe_v}, stdin=subprocess.PIPE)
+        vx = relay(A, "VX", 1200, "", ["idle", "--versus"], d, {"MOCK_GAME_DIR": gv, "MOCK_EXE_DIR": exe_v, "PROGRAMDATA": pdx}, stdin=subprocess.PIPE)
         procs.append(vx)
         check(vx.wait_for(r"\[settings\] vfix 0 fps 60 res 0x0 hud 1 rate125 1 fov 0 0 turn 100 100", timeout=10) is not None,
               "Versus Fix not installed yet; its defaults: 60 FPS, HUD fix, mouse 125 Hz, the game's FOV and turning")
@@ -942,7 +958,11 @@ def main():
         check(vx.wait_for(r"\[settings\] vfix 1 fps 120 res 1920x1080 hud 1 rate125 0 fov 90 110 turn 100 100", timeout=10, since=mk)
               is not None, "Versus Fix settings saved: 120 FPS, 1920x1080, mouse as it comes, FOV 90 / 110")
         with open(os.path.join(vsys, "Default.ini"), "rb") as f:
-            check(b"FullscreenViewportX=1920\r\n" in f.read(), "...and Versus' own Default.ini starts it at 1920 wide")
+            t = f.read()
+        check(b"WindowedViewportX=1920\r\nWindowedViewportY=1080\r\nFullscreenViewportX=1920\r\nFullscreenViewportY=1080\r\n" in t,
+              "...and Versus' own Default.ini starts it at 1920x1080 (window and full screen)")
+        with open(os.path.join(vprof, "KaZ_prf.ini"), "rb") as f:
+            check(b"ScreenRes=-1\r\nGraphQual=2\r\n" in f.read(), "...and the profile doesn't pick a line of the menu's list (ScreenRes=-1)")
         mk = vx.mark()
         vx.p.stdin.write("N\n250 300\n"); vx.p.stdin.flush()
         check(vx.wait_for(r"\[settings\] vfix 1 fps 120 res 1920x1080 hud 1 rate125 0 fov 90 110 turn 250 300", timeout=10, since=mk)
