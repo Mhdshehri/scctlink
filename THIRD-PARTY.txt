@@ -1,7 +1,9 @@
 Third-party code in SCCTLink
 ============================
 
-The co-op widescreen HUD and raw mouse in fix/d3d9fix.c (the SCCT Fix) are ported from
+In fix/d3d9fix.c (the SCCT Fix), the widescreen HUD, the raw mouse, the
+screen-resolution and DPI handling and the camera FOV - and the DPI handling
+in fix/d3d8versus.c (the Versus Fix) - are ported from
 SplinterCellChaosTheory.FusionFix in ThirteenAG's WidescreenFixesPack
 (https://github.com/ThirteenAG/WidescreenFixesPack) and its RawInputHandler
 (includes/rawinput.hpp), rewritten in C for

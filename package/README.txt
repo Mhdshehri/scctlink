@@ -1,4 +1,4 @@
-SCCTLink 0.9.9.7 - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
+SCCTLink 0.9.9.8 - Splinter Cell: Chaos Theory co-op and Versus with Steam friends
 ==============================================================================
 
 No VPN (no Hamachi, Radmin or ZeroTier), no port forwarding, no IP addresses.
@@ -13,7 +13,7 @@ Both players need:
   * each other on their Steam friends list
   * this folder unzipped somewhere (Desktop is fine). Keep SCCTLink.exe,
     steam_api.dll and SCCTFix-d3d9.dll together.
-  * the SAME SCCTLink version (0.9.9.7).
+  * the SAME SCCTLink version (0.9.9.8).
 
 
 HOW TO PLAY
@@ -273,6 +273,18 @@ and the SCCT Fix are hidden.
 0.9.9: Settings: mouse sensitivity, aim turn speed and Reset; Versus gets its
 own Settings (mouse sensitivity, mouse multiplier); the Mods tab says on top
 whether all party members match.
+0.9.9.8 (testing): co-op draws at the resolution you choose (or your
+screen's; the SCCT Fix opens a window always and is DPI aware, so a scaled
+2K desktop isn't shown as 1920x1080); the FOV works: the game ignores
+DesiredFOV, so the SCCT Fix sets the camera's FOV (from ThirteenAG's
+FusionFix) - wide screens see more on the sides by themselves, and the FOV
+number (75 = the game's) widens the normal view, each player's own; settings
+also go to the copies the game really reads in ProgramData; each time Versus
+starts the Versus Fix sets its start resolution (Default.ini) and
+ScreenRes=-1 in every profile and in DefaultProfile.ini (new profiles), so a
+profile doesn't pick 1600x1200 again; Live stats show the connection only
+(no FPS), with a thicker dark edge; the co-op 60 FPS signal is also a file,
+System\SCCTLink.coop.
 0.9.9.7 (testing): Raw mouse is now in the SCCT Fix (Windows Raw Input,
 ported from ThirteenAG's FusionFix: no acceleration, any polling rate); the
 Settings tab is rebuilt (a banner for the fix, sections, I / O switches,
@@ -282,24 +294,7 @@ says when another widescreen mod is there; single player can have more FPS
 ("Single player: 60 FPS / screen's Hz / no limit") - during an SCCTLink co-op
 session the SCCT Fix goes back to 60 by itself; the first install also skips
 the intro videos; the window fits small screens; "Check again" finds Steam
-if it was started after SCCTLink; "Update" replaces an older Versus Fix;
-co-op renders at your screen's own resolution (2K, ultrawide; from
-ThirteenAG's FusionFix), so the widescreen HUD is right from the first
-start; Versus starts at the resolution you set (its Default.ini); Live
-stats show the connection only (no FPS), with a thicker dark edge; the
-co-op 60 FPS signal is also a file, System\SCCTLink.coop.
-Settings are also written to the copies the game really reads in
-ProgramData (its own SplinterCell3.ini, each profile's FOV); the SCCT Fix
-always opens a window and is DPI aware (a scaled 2K desktop showed as
-1920x1080); in Versus, Apply sets the window and full-screen size in
-Default.ini and ScreenRes=-1 in your profile (so loading it doesn't pick
-1600x1200 again).
-Co-op FOV: the game ignores DesiredFOV in its .ini files, so the SCCT Fix now
-sets the camera's FOV itself (from FusionFix): wide screens see more on the
-sides by themselves, and the FOV number (75 = the game's) widens the normal
-view - each player's own. The co-op resolution is yours to choose (empty =
-the screen's). The Versus Fix sets the start resolution and ScreenRes=-1 in
-every profile each time Versus starts.
+if it was started after SCCTLink; "Update" replaces an older Versus Fix.
 0.9.9.6 (testing): new co-op HUD fix, ported from ThirteenAG's FusionFix (MIT,
 see THIRD-PARTY.txt): the HUD, menus and text are drawn 4:3 in the middle
 instead of stretched; full-screen pictures, the scope and the loading bar
