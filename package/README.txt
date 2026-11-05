@@ -54,20 +54,10 @@ FRIEND(S)
        Co-op:  Co-op -> LAN -> Join game.    Versus: the LAN game list.
   3. Leave SCCTLink open while you play.
 
-Live stats = text that floats on top of the game, with no background. It shows the
-game's frame rate (FPS) all the time - playing the story alone, in the menu,
-or online - and while you're linked the ping, packet loss and packets per
-second for each friend. The FPS comes from Windows' own performance events
-(like PresentMon / Xbox Game Bar): nothing is put into the game, and it is
-only measured while it is shown. Drag it by its text; right-click the text
-(or click the button again) to close it.
-Other buttons: Details = ping, packet loss, ports (in the Log). Stop = back
-to the start. Host: pick a friend in the list and click Kick to remove them
-(they can't link again until you click Stop).
-SCCTLink flashes in the taskbar with a short sound when a friend links (host)
-or the host's game is up (friend).
-If a friend picked the other mode, SCCTLink says so: click Stop, switch the
-mode, join again. If your SCCTLink versions differ, it says who has the newer one.
+Live stats = text that floats on top of the game, with no background and a
+             dark edge so it reads on any scene: while linked, the ping,
+             packet loss and packets per second for each friend. Drag it
+             anywhere; right-click it to close.
 
 Windows Firewall may ask about Splinter Cell or SCCTLink. You can press
 Cancel: the game traffic only goes over this PC's own loopback addresses
@@ -292,9 +282,12 @@ says when another widescreen mod is there; single player can have more FPS
 ("Single player: 60 FPS / screen's Hz / no limit") - during an SCCTLink co-op
 session the SCCT Fix goes back to 60 by itself; the first install also skips
 the intro videos; the window fits small screens; "Check again" finds Steam
-if it was started after SCCTLink; Live stats count the frames in the SCCT
-Fix / Versus Fix themselves (exact; Windows' own counting was wrong);
-"Update" replaces an older Versus Fix.
+if it was started after SCCTLink; "Update" replaces an older Versus Fix;
+co-op renders at your screen's own resolution (2K, ultrawide; from
+ThirteenAG's FusionFix), so the widescreen HUD is right from the first
+start; Versus starts at the resolution you set (its Default.ini); Live
+stats show the connection only (no FPS), with a thicker dark edge; the
+co-op 60 FPS signal is also a file, System\SCCTLink.coop.
 0.9.9.6 (testing): new co-op HUD fix, ported from ThirteenAG's FusionFix (MIT,
 see THIRD-PARTY.txt): the HUD, menus and text are drawn 4:3 in the middle
 instead of stretched; full-screen pictures, the scope and the loading bar

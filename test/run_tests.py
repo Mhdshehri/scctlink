@@ -703,6 +703,7 @@ def main():
               "co-op HUD fix on: System\\SCCTFix.ini [HUD] Fix=1 (read by our SCCT Fix)")
         hm.p.stdin.write("F\n0\n"); hm.p.stdin.flush()
         check(hm.wait_for(r"SCCT Fix removed", timeout=10, since=at) is not None, "removed again")
+        check(os.path.exists(os.path.join(ga, "System", "SCCTLink.coop")), "co-op session: System\\SCCTLink.coop is there (the SCCT Fix keeps 60 FPS)")
         # the live stats window's numbers
         check(jm.wait_for(r"\[stats\] user1191   ping \d+ ms   loss [\d.-]+%?   \d+/\d+ pkt/s", timeout=10) is not None,
               "live stats: ping, loss and packets per second for the linked friend")
@@ -716,6 +717,7 @@ def main():
         check(len(cached) >= 2 and int(cached[0][0]) > 0 and int(cached[-1][1]) > 0 and int(cached[-1][0]) <= 2,
               "checksum cache: first start hashes the files, later checks reuse them %s" % cached[-2:])
         hm.stop(); jm.stop()
+        check(not os.path.exists(os.path.join(ga, "System", "SCCTLink.coop")), "...and gone when SCCTLink closes")
         hs = relay(A, "HS", 1193, "1194", ["host"], d, {"MOCK_GAME_DIR": gc})
         procs.append(hs)
         check(hs.wait_for(r"Lobby is ready") is not None, "host ready")
@@ -735,19 +737,13 @@ def main():
         check(hs.wait_for(r"only on user1194's PC: system/d3d9\.dll", timeout=10) is not None, "...and on the host's side, without clicking anything")
         hs.stop(); js.stop()
 
-        print("[17] live stats: the game's frame rate, even playing alone; the SCCT Fix reminder")
-        solo = relay(A, "SO", 1195, "", ["idle"], d, {"MOCK_GAME_DIR": gc, "MOCK_FPS": "60"}, stdin=subprocess.PIPE)
+        print("[17] live stats: the connection's numbers; the SCCT Fix reminder")
+        solo = relay(A, "SO", 1195, "", ["idle"], d, {"MOCK_GAME_DIR": gc}, stdin=subprocess.PIPE)
         procs.append(solo)
         check(solo.wait_for(r"! The SCCT Fix isn't installed\. Co-op disconnects", timeout=10) is not None,
               "without the SCCT Fix, co-op players are told to install it")
         solo.p.stdin.write("T\n1\n"); solo.p.stdin.flush()  # "Live stats"
-        check(solo.wait_for(r"\[stats\] Splinter Cell: not running", timeout=10) is not None, "live stats with no game: 'not running'")
-        game = Proc("solo-game", A.cmd([sys.executable, "-I", "-c",
-                                        "import ctypes,time;ctypes.CDLL(None).prctl(15,b'splintercell3',0,0,0);time.sleep(12)"]))
-        procs.append(game)
-        check(solo.wait_for(r"\[stats\] Splinter Cell: 60 FPS$", timeout=12) is not None or "[stats] Splinter Cell: 60 FPS" in solo.log,
-              "live stats while playing alone: the game's frame rate")
-        game.stop()
+        check(solo.wait_for(r"\[stats\] Not linked to anyone yet", timeout=10) is not None, "live stats with no one linked: says so (no FPS any more)")
         solo.stop()
 
         print("[18] Versus: only Versus files are compared; who has SCCT Versus Reloaded")
@@ -945,6 +941,8 @@ def main():
         vx.p.stdin.write("P\n120 1920 1080 1 0 90 110\n"); vx.p.stdin.flush()
         check(vx.wait_for(r"\[settings\] vfix 1 fps 120 res 1920x1080 hud 1 rate125 0 fov 90 110 turn 100 100", timeout=10, since=mk)
               is not None, "Versus Fix settings saved: 120 FPS, 1920x1080, mouse as it comes, FOV 90 / 110")
+        with open(os.path.join(vsys, "Default.ini"), "rb") as f:
+            check(b"FullscreenViewportX=1920\r\n" in f.read(), "...and Versus' own Default.ini starts it at 1920 wide")
         mk = vx.mark()
         vx.p.stdin.write("N\n250 300\n"); vx.p.stdin.flush()
         check(vx.wait_for(r"\[settings\] vfix 1 fps 120 res 1920x1080 hud 1 rate125 0 fov 90 110 turn 250 300", timeout=10, since=mk)

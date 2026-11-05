@@ -16,6 +16,8 @@
  *   - Alt+Tab: the game grabs Alt+Tab for itself (RegisterHotKey "UnrealAltTab")
  *     and minimizes on focus loss; both are blocked.
  *   - Crash log: a crash's code and address are written to SCCTFix.log.
+ *   - Screen resolution: in its borderless window the game renders at the
+ *     monitor's own resolution (2K, ultrawide, ...); see below.
  *   - Raw mouse (optional, SCCTFix.ini [Mouse] Raw=1): the mouse is read as
  *     Windows Raw Input (no acceleration, any polling rate); see below.
  *   - HUD fix (optional, SCCTFix.ini [HUD] Fix=1): the game stretches its
@@ -599,6 +601,71 @@ static void raw_mouse(void)
     log_write("Raw mouse: on\r\n", 15);
 }
 
+/* ---- the screen's own resolution ----
+   Ported from ThirteenAG's FusionFix (MIT, see THIRD-PARTY.txt). In a window
+   the game renders at its windowed size (its menu's list stops short of 2K and
+   wider screens), and the borderless window stretched that over the screen.
+   UD3DRenderDevice::SetRes(viewport, width, height, fullscreen, ...) is given
+   the monitor's size instead whenever it isn't fullscreen, so the game draws
+   at the screen's real resolution. When the size changes, the device's "reset
+   requested" flag (+0x64) is set for the call: the windowed fast path would
+   keep the old size's render targets. */
+typedef int(__thiscall *SetResFn)(void *, BYTE *, int, int, int, int);
+static SetResFn g_setres; /* the original: its first instruction, then a jump back */
+static int g_res_w, g_res_h;
+static int __fastcall my_setres(BYTE *dev, void *edx, BYTE *vp, int w, int h, int fs, int a5)
+{
+    (void)edx;
+    DWORD wp = vp ? *(DWORD *)(vp + 0x1f0) : 0;
+    HWND hw = wp ? *(HWND *)(wp + 4) : 0;
+    MONITORINFO mi;
+    mi.cbSize = sizeof mi;
+    if (!fs && hw && GetMonitorInfoA(MonitorFromWindow(hw, 2 /* MONITOR_DEFAULTTONEAREST */), &mi)) {
+        int mw = mi.rcMonitor.right - mi.rcMonitor.left, mh = mi.rcMonitor.bottom - mi.rcMonitor.top;
+        if (mw > 0 && mh > 0 && (mw != w || mh != h)) {
+            char b[80];
+            wsprintfA(b, "Resolution: %dx%d -> %dx%d (the screen's)\r\n", w, h, mw, mh);
+            log_write(b, slen(b));
+            w = mw;
+            h = mh;
+        }
+    }
+    int r;
+    if (!fs && w > 0 && h > 0 && (w != g_res_w || h != g_res_h) && g_res_w) {
+        int *req = (int *)(dev + 0x64), prev = *req;
+        *req = 1;
+        r = g_setres(dev, vp, w, h, fs, a5);
+        *req = prev;
+    } else
+        r = g_setres(dev, vp, w, h, fs, a5);
+    g_res_w = w;
+    g_res_h = h;
+    return r;
+}
+static const struct Site res_sites[] = {
+    { 0x10c8b860, 5, { 0xa1, 0x94, 0x27, 0x23, 0x11 } }, /* SetRes: mov eax, [0x11232794] */
+    { 0x10c8b8f8, 5, { 0x8b, 0x46, 0x64, 0x85, 0xc0 } }, /* ...: mov eax, [esi+0x64] (the reset flag); test eax, eax */
+};
+static void screen_res(void)
+{
+    for (unsigned i = 0; i < sizeof res_sites / sizeof *res_sites; i++)
+        if (!site_ok(&res_sites[i])) {
+            log_write("Resolution: not this game's code, left as it is\r\n", 49);
+            return;
+        }
+    if (!stubs_ready()) return;
+    BYTE *t = g_stubs + g_stubs_used; /* the trampoline: the replaced mov, then on */
+    memcpy(t, (void *)0x10c8b860, 5);
+    t[5] = 0xe9;
+    put32(t + 6, 0x10c8b865 - (DWORD)(t + 10));
+    g_stubs_used += 16;
+    g_setres = (SetResFn)(void *)t;
+    BYTE j[5] = { 0xe9 };
+    put32(j + 1, (DWORD)my_setres - (0x10c8b860 + 5));
+    code_write((void *)0x10c8b860, j, 5);
+    log_write("Resolution: the screen's\r\n", 26);
+}
+
 static void log_mode(const char *what, const PRESENT_PARAMS *pp, HRESULT hr)
 {
     char b[160];
@@ -622,19 +689,23 @@ static void *hook_slot(void *obj, int slot, void *hook)
 /* ---- the frame rate ----
    Co-op: always 60 (the two PCs run the same simulation in lockstep). Single
    player may choose (SCCTFix.ini [Display] SingleFPS: 60, -1 = the screen's
-   refresh rate, 0 = no limit). While SCCTLink is in a co-op session it holds a
-   named event, Local\SCCTLinkCoop (on this PC only, nothing on the network);
-   once a second the fix looks for it, and while it is there the limit is 60
-   whatever the setting. If SCCTLink runs as administrator and the game
-   doesn't, opening it is refused - which still means it is there. */
+   refresh rate, 0 = no limit). While SCCTLink is in a co-op session it keeps
+   a file, System\SCCTLink.coop (and a named event, Local\SCCTLinkCoop: on
+   this PC only, nothing on the network); once a second the fix looks for
+   them, and while one is there the limit is 60 whatever the setting. If
+   SCCTLink stops without removing the file, single player stays at 60 until
+   it runs again: the safe side. */
 IMP HANDLE WINAPI OpenEventA(DWORD, BOOL, const char *);
 IMP BOOL WINAPI CloseHandle(HANDLE);
 IMP DWORD WINAPI GetLastError(void);
 IMP BOOL WINAPI EnumDisplaySettingsA(const char *, DWORD, void *);
 static int g_fps = 60;        /* the limit now (0: none) */
 static LONGLONG g_fps_check;  /* when to look again */
+IMP DWORD WINAPI GetFileAttributesA(const char *);
+static char g_coop_file[300]; /* System\SCCTLink.coop: SCCTLink keeps it there during a co-op session */
 static int coop_session(void)
 {
+    if (g_coop_file[0] && GetFileAttributesA(g_coop_file) != (DWORD)-1) return 1;
     HANDLE e = OpenEventA(0x00100000 /* SYNCHRONIZE */, 0, "Local\\SCCTLinkCoop");
     if (e) { CloseHandle(e); return 1; }
     return GetLastError() == 5 /* ERROR_ACCESS_DENIED: there, but SCCTLink is administrator */;
@@ -673,23 +744,9 @@ static void fps_update(LONGLONG now)
     log_write(b, slen(b));
 }
 
-/* The frame counter for SCCTLink's live stats: a small shared memory block,
-   Local\\SCCTFixFrames (this PC only): [0] 'SCFX', [1] frames drawn. SCCTLink
-   reads it once a second; Windows' own counting (ETW) gets this game wrong. */
-IMP HANDLE WINAPI CreateFileMappingA(HANDLE, void *, DWORD, DWORD, DWORD, const char *);
-IMP void *WINAPI MapViewOfFile(HANDLE, DWORD, DWORD, DWORD, unsigned long);
-static volatile DWORD *g_shared;
-static void shared_open(void)
-{
-    HANDLE m = CreateFileMappingA((HANDLE)-1, 0, 4 /* PAGE_READWRITE */, 0, 4096, "Local\\SCCTFixFrames");
-    if (m) g_shared = MapViewOfFile(m, 2 /* FILE_MAP_WRITE */, 0, 0, 16);
-    if (g_shared) g_shared[0] = 0x58464353; /* "SCFX" */
-}
-
 static HRESULT WINAPI hook_Present(void *dev, const void *src, const void *dst, HWND w, const void *dirty)
 {
     HRESULT hr = g_present(dev, src, dst, w, dirty);
-    if (g_shared) g_shared[1]++;
     LONGLONG now;
     QueryPerformanceCounter(&now);
     fps_update(now);
@@ -780,6 +837,8 @@ BOOL WINAPI DllEntry(HINSTANCE dll, DWORD reason, void *reserved)
     memcpy(g_ini, path, n);
     memcpy(g_ini + n, "SCCTFix.ini", 12);
     memcpy(path + n, "SCCTFix.log", 12);
+    memcpy(g_coop_file, path, n);
+    memcpy(g_coop_file + n, "SCCTLink.coop", 14);
     g_log = CreateFileA(path, 0x40000000 /* GENERIC_WRITE */, 1 /* FILE_SHARE_READ */, 0, 2 /* CREATE_ALWAYS */,
                         0x80000000 /* FILE_FLAG_WRITE_THROUGH */, 0);
     log_write("SCCT Fix loaded\r\n", 17);
@@ -788,8 +847,8 @@ BOOL WINAPI DllEntry(HINSTANCE dll, DWORD reason, void *reserved)
     g_spin = (DWORD)g_freq / 500;
     timeBeginPeriod(1);
     SetUnhandledExceptionFilter((void *)on_crash);
-    shared_open();
     patch_import("RegisterHotKey", (void *)hook_RegisterHotKey);
     patch_import("ShowWindow", (void *)hook_ShowWindow);
+    screen_res(); /* before the game sets up its screen */
     return 1;
 }

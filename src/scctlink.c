@@ -1914,7 +1914,8 @@ static bool mf_skip(const char *name)
     if (!dot) return false;
     static const char *const ext[] = { ".ini", ".log", ".txt", ".sav", ".bak", ".tmp", ".dmp", ".lnk", ".url",
                                        ".pdf", ".htm", ".html", ".rtf", ".old", ".crash", ".zip", ".rar", ".7z",
-                                       ".scctlink-backup", ".scctlink-new" /* SCCTLink's own copies of changed files */ };
+                                       ".scctlink-backup", ".scctlink-new", /* SCCTLink's own copies of changed files */
+                                       ".coop" /* System\\SCCTLink.coop: only during a co-op session */ };
     for (unsigned i = 0; i < sizeof ext / sizeof *ext; i++) {
         const char *a = dot, *b = ext[i];
         while (*a && *b && ((*a | 32) == *b || *a == *b)) { a++; b++; }
@@ -2315,7 +2316,7 @@ static int ini_set(const char *path, const char *section, const char *key, const
    SHA-256 is exactly this one (checked: no network functions, starts no
    programs, only writes System\SCCTFix.log). */
 #define SCCTFIX_FILE "SCCTFix-d3d9.dll"
-#define SCCTFIX_SHA "3f73be91b530d629e3c255d6294785160a7db360cd7d145649cc96e11531e910" /* ours: fix/d3d9fix.c (fix/build_fix.sh) */
+#define SCCTFIX_SHA "74018a1aa44700c3b971e4a6a4973dbe9fe8d3e7e5a842df6124eaf057c11ac6" /* ours: fix/d3d9fix.c (fix/build_fix.sh) */
 #define SCCTFIX_OLD_SHA "2f05d8e9e7aaf750eb2889c7ba57dd453820e3a794b9ba74c43730446a84cae9" /* the original; ours replaces it */
 bool sha256_file(const char *path, char hex[65]);
 static void scctfix_paths(char *src, char *dst, char *bak, char *ini, size_t n)
@@ -2338,7 +2339,8 @@ static int scctfix_state(void)
                                         "2228214d27cb77ad2b13e63510bad49bab834eba7ce8665e8a55371419994ea4",
                                         "b5624f3f18d4c775f1aca05c8e0fffabcc2aaf523321073f558f2a9d815985da",
                                         "9b73fe61a3eba66ebd91ffdbc20a59b0a217b3fba61d5facf7b327f2514c0a97",
-                                        "ab388fcc1ec495675a3ad4fa3c96b426654f4201a7672d58f597f8afa709cf86" };
+                                        "ab388fcc1ec495675a3ad4fa3c96b426654f4201a7672d58f597f8afa709cf86",
+                                        "3f73be91b530d629e3c255d6294785160a7db360cd7d145649cc96e11531e910" };
     if (!strcmp(hex, SCCTFIX_SHA)) return 1;
     if (!strcmp(hex, SCCTFIX_OLD_SHA)) return 3;
     for (size_t i = 0; i < sizeof ours / sizeof *ours; i++) if (!strcmp(hex, ours[i])) return 3;
@@ -2564,7 +2566,7 @@ static void scctfix(bool install)
    next to SCCTLink.exe as SCCTVersusFix-d3d8.dll and is only copied if its
    SHA-256 is exactly this one (the build is reproducible: fix/build_fix.sh). */
 #define VFIX_FILE "SCCTVersusFix-d3d8.dll"
-#define VFIX_SHA "9c8a57a03e8f38d6aec15fc17fdb2647e4f3bd6a8b4b39e36f25efc0d99b0a1b"
+#define VFIX_SHA "3661f8434c4b8a3e2d87756a08c6a35322bd26b9a42d9c1fee43a4034ace204d"
 static void vfix_paths(char *src, char *dst, char *bak, char *ini, size_t n)
 {
     sfmt(src, n, "%s" PATHSEP VFIX_FILE, exe_dir());
@@ -2584,7 +2586,7 @@ static int vfix_state(void)
     if (!strcmp(hex, VFIX_SHA)) return 1;
     static const char *const ours[] = { /* earlier builds of ours: replaced on install ("Update") */
         "84b1da2a6d27e051cd3102ae0cef9be838189ad3e1d90082eea0361215d7d5a6",
-        "3661f8434c4b8a3e2d87756a08c6a35322bd26b9a42d9c1fee43a4034ace204d",
+        "9c8a57a03e8f38d6aec15fc17fdb2647e4f3bd6a8b4b39e36f25efc0d99b0a1b",
         "7b2645692fdae5369bfab7029a80b38fbd3759f322fe22abeff9f0ff3db43549" };
     for (size_t i = 0; i < sizeof ours / sizeof *ours; i++) if (!strcmp(hex, ours[i])) return 3;
     return 2;
@@ -2690,6 +2692,18 @@ static void vfix(bool install)
     mf_recheck();
     settings_publish();
 }
+/* Versus starts at the resolution in its Default.ini (FullscreenViewportX/Y),
+   before the Versus Fix can change the menu's last entry: so it goes there too. */
+static bool vfix_res_ini(int w, int h)
+{
+    char p[900], v[16];
+    sfmt(p, sizeof p, "%s" PATHSEP "Versus" PATHSEP "System" PATHSEP "Default.ini", g_mf_dir);
+    if (!file_exists(p)) return true; /* made when Versus first runs; the menu works then */
+    sfmt(v, sizeof v, "%d", w);
+    bool ok = ini_set(p, "WinDrv.WindowsClient", "FullscreenViewportX", v) >= 0;
+    sfmt(v, sizeof v, "%d", h);
+    return ini_set(p, "WinDrv.WindowsClient", "FullscreenViewportY", v) >= 0 && ok;
+}
 static void apply_vfix(u64 a, bool turns)
 {
     g_uiset.note[0] = 0;
@@ -2710,6 +2724,7 @@ static void apply_vfix(u64 a, bool turns)
     }
     if (vfix_state() < 0) set_say("! Versus Fix: Versus wasn't found in the game's folder (only Steam copies).");
     else if (!vfix_write(&u)) set_say("! Versus Fix: couldn't write SCCTVersusFix.ini.");
+    else if (!turns && u.vf_w && u.vf_h && !vfix_res_ini(u.vf_w, u.vf_h)) set_say("! Versus Fix: couldn't write Versus\\System\\Default.ini.");
     else set_say(vfix_state() == 1 ? "Versus Fix: saved. FPS, mouse and resolution apply when Versus starts; FOV and turning within a few seconds."
                                    : "Versus Fix: saved. Install the Versus Fix to use them.");
     settings_publish();
@@ -3678,17 +3693,26 @@ static void start_mode(int mode)
     }
 }
 
-/* the live stats window: is it open, and the game's frame rate */
+/* the live stats window: is it open (the connection's numbers) */
 static bool g_stats_on;
-static int g_fps = -1;
-static u64 g_fps_at;
-static void stats_tick(u64 t)
+
+/* While in a co-op session: System\SCCTLink.coop (and a named event) tell the
+   SCCT Fix to keep 60 FPS, whatever single player's setting. Removed when the
+   session ends and when SCCTLink starts idle (a left-over after a crash). */
+static void coop_flag(bool on)
 {
-    if (!g_stats_on || t - g_fps_at < 1000) return;
-    g_fps_at = t;
-    if (g_mode == MODE_IDLE) scan_game(0); /* (while linked, the relay keeps this up to date) */
-    int f = fps_get();
-    if (f != -2) g_fps = f;
+    static int last = -1, last_file = -1;
+    if (last != (int)on) { last = on; plat_coop_flag(on); }
+    if (last_file == (int)on || !g_mf_dir[0]) return; /* no game folder yet: try again next time */
+    last_file = on;
+    char p[900];
+    sfmt(p, sizeof p, "%s" PATHSEP "System" PATHSEP "SCCTLink.coop", g_mf_dir);
+    if (on) {
+        FILE *f = fopen(p, "wb");
+        static const char t[] = "SCCTLink co-op session: the SCCT Fix keeps 60 FPS while this file is here.\r\n";
+        if (f) { fwrite(t, 1, sizeof t - 1, f); fclose(f); }
+    } else
+        remove(p);
 }
 
 /* Co-op without the SCCT Fix disconnects as soon as someone draws a weapon: say so. */
@@ -3719,12 +3743,6 @@ static void make_status(UiState *st)
         st->done = (uint8_t)((linked ? 1 : 0) | (up ? 2 : 0) | (G.running && linked ? 4 : 0) | (playing ? 8 : 0));
     }
     size_t sk = 0;
-    if (g_stats_on) {
-        if (!G.running) sfmt(st->stats, sizeof st->stats, "%s: not running", g_versus ? "Versus" : "Splinter Cell");
-        else if (g_fps >= 0) sfmt(st->stats, sizeof st->stats, "%s: %d FPS", g_versus ? "Versus" : "Splinter Cell", g_fps);
-        else sfmt(st->stats, sizeof st->stats, "%s: running (FPS: Windows didn't allow measuring it)", g_versus ? "Versus" : "Splinter Cell");
-        sk = strlen(st->stats);
-    }
     for (int i = 0; i < g_npeers && sk < sizeof st->stats - 80; i++) {
         Peer *p = &g_peers[i];
         if (!p->welcomed) continue;
@@ -3735,6 +3753,7 @@ static void make_status(UiState *st)
              who(p->id), ping, loss, p->pps_in, p->pps_out);
         sk += strlen(st->stats + sk);
     }
+    if (g_stats_on && !sk) sfmt(st->stats, sizeof st->stats, "Not linked to anyone yet");
     if (g_mode == MODE_IDLE) {
         sfmt(st->status, sizeof st->status, "Ready (%s). Host a game, or join a friend.", MODE_NAME);
     } else if (g_is_host) {
@@ -3803,12 +3822,8 @@ static void handle_cmd(const Cmd *c)
     case CMD_STATS:
         if (c->arg && !g_stats_on) {
             g_stats_on = true;
-            g_fps = -1;
-            scan_game(2);
-            if (!fps_start()) note("frame rate: Windows didn't start the measuring (ETW)");
         } else if (!c->arg && g_stats_on) {
             g_stats_on = false;
-            fps_stop();
         }
         break;
     case CMD_SET_VERSUS:
@@ -3860,7 +3875,7 @@ void engine_run(const EngineOpts *o, Cmd first)
         }
         u64 t = now_ms();
         if (g_mode != prev_mode) { last_scan = 0; last_friends = 0; prev_mode = g_mode; }
-        plat_coop_flag(g_mode != MODE_IDLE && !g_versus); /* the SCCT Fix: 60 FPS while in a co-op session */
+        coop_flag(g_mode != MODE_IDLE && !g_versus); /* the SCCT Fix: 60 FPS while in a co-op session */
         if (g_mode != MODE_IDLE) {
             scan_game(0);
             u64 sig = ports_signature();
@@ -3912,7 +3927,6 @@ void engine_run(const EngineOpts *o, Cmd first)
             }
             if (g_lobby || g_joining) g_refresh = 0;
         }
-        stats_tick(t);
         Cmd c;
         while (ui_poll(&c)) handle_cmd(&c);
 
@@ -3935,11 +3949,11 @@ void engine_run(const EngineOpts *o, Cmd first)
             for (int j = 0; j < g_catch[i].ns && ns < 256; j++) socks[ns++] = g_catch[i].s[j];
         wait_socks(socks, ns, g_mode == MODE_IDLE ? 20 : 1);
     }
-    if (g_stats_on) fps_stop();
     if (g_steam_ok) {
         stop_mode(true);
         S.Shutdown();
     }
+    coop_flag(false);
     say("SCCTLink closed.");
 }
 

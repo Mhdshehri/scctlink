@@ -1027,7 +1027,7 @@ static void show_settings(const UiSettings *n)
         if (first || o.vf_mercturn != n->vf_mercturn) set_ws(ID_SET_VTURNM, n->vf_mercturn);
         if (first || o.vf_hud != n->vf_hud || o.vf_rate125 != n->vf_rate125) { g_vf_hud = n->vf_hud; g_vf_rate = n->vf_rate125; }
         vf_switch_texts();
-        set_text(ID_SF_RES, "then pick the last one in the game's menu");
+        set_text(ID_SF_RES, "Versus starts at it");
         set_text(ID_SF_VFOV, "game: spy 75, merc 95");
         bool vok = n->vfix >= 0;
         int vids[] = { ID_SET_VFPS, ID_SET_VHUD, ID_SET_VRATE, ID_SET_VFOVS, ID_SET_VFOVM, ID_SET_VTURNS, ID_SET_VTURNM, ID_SET_W, ID_SET_H };
@@ -1047,6 +1047,12 @@ static void show_settings(const UiSettings *n)
 #define FR(id, have, ...) do { if (!n->friend_) b[0] = 0; else if (have) sfmt(b, sizeof b, __VA_ARGS__); \
                                else sfmt(b, sizeof b, "%s: not set", who); set_text(id, b); } while (0)
     if (!vs) FR(ID_SF_RES, n->fw && n->fh, "%s: %dx%d", who, n->fw, n->fh);
+    if (!vs) { /* with the SCCT Fix the game renders at the screen's own resolution */
+        bool own = n->scctfix == 1;
+        EnableWindow(g_c[ID_SET_W], !own);
+        EnableWindow(g_c[ID_SET_H], !own);
+        if (own) set_text(ID_SF_RES, "your screen's (the SCCT Fix sets it)");
+    }
     FR(ID_SF_FOV, n->ffov, "%s: %d%s", who, n->ffov, n->ffov != n->fov ? "  <- must match" : "");
     FR(ID_SF_FPS, n->ffps, "%s: %d%s", who, n->ffps, n->ffps != n->fps ? "  <- must match" : "");
     FR(ID_SF_WS, n->fwsfov, "%s: %d.%02d%s", who, n->fwsfov / 100, n->fwsfov % 100, n->fwsfov != n->wsfov ? "  <- must match" : "");
@@ -1314,9 +1320,10 @@ static HFONT g_stats_font;
 
 static void outlined(HDC dc, const WCHAR *t, RECT r, DWORD color)
 {
-    SetTextColor(dc, RGBC(0, 0, 0));
-    for (int dx = -1; dx <= 1; dx++)
-        for (int dy = -1; dy <= 1; dy++) {
+    SetTextColor(dc, RGBC(0, 0, 0)); /* a 2-pixel black edge all round */
+    int k = S_(2);
+    for (int dx = -k; dx <= k; dx++)
+        for (int dy = -k; dy <= k; dy++) {
             if (!dx && !dy) continue;
             RECT o = { r.left + dx, r.top + dy, r.right + dx, r.bottom + dy };
             DrawTextW(dc, t, -1, &o, DT_SINGLELINE | DT_END_ELLIPSIS);
@@ -1346,8 +1353,8 @@ static LRESULT WINAPI stats_proc(HWND w, UINT m, WPARAM wp, LPARAM lp)
             if (n > 199) n = 199;
             memcpy(line, l, (size_t)n);
             line[n] = 0;
-            RECT lr = { S_(4), S_(4 + 20 * i), r.right - S_(4), S_(24 + 20 * i) };
-            outlined(dc, wide(line, wl, 200), lr, i ? RGBC(240, 240, 240) : RGBC(90, 235, 130)); /* FPS in green */
+            RECT lr = { S_(5), S_(5 + 20 * i), r.right - S_(5), S_(25 + 20 * i) };
+            outlined(dc, wide(line, wl, 200), lr, RGBC(245, 245, 245));
             l = e ? e + 1 : l + n;
         }
         SelectObject(dc, of);
@@ -1375,7 +1382,7 @@ static void stats_toggle(void)
                               S_(16), S_(16), S_(420), S_(28), 0, 0, GetModuleHandleW(0), 0);
     if (!g_stats) return;
     SetLayeredWindowAttributes(g_stats, STATS_KEY, 255, 0x1 /* LWA_COLORKEY: the background is see-through */);
-    push_cmd(CMD_STATS, 1); /* start measuring the game's frame rate */
+    push_cmd(CMD_STATS, 1); /* the connection's numbers */
     stats_layout();
     ShowWindow(g_stats, 4 /* SW_SHOWNOACTIVATE */);
     set_text(ID_STATS, "Hide live stats");
