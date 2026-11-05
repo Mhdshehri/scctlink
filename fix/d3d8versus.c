@@ -530,7 +530,8 @@ static void read_settings(void)
    the menu's list that is set when the profile is loaded - and saved again when
    Versus closes. So each time Versus starts (this DLL loads before it reads
    them), the chosen resolution goes into Default.ini and every profile gets
-   ScreenRes=-1 (none: Default.ini's is kept). Only those lines change. */
+   ScreenRes=-1 (none: Default.ini's is kept), and so does Versus\System\
+   DefaultProfile.ini, which a new profile is made from. Only those lines change. */
 IMP BOOL WINAPI ReadFile(HANDLE, void *, DWORD, DWORD *, void *);
 IMP DWORD WINAPI GetEnvironmentVariableA(const char *, char *, DWORD);
 typedef struct { DWORD attr; DWORD t[6]; DWORD hi, lo, r0, r1; char name[260]; char alt[14]; DWORD more[3]; } FINDA;
@@ -598,6 +599,11 @@ static void start_resolution(void)
     wsprintfA(path, "%sDefault.ini", g_dir);
     int d = set_lines(path, keys, vals, 4);
     int np = 0;
+    { /* DefaultProfile.ini is what a new profile starts from: it gets -1 too */
+        const char *pk[] = { "ScreenRes" }, *pv[] = { "-1" };
+        wsprintfA(path, "%sDefaultProfile.ini", g_dir);
+        if (set_lines(path, pk, pv, 1) > 0) np++;
+    }
     char pd[300];
     DWORD pl = GetEnvironmentVariableA("PROGRAMDATA", pd, sizeof pd);
     if (pl && pl < sizeof pd) {

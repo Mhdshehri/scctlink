@@ -2620,7 +2620,7 @@ static void scctfix(bool install)
    next to SCCTLink.exe as SCCTVersusFix-d3d8.dll and is only copied if its
    SHA-256 is exactly this one (the build is reproducible: fix/build_fix.sh). */
 #define VFIX_FILE "SCCTVersusFix-d3d8.dll"
-#define VFIX_SHA "43e219cf628d0450ffcd20637fa242bb282dc8f6b1bb28840bdf4b023f7c3176"
+#define VFIX_SHA "0b1a4685b1acdb870d33af788575563c332343ffc1c2cc2779b520987e20fdc9"
 static void vfix_paths(char *src, char *dst, char *bak, char *ini, size_t n)
 {
     sfmt(src, n, "%s" PATHSEP VFIX_FILE, exe_dir());
@@ -2643,6 +2643,7 @@ static int vfix_state(void)
         "9c8a57a03e8f38d6aec15fc17fdb2647e4f3bd6a8b4b39e36f25efc0d99b0a1b",
         "3661f8434c4b8a3e2d87756a08c6a35322bd26b9a42d9c1fee43a4034ace204d",
         "f680d8a6da67f66a752137c2d9b351ae961700f2483ac1f954c8929bda91c205",
+        "43e219cf628d0450ffcd20637fa242bb282dc8f6b1bb28840bdf4b023f7c3176",
         "7b2645692fdae5369bfab7029a80b38fbd3759f322fe22abeff9f0ff3db43549" };
     for (size_t i = 0; i < sizeof ours / sizeof *ours; i++) if (!strcmp(hex, ours[i])) return 3;
     return 2;
