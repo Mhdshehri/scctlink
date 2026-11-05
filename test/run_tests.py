@@ -620,8 +620,8 @@ def main():
         hm = relay(A, "HM", 1191, "1192", ["host"], d, {"MOCK_GAME_DIR": ga, "PROGRAMDATA": os.path.join(gd, "programdata_a"),
                                                          "MOCK_EXE_DIR": exe_a}, stdin=subprocess.PIPE)
         procs.append(hm)
-        check(hm.wait_for(r"\[settings\] scctfix 0 mine 2560x1440 fov 75 fps 60 ws 0") is not None,
-              "the host's resolution, FOV (from ProgramData) and FPS limit, before anyone links")
+        check(hm.wait_for(r"\[settings\] scctfix 0 mine 1024x768 fov 75 fps 60 ws 0") is not None,
+              "the host's resolution (ProgramData's SplinterCell3.ini, the copy the game reads), FOV (from ProgramData) and FPS limit, before anyone links")
         check(hm.wait_for(r"\[mods\] #user1191 \(you\)") is not None and hm.wait_for(r"\[mods\]  system/dinput8\.dll") is not None
               and hm.wait_for(r"\[mods\] !SCCT Fix not installed") is not None,
               "Mods tab: your name, your mods and the SCCT Fix right away (no friend, no game running)")
@@ -642,16 +642,15 @@ def main():
         check(hm.wait_for(r"\[mods\] #user1192", timeout=3) is not None and hm.wait_for(r"\[mods\] !Only on your PC: system/dinput8\.dll", timeout=3) is not None
               and hm.wait_for(r"\[mods\] !Different version: system/core\.u", timeout=3) is not None,
               "Mods tab: the friend's name, then each difference in red")
-        check(hm.wait_for(r"! FOV differs: you 75, user1192 90", timeout=3) is not None
-              and hm.wait_for(r"\[mods\] !FOV: you 75, user1192 90 - must be the same", timeout=3) is not None, "a different FOV is flagged")
+        check("FOV differs" not in hm.log and "!FOV:" not in hm.log, "a different FOV is not flagged (each player's own view)")
         modlines = "\n".join(l for l in hm.log.splitlines() if l.startswith("[mods]"))
         check("Resolution" not in modlines and "FPS limit (game)" not in modlines,
               "a different resolution and the same FPS limit are not flagged")
-        check(jm.wait_for(r"! FOV differs: you 90, user1191 75", timeout=3) is not None, "...and on the friend's side")
+        check("FOV differs" not in jm.log, "...nor on the friend's side")
         check("splintercell3.ini" not in hm.log + jm.log, "settings files (.ini) are not compared")
         check(gd not in hm.log + jm.log and gd not in open(os.path.join(d, "log_HM.txt")).read(), "the game folder's path is never sent or logged")
         # the Settings tab
-        check(hm.wait_for(r"\[settings\] scctfix 0 mine 2560x1440 fov 75 fps 60 ws 0 \| user1192 1920x1080 fov 90 fps 60 ws 0", timeout=5) is not None,
+        check(hm.wait_for(r"\[settings\] scctfix 0 mine 1024x768 fov 75 fps 60 ws 0 \| user1192 1920x1080 fov 90 fps 60 ws 0", timeout=5) is not None,
               "Settings tab: this PC's values and the friend's")
         hm.p.stdin.write("A\n1920 1080 90 60 100\n"); hm.p.stdin.flush()  # "Use friend's", FOV factor 1.00, Apply
         check(hm.wait_for(r"Settings: resolution set to 1920x1080", timeout=10) is not None
@@ -842,6 +841,14 @@ def main():
         rm.p.stdin.write("E\n0\n"); rm.p.stdin.flush()
         check(rm.wait_for(r"spfps 0\n", timeout=10, since=mk) is not None, "single-player FPS: no limit")
         check("[coop-flag] 1" not in rm.log, "...not in a session: no co-op flag")
+        mk = rm.mark()
+        rm.p.stdin.write("A\n2560 1440 90 0 0\n"); rm.p.stdin.flush()
+        check(rm.wait_for(r"Settings: resolution set to 2560x1440", timeout=10, since=mk) is not None
+              and rm.wait_for(r"Settings: FOV set to 90", timeout=5, since=mk) is not None, "with the SCCT Fix: resolution and FOV applied")
+        with open(fix_m, "rb") as f:
+            t = f.read()
+        check(b"Resolution=2560x1440\r\n" in t and b"FOV=90\r\n" in t and b"Raw=0\r\n" in t and b"SingleFPS=0\r\n" in t,
+              "...into SCCTFix.ini (the fix draws at it and sets the camera's FOV), the other settings kept")
         rm.stop()
 
         print("[20] Settings: co-op mouse (sensitivity, aim turn speed), Versus settings, Reset")

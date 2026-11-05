@@ -34,7 +34,8 @@ sha256sum "$OUT/d3d9.dll"
 mkdef kernel32v CreateFileA@28 DisableThreadLibraryCalls@4 GetModuleFileNameA@12 GetProcAddress@8 \
     GetSystemDirectoryA@8 LoadLibraryA@4 Sleep@4 WriteFile@20 CloseHandle@4 CreateThread@24 VirtualQuery@12 \
     GetPrivateProfileStringA@24 SetThreadPriority@8 GetCurrentThread@0 GetCurrentProcess@0 \
-    ReadProcessMemory@20 WriteProcessMemory@20 VirtualProtect@16 GetModuleHandleA@4 QueryPerformanceCounter@4 QueryPerformanceFrequency@4
+    ReadProcessMemory@20 WriteProcessMemory@20 VirtualProtect@16 GetModuleHandleA@4 QueryPerformanceCounter@4 QueryPerformanceFrequency@4 \
+    ReadFile@20 GetEnvironmentVariableA@12 FindFirstFileA@8 FindNextFileA@8 FindClose@4
 sed -i 's/^LIBRARY kernel32v.dll/LIBRARY kernel32.dll/' "$OUT/lib/kernel32v.def"
 llvm-dlltool -m i386 -k -d "$OUT/lib/kernel32v.def" -l "$OUT/lib/kernel32v.lib"
 mkdef winmmv timeBeginPeriod@4

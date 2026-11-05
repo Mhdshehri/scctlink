@@ -754,7 +754,7 @@ static void build(void)
     ctl(ID_FOV43, B, WTEXT("4:3"), OD, 0, 250, 494, 32, 24, g_font);
     ctl(ID_FOV1610, B, WTEXT("16:10"), OD, 0, 285, 494, 40, 24, g_font);
     ctl(ID_FOV169, B, WTEXT("16:9"), OD, 0, 328, 494, 34, 24, g_font);
-    ctl(ID_SF_FOV, T_, WTEXT(""), ELL, 0, 370, 498, 206, 18, g_font);
+    ctl(ID_SF_FOV, T_, WTEXT(""), ELL, 0, 250, 498, 326, 18, g_font);
     ctl(ID_SET_CHUD, B, WTEXT("Widescreen HUD"), OD, 0, 28, 522, 172, 24, g_font);
     ctl(ID_SET_INTRO, B, WTEXT("Skip intro videos"), OD, 0, 206, 522, 180, 24, g_font);
     /* single player's frame rate (co-op is always 60): click for 60 / the screen's / no limit */
@@ -797,7 +797,8 @@ static void build(void)
 /* The Settings tab in co-op and in Versus: what each shows. */
 static bool set_never(int id)
 {
-    return (id >= ID_SL_FPS && id <= ID_SL_WS) || id == ID_SET_FPS || id == ID_SET_WS || id == ID_SF_FPS || id == ID_SF_WS ||
+    return (id >= ID_FOV43 && id <= ID_FOV169) || /* the SCCT Fix widens the FOV for the screen by itself */
+           (id >= ID_SL_FPS && id <= ID_SL_WS) || id == ID_SET_FPS || id == ID_SET_WS || id == ID_SF_FPS || id == ID_SF_WS ||
            id == ID_SF_VFOV;
 }
 static bool set_versus_only(int id) { return (id >= ID_SL_VFPS && id <= ID_SF_VFOV) || id == ID_SEC_CLASS || id == ID_SET_VRATENOTE; }
@@ -1047,13 +1048,9 @@ static void show_settings(const UiSettings *n)
 #define FR(id, have, ...) do { if (!n->friend_) b[0] = 0; else if (have) sfmt(b, sizeof b, __VA_ARGS__); \
                                else sfmt(b, sizeof b, "%s: not set", who); set_text(id, b); } while (0)
     if (!vs) FR(ID_SF_RES, n->fw && n->fh, "%s: %dx%d", who, n->fw, n->fh);
-    if (!vs) { /* with the SCCT Fix the game renders at the screen's own resolution */
-        bool own = n->scctfix == 1;
-        EnableWindow(g_c[ID_SET_W], !own);
-        EnableWindow(g_c[ID_SET_H], !own);
-        if (own) set_text(ID_SF_RES, "your screen's (the SCCT Fix sets it)");
-    }
-    FR(ID_SF_FOV, n->ffov, "%s: %d%s", who, n->ffov, n->ffov != n->fov ? "  <- must match" : "");
+    if (!vs && n->scctfix == 1 && !n->friend_) set_text(ID_SF_RES, "the SCCT Fix draws at it");
+    if (!vs && n->scctfix == 1 && !n->friend_) set_text(ID_SF_FOV, "75 = the game's; wide screens see more by themselves");
+    FR(ID_SF_FOV, n->ffov, "%s: %d", who, n->ffov);
     FR(ID_SF_FPS, n->ffps, "%s: %d%s", who, n->ffps, n->ffps != n->fps ? "  <- must match" : "");
     FR(ID_SF_WS, n->fwsfov, "%s: %d.%02d%s", who, n->fwsfov / 100, n->fwsfov % 100, n->fwsfov != n->wsfov ? "  <- must match" : "");
     if (!vs) FR(ID_SF_MOUSE, n->fturn, "%s: aim turn %d.%02d%s", who, n->fturn / 100, n->fturn % 100, n->fturn != n->turn ? "  <- must match" : "");

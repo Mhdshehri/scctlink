@@ -2049,7 +2049,7 @@ static bool ini_get(const char *path, const char *section, const char *key, char
 typedef struct { const char *key, *label; bool must_match; } SetDef;
 static const SetDef SETS[] = {
     { "res", "Resolution", false },
-    { "fov", "FOV", true },
+    { "fov", "FOV", false }, /* the SCCT Fix's camera FOV: each player's own view */
     { "fps", "FPS limit (game)", false }, /* [SIMULATION] MAXFPS: the game doesn't read it; the SCCT Fix sets the rate */
     { "otherws", "Another widescreen mod (remove it: the SCCT Fix has its own)", true },
     { "scctfix", "SCCT Fix (60 FPS cap, borderless)", true },
@@ -2189,6 +2189,18 @@ static void settings_collect(void)
         char ubi[700];
         sfmt(ubi, sizeof ubi, "%s" PATHSEP "Ubisoft", pd);
         find_user_ini(ubi, 3);
+    }
+    { /* with the SCCT Fix: its resolution and FOV are the ones used */
+        char fi[900], r[32];
+        sfmt(fi, sizeof fi, "%s" PATHSEP "SCCTFix.ini", sys);
+        if (file_exists(fi) && ini_get(fi, "Display", "Resolution", r, sizeof r) && r[0]) set_add("res", r);
+        if (file_exists(fi) && ini_get(fi, "Display", "FOV", v, sizeof v) && v[0]) set_add("fov", v);
+    }
+    if (g_pd_ini[0] && ini_get(g_pd_ini, "WinDrv.WindowsClient", "FullscreenViewportX", x, sizeof x) &&
+        ini_get(g_pd_ini, "WinDrv.WindowsClient", "FullscreenViewportY", y, sizeof y)) { /* the copy the game reads */
+        char r[17];
+        sfmt(r, sizeof r, "%sx%s", x, y);
+        set_add("res", r);
     }
     sfmt(path, sizeof path, "%s" PATHSEP "SplinterCell3User.ini", sys);
     const char *users[2] = { g_user_ini, path };
@@ -2333,7 +2345,7 @@ static int ini_set(const char *path, const char *section, const char *key, const
    SHA-256 is exactly this one (checked: no network functions, starts no
    programs, only writes System\SCCTFix.log). */
 #define SCCTFIX_FILE "SCCTFix-d3d9.dll"
-#define SCCTFIX_SHA "8017a0f7e4cddd3840e44aca8023c140dd0209d784fabda3337ad754cd0e77bf" /* ours: fix/d3d9fix.c (fix/build_fix.sh) */
+#define SCCTFIX_SHA "5350e4325e83d81e544133f42c27f5d07f7cd19a0865bf220cc235f58d9504fb" /* ours: fix/d3d9fix.c (fix/build_fix.sh) */
 #define SCCTFIX_OLD_SHA "2f05d8e9e7aaf750eb2889c7ba57dd453820e3a794b9ba74c43730446a84cae9" /* the original; ours replaces it */
 bool sha256_file(const char *path, char hex[65]);
 static void scctfix_paths(char *src, char *dst, char *bak, char *ini, size_t n)
@@ -2358,7 +2370,8 @@ static int scctfix_state(void)
                                         "9b73fe61a3eba66ebd91ffdbc20a59b0a217b3fba61d5facf7b327f2514c0a97",
                                         "ab388fcc1ec495675a3ad4fa3c96b426654f4201a7672d58f597f8afa709cf86",
                                         "3f73be91b530d629e3c255d6294785160a7db360cd7d145649cc96e11531e910",
-                                        "74018a1aa44700c3b971e4a6a4973dbe9fe8d3e7e5a842df6124eaf057c11ac6" };
+                                        "74018a1aa44700c3b971e4a6a4973dbe9fe8d3e7e5a842df6124eaf057c11ac6",
+                                        "8017a0f7e4cddd3840e44aca8023c140dd0209d784fabda3337ad754cd0e77bf" };
     if (!strcmp(hex, SCCTFIX_SHA)) return 1;
     if (!strcmp(hex, SCCTFIX_OLD_SHA)) return 3;
     for (size_t i = 0; i < sizeof ours / sizeof *ours; i++) if (!strcmp(hex, ours[i])) return 3;
@@ -2450,19 +2463,37 @@ static int chud_state(void)
     return ini_get(p, "HUD", "Fix", v, sizeof v) && v[0] == '1';
 }
 /* SCCTFix.ini: written whole, with both of its settings. */
+/* the resolution and FOV the SCCT Fix uses (kept when the other settings change);
+   set by scfini_display() */
+static const char *g_scf_res, *g_scf_fov;
 static bool scfini_write(int hud, int raw, int spfps)
 {
-    char p[900], t[900];
+    char p[900], t[1400], res[32] = "", fov[16] = "75";
     chud_path(p, sizeof p);
+    if (g_scf_res) sfmt(res, sizeof res, "%s", g_scf_res); else ini_get(p, "Display", "Resolution", res, sizeof res);
+    if (g_scf_fov) sfmt(fov, sizeof fov, "%s", g_scf_fov); else ini_get(p, "Display", "FOV", fov, sizeof fov);
     sfmt(t, sizeof t, "; SCCT Fix settings - written by SCCTLink.\r\n"
                       "[HUD]\r\n; 1 = the HUD, menus and text keep their shape on wide screens (4:3 in the middle).\r\nFix=%d\r\n"
                       "[Mouse]\r\n; 1 = the mouse is read as Windows Raw Input: no acceleration, any polling rate.\r\nRaw=%d\r\n"
                       "[Display]\r\n; single player only: 60, -1 = the screen's refresh rate, 0 = no limit.\r\n"
-                      "; In an SCCTLink co-op session the SCCT Fix keeps 60 by itself.\r\nSingleFPS=%d\r\n",
-         hud, raw, spfps);
+                      "; In an SCCTLink co-op session the SCCT Fix keeps 60 by itself.\r\nSingleFPS=%d\r\n"
+                      "; WxH the game draws at; empty = the screen's own.\r\nResolution=%s\r\n"
+                      "; 75 = the game's own view (wider on wide screens by itself); 40 to 150.\r\nFOV=%s\r\n",
+         hud, raw, spfps, res, fov);
     FILE *f = fopen(p, "wb");
     bool ok = f && fwrite(t, 1, strlen(t), f) == strlen(t);
     if (f && fclose(f) != 0) ok = false;
+    return ok;
+}
+static bool scfini_display(const char *res, const char *fov) /* NULL = keep */
+{
+    char p[900], v[8];
+    chud_path(p, sizeof p);
+    int hud = ini_get(p, "HUD", "Fix", v, sizeof v) ? v[0] == '1' : 1, raw = ini_get(p, "Mouse", "Raw", v, sizeof v) ? v[0] == '1' : 1;
+    g_scf_res = res;
+    g_scf_fov = fov;
+    bool ok = scfini_write(hud, raw, spfps_state());
+    g_scf_res = g_scf_fov = 0;
     return ok;
 }
 static int raw_state(void)
@@ -2589,7 +2620,7 @@ static void scctfix(bool install)
    next to SCCTLink.exe as SCCTVersusFix-d3d8.dll and is only copied if its
    SHA-256 is exactly this one (the build is reproducible: fix/build_fix.sh). */
 #define VFIX_FILE "SCCTVersusFix-d3d8.dll"
-#define VFIX_SHA "f680d8a6da67f66a752137c2d9b351ae961700f2483ac1f954c8929bda91c205"
+#define VFIX_SHA "43e219cf628d0450ffcd20637fa242bb282dc8f6b1bb28840bdf4b023f7c3176"
 static void vfix_paths(char *src, char *dst, char *bak, char *ini, size_t n)
 {
     sfmt(src, n, "%s" PATHSEP VFIX_FILE, exe_dir());
@@ -2611,6 +2642,7 @@ static int vfix_state(void)
         "84b1da2a6d27e051cd3102ae0cef9be838189ad3e1d90082eea0361215d7d5a6",
         "9c8a57a03e8f38d6aec15fc17fdb2647e4f3bd6a8b4b39e36f25efc0d99b0a1b",
         "3661f8434c4b8a3e2d87756a08c6a35322bd26b9a42d9c1fee43a4034ace204d",
+        "f680d8a6da67f66a752137c2d9b351ae961700f2483ac1f954c8929bda91c205",
         "7b2645692fdae5369bfab7029a80b38fbd3759f322fe22abeff9f0ff3db43549" };
     for (size_t i = 0; i < sizeof ours / sizeof *ours; i++) if (!strcmp(hex, ours[i])) return 3;
     return 2;
@@ -3009,6 +3041,11 @@ static void apply_settings_(u64 a)
             sfmt(v, sizeof v, "%d", w); SET(g_ws_ini, 0, "ResX", v);
             sfmt(v, sizeof v, "%d", h); SET(g_ws_ini, 0, "ResY", v);
         }
+        if (scctfix_state() == 1) { /* the SCCT Fix draws at it */
+            char rr[24];
+            sfmt(rr, sizeof rr, "%dx%d", w, h);
+            if (scfini_display(rr, 0)) n++; else err = true;
+        }
         set_say(n ? "Settings: resolution set to %dx%d." : "! Settings: the resolution setting wasn't found in the game's files.", w, h);
     }
     if (fov) {
@@ -3022,6 +3059,11 @@ static void apply_settings_(u64 a)
         for (int i = 0; i < g_nprof; i++) { /* each profile has its own */
             SET(g_prof_ini[i], "Engine.PlayerController", "DesiredFOV", v); n += r > 0;
             SET(g_prof_ini[i], "Engine.PlayerController", "DefaultFOV", v); n += r > 0;
+        }
+        if (scctfix_state() == 1) { /* the game ignores DesiredFOV: the SCCT Fix sets the camera's */
+            char fv[8];
+            sfmt(fv, sizeof fv, "%d", fov);
+            if (scfini_display(0, fv)) n++; else err = true;
         }
         if (n) set_say("Settings: FOV set to %d.", fov);
         else set_say("! Settings: the game's files have no FOV setting to change%s.", g_ws_ini[0] ? " - use the widescreen fix's FOV factor" : "");

@@ -100,10 +100,10 @@ Settings = on top, the fix of this mode: installed (green) or not (red),
            original is kept next to it as <name>.scctlink-backup - to undo,
            delete the changed file and remove ".scctlink-backup" from the
            backup's name.
-           FOV for your screen: the 4:3 / 16:10 / 16:9 buttons fill in 75 /
-           85 / 91 (the game's default 75 is made for old 4:3 screens and
-           looks cut off on wide ones). Then Apply. In co-op both players
-           need the SAME FOV, so agree on one number.
+           FOV: 75 is the game's own view. With the SCCT Fix a wide screen
+           sees more on the sides by itself; a bigger number widens the
+           view in normal play (not when aiming, using gadgets or in
+           cutscenes). Each player's own choice.
            Aim turn: how fast you turn while aiming (the game's 0.50 = half
            speed; 1.00 = as fast as normal). In co-op both players need the
            same aim turn speed.
@@ -294,6 +294,12 @@ always opens a window and is DPI aware (a scaled 2K desktop showed as
 1920x1080); in Versus, Apply sets the window and full-screen size in
 Default.ini and ScreenRes=-1 in your profile (so loading it doesn't pick
 1600x1200 again).
+Co-op FOV: the game ignores DesiredFOV in its .ini files, so the SCCT Fix now
+sets the camera's FOV itself (from FusionFix): wide screens see more on the
+sides by themselves, and the FOV number (75 = the game's) widens the normal
+view - each player's own. The co-op resolution is yours to choose (empty =
+the screen's). The Versus Fix sets the start resolution and ScreenRes=-1 in
+every profile each time Versus starts.
 0.9.9.6 (testing): new co-op HUD fix, ported from ThirteenAG's FusionFix (MIT,
 see THIRD-PARTY.txt): the HUD, menus and text are drawn 4:3 in the middle
 instead of stretched; full-screen pictures, the scope and the loading bar

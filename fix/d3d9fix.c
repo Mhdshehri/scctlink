@@ -381,8 +381,15 @@ static void mid_hook(DWORD at, unsigned len, MidFn fn, int gate)
         *p++ = 0x80; *p++ = 0x3d; put32(p, (DWORD)&g_skip); p += 4; *p++ = 0;
         *p++ = 0x75; *p++ = (BYTE)(len + 5);
     }
-    memcpy(p, (void *)at, len); /* the replaced instructions (none of them relative) */
-    p += len;
+    if (*(BYTE *)at == 0xe8 && len == 5) { /* a call: the same target from here */
+        DWORD target = at + 5 + *(DWORD *)(at + 1);
+        *p++ = 0xe8;
+        put32(p, target - (DWORD)(p + 4));
+        p += 4;
+    } else {
+        memcpy(p, (void *)at, len); /* the replaced instructions (none of them relative) */
+        p += len;
+    }
     *p++ = 0xe9;
     put32(p, at + len - (DWORD)(p + 4));
     p += 4;
@@ -436,10 +443,14 @@ static int site_ok(const struct Site *s)
     return 1;
 }
 
+static void fov_fix(void);
+static float g_aspect = 4.0f / 3.0f; /* the screen's shape, for the FOV */
 static void hud_fix(UINT w, UINT h)
 {
     static int done;
     char b[96];
+    if (w && h) g_aspect = (float)w / (float)h;
+    fov_fix();
     if (g_hud < 0) g_hud = GetPrivateProfileIntA("HUD", "Fix", 0, g_ini);
     if (!g_hud || !w || !h) return;
     float fw = (float)w, fh = (float)h, aspect = fw / fh;
@@ -601,13 +612,167 @@ static void raw_mouse(void)
     log_write("Raw mouse: on\r\n", 15);
 }
 
+/* ---- the FOV ----
+   Ported from ThirteenAG's FusionFix (MIT, see THIRD-PARTY.txt): the game
+   ignores DesiredFOV in its .ini files; its camera sets the view's FOV itself
+   (FCameraSceneNode, +0x248) for a 4:3 screen, so a wide screen only cuts the
+   top and bottom off. Just before the projection is made from it, the FOV is
+   widened for the screen's shape (the same horizontal view as 4:3 plus the
+   sides), and in normal play - Sam's own camera following him, not a cutscene,
+   a gadget or aiming - multiplied by SCCTFix.ini [Display] FOV / 75. */
+static float g_fov_factor = 1.0f;
+static float x87_tan(float x) { float r; __asm__("fptan\n\tfstp %%st(0)" : "=t"(r) : "0"(x)); return r; }
+static float x87_atan(float x) { float r; __asm__("fld1\n\tfpatan" : "=t"(r) : "0"(x)); return r; }
+static float adjust_fov(float f, float ar)
+{
+    const float pi = 3.14159265f;
+    return 2.0f * x87_atan(x87_tan(f * pi / 360.0f) * (ar / (4.0f / 3.0f))) * 180.0f / pi;
+}
+#define RD(T, o, off) (*(T *)((BYTE *)(o) + (off)))
+static unsigned short *obj_name(void *o, unsigned short *buf)
+{
+    buf[0] = 0;
+    if (!o) return buf;
+    unsigned short *n = ((FullNameFn)0x10cd8f90)(o, 0, buf);
+    return n ? n : buf;
+}
+/* "Class Package.Name": the type is the word before the space */
+static int obj_type(void *o, const char *type)
+{
+    static unsigned short b[256];
+    const unsigned short *n = obj_name(o, b);
+    return wstarts(n, type) && n[slen(type)] == ' ';
+}
+static int obj_leaf(void *o, const char *leaf)
+{
+    static unsigned short b[256];
+    const unsigned short *n = obj_name(o, b), *l = n;
+    for (const unsigned short *c = n; *c; c++) if (*c == '.' || *c == ' ') l = c + 1;
+    return wequal(l, leaf);
+}
+/* a property of a class (SCCT's UField / UStruct / UProperty layout) */
+static void *class_prop(void *cls, const char *name, const char *type, int is_bool)
+{
+    int total = RD(int, cls, 76);
+    if (total <= 0 || total > 0x100000) return 0;
+    for (unsigned depth = 0; cls && depth < 32; depth++, cls = RD(void *, cls, 40)) {
+        unsigned count = 0;
+        for (void *f = RD(void *, cls, 72); f && ++count <= 2048;) {
+            if (obj_leaf(f, name) && obj_type(f, type)) {
+                if (RD(WORD, f, 52) != 1 || RD(WORD, f, 54) != 4 || RD(WORD, f, 68) + 4 > total) return 0;
+                if (is_bool) { DWORD m = RD(DWORD, f, 84); if (!m || (m & (m - 1))) return 0; }
+                return f;
+            }
+            void *nx = RD(void *, f, 44);
+            if (nx == f) break;
+            f = nx;
+        }
+    }
+    return 0;
+}
+#define PVAL(T, o, prop) RD(T, o, RD(WORD, prop, 68))
+#define PFLAG(o, prop) ((PVAL(DWORD, o, prop) & RD(DWORD, prop, 84)) != 0)
+static void *obj_state(void *o)
+{
+    void *frame = RD(void *, o, 12), *st = frame ? RD(void *, frame, 28) : 0;
+    return st && obj_type(st, "State") ? st : 0;
+}
+static struct { void *ctl_cls, *camera, *pawn, *target, *cine, *cam_cls, *owner, *sam, *freecam, *fixcam; } g_ct;
+static int ct_controller(void *c)
+{
+    void *cls = RD(void *, c, 36);
+    if (!cls) return 0;
+    if (g_ct.ctl_cls == cls) return 1;
+    if (!obj_type(c, "EPlayerController")) return 0;
+    void *cam = class_prop(cls, "m_camera", "ObjectProperty", 0), *pawn = class_prop(cls, "EPawn", "ObjectProperty", 0),
+         *tgt = class_prop(cls, "ViewTarget", "ObjectProperty", 0), *cine = class_prop(cls, "bInCinematic", "BoolProperty", 1);
+    if (!cam || !pawn || !tgt || !cine) return 0;
+    memset(&g_ct, 0, sizeof g_ct);
+    g_ct.ctl_cls = cls; g_ct.camera = cam; g_ct.pawn = pawn; g_ct.target = tgt; g_ct.cine = cine;
+    return 1;
+}
+static int ct_camera(void *c)
+{
+    void *cls = RD(void *, c, 36);
+    if (!cls) return 0;
+    if (g_ct.cam_cls == cls) return 1;
+    if (!obj_type(c, "EPlayerCam")) return 0;
+    void *ow = class_prop(cls, "m_EPC", "ObjectProperty", 0), *sam = class_prop(cls, "m_sam", "ObjectProperty", 0),
+         *fc = class_prop(cls, "m_freeCam", "BoolProperty", 1), *xc = class_prop(cls, "m_fixeCam", "BoolProperty", 1);
+    if (!ow || !sam || !fc || !xc) return 0;
+    g_ct.cam_cls = cls; g_ct.owner = ow; g_ct.sam = sam; g_ct.freecam = fc; g_ct.fixcam = xc;
+    return 1;
+}
+/* the controller's states where Sam's own view is shown (not aiming, gadgets, scripts) */
+static const char *const gameplay_states[] = {
+    "s_PlayerWalking", "s_Carry", "s_Roll", "s_SideRoll", "s_QuickStep", "s_PlayerJumping", "s_PlayerBTW",
+    "s_PlayerBTWMove", "s_PlayerBTWPeek", "s_Rappelling", "s_RappellingFall", "s_Split", "s_Fence", "s_Ledge",
+    "s_GrabbingLedge", "s_HoistingAboveLedge", "s_GrabbingHandOverHand", "s_HandOverHand", "s_HandOverHandFeetUp",
+    "s_GrabbingNarrowLadder", "s_NarrowLadder", "s_NarrowLadderSlideDown", "s_GrabbingPipe", "s_Pipe",
+    "s_PipeSlideDown", "s_GrabbingZipLine", "s_ZipLine", "s_GrabbingPole", "s_Pole", "s_PoleSlideDown", "s_PlayerSwimming" };
+static const DWORD fov_callers[] = { 0x10a0cd70, 0x10a0cf50, 0x10a0d10c, 0x10a3e6c5 }; /* the player's view */
+static float fov_factor(BYTE *scene, DWORD caller)
+{
+    float f = g_fov_factor;
+    if (f == 1.0f || !scene) return 1.0f;
+    int ok = 0;
+    for (unsigned i = 0; i < sizeof fov_callers / sizeof *fov_callers; i++) ok |= caller == fov_callers[i];
+    if (!ok) return 1.0f;
+    void *vp = RD(void *, scene, 4);
+    if (!vp || RD(void *, scene, 8) || RD(int, vp, 408)) return 1.0f;
+    void *ctl = RD(void *, vp, 48);
+    if (!ctl || !ct_controller(ctl) || PFLAG(ctl, g_ct.cine)) return 1.0f;
+    void *pawn = PVAL(void *, ctl, g_ct.pawn), *cam = PVAL(void *, ctl, g_ct.camera);
+    if (!pawn || RD(void *, scene, 548) != pawn || PVAL(void *, ctl, g_ct.target) != pawn || !cam || !ct_camera(cam)) return 1.0f;
+    if (PVAL(void *, cam, g_ct.owner) != ctl || PVAL(void *, cam, g_ct.sam) != pawn || PFLAG(cam, g_ct.freecam) ||
+        PFLAG(cam, g_ct.fixcam))
+        return 1.0f;
+    void *cs = obj_state(cam);
+    if (!cs || !obj_leaf(cs, "s_Following")) return 1.0f;
+    void *st = obj_state(ctl);
+    if (!st) return 1.0f;
+    for (unsigned i = 0; i < sizeof gameplay_states / sizeof *gameplay_states; i++)
+        if (obj_leaf(st, gameplay_states[i])) return f < 0.5f ? 0.5f : f > 2.0f ? 2.0f : f;
+    return 1.0f;
+}
+/* FCameraSceneNode's constructor, just before the projection (ebx = the scene node) */
+static void on_camera(Regs *r)
+{
+    float *fov = (float *)(r->ebx + 0x248);
+    float base = adjust_fov(*fov, g_aspect);
+    if (!(base >= 1.0f)) base = 1.0f; /* also NaN */
+    if (base > 179.0f) base = 179.0f;
+    float v = base * fov_factor((BYTE *)r->ebx, *(DWORD *)(r->esp + 0x7c));
+    float top = base > 150.0f ? base : 150.0f;
+    *fov = v < 1.0f ? 1.0f : v > top ? top : v;
+}
+static const struct Site fov_site = { 0x10ac29a7, 5, { 0xe8, 0xd4, 0xc6, 0xff, 0xff } }; /* call (the projection) */
+static void fov_read(void)
+{
+    int v = GetPrivateProfileIntA("Display", "FOV", 75, g_ini);
+    g_fov_factor = (v < 40 || v > 150) ? 1.0f : (float)v / 75.0f;
+}
+static void fov_fix(void)
+{
+    static int done;
+    if (done) return;
+    done = 1;
+    fov_read();
+    if (!site_ok(&fov_site)) { log_write("FOV: not this game's code, left as it is\r\n", 42); return; }
+    if (!stubs_ready()) return;
+    mid_hook(fov_site.at, fov_site.len, on_camera, -1);
+    char b[80];
+    wsprintfA(b, "FOV: wide screens see more; x%d%% in play\r\n", (int)(g_fov_factor * 100.0f + 0.5f));
+    log_write(b, slen(b));
+}
+
 /* ---- the screen's own resolution ----
    Ported from ThirteenAG's FusionFix (MIT, see THIRD-PARTY.txt). In a window
    the game renders at its windowed size (its menu's list stops short of 2K and
    wider screens), and the borderless window stretched that over the screen.
    UD3DRenderDevice::SetRes(viewport, width, height, fullscreen, ...) is given
-   the monitor's size instead whenever it isn't fullscreen, so the game draws
-   at the screen's real resolution. When the size changes, the device's "reset
+   the player's choice (SCCTFix.ini [Display] Resolution=WxH) or else the
+   monitor's size whenever it isn't fullscreen, so the game draws at it. When the size changes, the device's "reset
    requested" flag (+0x64) is set for the call: the windowed fast path would
    keep the old size's render targets. */
 typedef int(__thiscall *SetResFn)(void *, BYTE *, int, int, int, int);
@@ -620,11 +785,18 @@ static int __fastcall my_setres(BYTE *dev, void *edx, BYTE *vp, int w, int h, in
     HWND hw = wp ? *(HWND *)(wp + 4) : 0;
     MONITORINFO mi;
     mi.cbSize = sizeof mi;
-    if (!fs && hw && GetMonitorInfoA(MonitorFromWindow(hw, 2 /* MONITOR_DEFAULTTONEAREST */), &mi)) {
-        int mw = mi.rcMonitor.right - mi.rcMonitor.left, mh = mi.rcMonitor.bottom - mi.rcMonitor.top;
+    char rs[32];
+    GetPrivateProfileStringA("Display", "Resolution", "", rs, sizeof rs, g_ini); /* the player's choice; empty = the screen's */
+    int cw = 0, ch = 0, k = 0;
+    while (rs[k] >= '0' && rs[k] <= '9') cw = cw * 10 + (rs[k++] - '0');
+    if (rs[k] == 'x' || rs[k] == 'X') k++;
+    while (rs[k] >= '0' && rs[k] <= '9') ch = ch * 10 + (rs[k++] - '0');
+    int chosen = cw >= 640 && cw <= 16384 && ch >= 480 && ch <= 16384;
+    if (!fs && (chosen || (hw && GetMonitorInfoA(MonitorFromWindow(hw, 2 /* MONITOR_DEFAULTTONEAREST */), &mi)))) {
+        int mw = chosen ? cw : mi.rcMonitor.right - mi.rcMonitor.left, mh = chosen ? ch : mi.rcMonitor.bottom - mi.rcMonitor.top;
         if (mw > 0 && mh > 0 && (mw != w || mh != h)) {
             char b[80];
-            wsprintfA(b, "Resolution: %dx%d -> %dx%d (the screen's)\r\n", w, h, mw, mh);
+            wsprintfA(b, "Resolution: %dx%d -> %dx%d (%s)\r\n", w, h, mw, mh, chosen ? "SCCTFix.ini" : "the screen's");
             log_write(b, slen(b));
             w = mw;
             h = mh;
@@ -749,6 +921,7 @@ static void fps_update(LONGLONG now)
 {
     if (now < g_fps_check) return;
     g_fps_check = now + g_freq;
+    fov_read(); /* the FOV can change while the game runs */
     int want = 60, coop = coop_session();
     if (!coop) {
         int v = GetPrivateProfileIntA("Display", "SingleFPS", 60, g_ini);

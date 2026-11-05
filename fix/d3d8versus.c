@@ -523,6 +523,104 @@ static void read_settings(void)
     }
 }
 
+/* ---- the resolution Versus starts at ----
+   Versus starts at Default.ini's [WinDrv.WindowsClient] Windowed/Fullscreen-
+   ViewportX/Y, and each profile (ProgramData\Ubisoft\Tom Clancy's Splinter Cell
+   Chaos Theory\Saved Games\Versus\<name>_prf.ini) has ScreenRes=n, a line of
+   the menu's list that is set when the profile is loaded - and saved again when
+   Versus closes. So each time Versus starts (this DLL loads before it reads
+   them), the chosen resolution goes into Default.ini and every profile gets
+   ScreenRes=-1 (none: Default.ini's is kept). Only those lines change. */
+IMP BOOL WINAPI ReadFile(HANDLE, void *, DWORD, DWORD *, void *);
+IMP DWORD WINAPI GetEnvironmentVariableA(const char *, char *, DWORD);
+typedef struct { DWORD attr; DWORD t[6]; DWORD hi, lo, r0, r1; char name[260]; char alt[14]; DWORD more[3]; } FINDA;
+IMP HANDLE WINAPI FindFirstFileA(const char *, FINDA *);
+IMP BOOL WINAPI FindNextFileA(HANDLE, FINDA *);
+IMP BOOL WINAPI FindClose(HANDLE);
+static char g_ibuf[1 << 16], g_obuf[(1 << 16) + 512];
+/* key=value lines: "key=" at a line start (any case) gets the new value */
+static int set_lines(const char *path, const char *const *keys, const char *const *vals, int n)
+{
+    HANDLE f = CreateFileA(path, 0x80000000 /* GENERIC_READ */, 1, 0, 3 /* OPEN_EXISTING */, 0, 0);
+    if (f == (HANDLE)-1) return 0;
+    DWORD len = 0;
+    BOOL ok = ReadFile(f, g_ibuf, sizeof g_ibuf - 1, &len, 0);
+    CloseHandle(f);
+    if (!ok || !len || len >= sizeof g_ibuf - 1) return 0;
+    DWORD o = 0, i = 0;
+    int hits = 0;
+    while (i < len) {
+        DWORD e = i;
+        while (e < len && g_ibuf[e] != '\n') e++;
+        int done = 0;
+        for (int k = 0; k < n && !done; k++) {
+            DWORD kl = (DWORD)slen(keys[k]), j = 0;
+            while (j < kl && i + j < e && (g_ibuf[i + j] | 32) == (keys[k][j] | 32)) j++;
+            if (j == kl && i + kl < e && g_ibuf[i + kl] == '=') {
+                DWORD vl = (DWORD)slen(vals[k]), c = i + kl + 1, ve = c;
+                while (ve < e && g_ibuf[ve] != '\r') ve++;
+                int same = ve - c == vl;
+                for (DWORD q = 0; same && q < vl; q++) same = g_ibuf[c + q] == vals[k][q];
+                if (!same) hits++;
+                memcpy(g_obuf + o, g_ibuf + i, kl + 1); o += kl + 1;
+                memcpy(g_obuf + o, vals[k], vl); o += vl;
+                memcpy(g_obuf + o, g_ibuf + ve, e - ve); o += e - ve; /* the "\r" */
+                done = 1;
+            }
+        }
+        if (!done) { memcpy(g_obuf + o, g_ibuf + i, e - i); o += e - i; }
+        if (e < len) g_obuf[o++] = '\n';
+        i = e + 1;
+        if (o > sizeof g_obuf - 300) return 0;
+    }
+    if (!hits) return 0;
+    f = CreateFileA(path, 0x40000000 /* GENERIC_WRITE */, 0, 0, 2 /* CREATE_ALWAYS */, 0x80, 0);
+    if (f == (HANDLE)-1) return -1;
+    DWORD w = 0;
+    WriteFile(f, g_obuf, o, &w, 0);
+    CloseHandle(f);
+    return w == o ? hits : -1;
+}
+static void start_resolution(void)
+{
+    char r[32], b[200];
+    read_str("Display", "Resolution", r, sizeof r);
+    int w = 0, h = 0, i = 0;
+    while (r[i] >= '0' && r[i] <= '9') w = w * 10 + (r[i++] - '0');
+    if (r[i] == 'x' || r[i] == 'X') i++;
+    while (r[i] >= '0' && r[i] <= '9') h = h * 10 + (r[i++] - '0');
+    if (w < 640 || w > 9999 || h < 480 || h > 9999) return; /* none chosen: Versus' own */
+    char ws[8], hs[8], path[600];
+    wsprintfA(ws, "%d", w);
+    wsprintfA(hs, "%d", h);
+    const char *keys[] = { "WindowedViewportX", "WindowedViewportY", "FullscreenViewportX", "FullscreenViewportY" };
+    const char *vals[] = { ws, hs, ws, hs };
+    wsprintfA(path, "%sDefault.ini", g_dir);
+    int d = set_lines(path, keys, vals, 4);
+    int np = 0;
+    char pd[300];
+    DWORD pl = GetEnvironmentVariableA("PROGRAMDATA", pd, sizeof pd);
+    if (pl && pl < sizeof pd) {
+        char dir[500], pat[520];
+        wsprintfA(dir, "%s\\Ubisoft\\Tom Clancy's Splinter Cell Chaos Theory\\Saved Games\\Versus\\", pd);
+        wsprintfA(pat, "%s*_prf.ini", dir);
+        FINDA fd;
+        HANDLE fh = FindFirstFileA(pat, &fd);
+        if (fh != (HANDLE)-1) {
+            const char *pk[] = { "ScreenRes" }, *pv[] = { "-1" };
+            do {
+                if (fd.attr & 0x10) continue;
+                wsprintfA(path, "%s%s", dir, fd.name);
+                if (set_lines(path, pk, pv, 1) > 0) np++;
+            } while (FindNextFileA(fh, &fd));
+            FindClose(fh);
+        }
+    }
+    wsprintfA(b, "start resolution: %dx%d (Default.ini %s, %d profile(s) set to ScreenRes=-1)\r\n", w, h,
+              d > 0 ? "set" : d < 0 ? "not writable" : "already", np);
+    log_line(b);
+}
+
 static DWORD WINAPI worker(void *arg)
 {
     (void)arg;
@@ -576,6 +674,7 @@ BOOL WINAPI DllEntry(HINSTANCE dll, DWORD reason, void *reserved)
         if (f) f((HANDLE)-4 /* DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 */);
     }
     g_rate125 = read_int("Mouse", "Rate125", 1) != 0;
+    start_resolution();
     patch_limiter();
     log_line(g_limiter_patched ? "frame limiter: found\r\n" : "frame limiter: not found\r\n");
     patch_dinput();
