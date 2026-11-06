@@ -209,6 +209,57 @@ static long WINAPI hook_CreateDevice(void *d3d, UINT ad, UINT type, void *wnd, D
     log_line(b);
     return hr;
 }
+/* ---- the mercenary's flashlight ----
+   Found in SCCT_Versus.ex (D3DDrv init, 0x1095bec5): the shadow buffer that
+   the flashlight (a projector with shadows) is drawn through is picked with
+   CheckDeviceFormat(usage DEPTHSTENCIL, type TEXTURE): D16 (0x50) first, then
+   D24X8 (0x4d) - a depth texture that the card itself compares against (the
+   old NVIDIA "shadow buffer" trick, driver-dependent today) - and only when
+   both are refused, A8R8G8B8 (0x15) with the comparison done in the game's
+   own ps.1.4 shaders (the "cmp r0.a" shaders in the exe). With depth textures
+   the light stays black on today's drivers; the colour buffer works on every
+   card. That is what 3D-Analyze's fix ends up doing (it forces ps 1.4 and
+   hides those formats). So depth formats as textures are reported as not
+   available; depth surfaces (the normal Z buffer) are untouched.
+   SCCTVersusFix.ini [Display] Flashlight=0 turns this off. */
+typedef long(WINAPI *CheckFmtFn)(void *, UINT, UINT, UINT, DWORD, UINT, UINT);
+static CheckFmtFn g_check_fmt;
+static int g_flash = -1, g_flash_logged;
+static long WINAPI hook_CheckDeviceFormat(void *d3d, UINT ad, UINT type, UINT adfmt, DWORD usage, UINT rtype, UINT fmt)
+{
+    long hr = g_check_fmt(d3d, ad, type, adfmt, usage, rtype, fmt);
+    /* D3DUSAGE_DEPTHSTENCIL 2, D3DRTYPE_TEXTURE 3, depth formats D16_LOCKABLE 70 .. D16 80 */
+    if (g_flash && (usage & 2) && rtype == 3 && fmt >= 70 && fmt <= 80) {
+        if (g_flash_logged < 4) {
+            char b[120];
+            g_flash_logged++;
+            wsprintfA(b, "flashlight: depth texture format %u %s -> hidden (colour shadow buffer)\r\n",
+                      fmt, hr >= 0 ? "available" : "not available");
+            log_line(b);
+        }
+        return (long)0x8876086A; /* D3DERR_NOTAVAILABLE */
+    }
+    return hr;
+}
+typedef long(WINAPI *AdapterIdFn)(void *, UINT, DWORD, unsigned char *);
+static AdapterIdFn g_adapter_id;
+static long WINAPI hook_GetAdapterIdentifier(void *d3d, UINT ad, DWORD flags, unsigned char *id)
+{
+    long hr = g_adapter_id(d3d, ad, flags, id);
+    static int once;
+    if (hr >= 0 && id && !once) { /* D3DADAPTER_IDENTIFIER8: Description at 512, VendorId at 1032 */
+        char b[200], d[80];
+        int i;
+        once = 1;
+        for (i = 0; i < 79 && id[512 + i]; i++) d[i] = (char)id[512 + i];
+        d[i] = 0;
+        wsprintfA(b, "graphics card: %s (vendor %04lx, device %04lx)\r\n", d,
+                  *(DWORD *)(id + 1032), *(DWORD *)(id + 1036));
+        log_line(b);
+    }
+    return hr;
+}
+
 typedef void *(WINAPI *Create8Fn)(UINT);
 static void patch_dinput(void);
 __declspec(dllexport) void *WINAPI Direct3DCreate8(UINT sdk)
@@ -226,6 +277,15 @@ __declspec(dllexport) void *WINAPI Direct3DCreate8(UINT sdk)
     if (d3d) {
         void *o = hook_slot(d3d, 15, (void *)hook_CreateDevice);
         if (o) g_create_dev = (CreateDevFn)o;
+        /* IDirect3D8: 5 GetAdapterIdentifier, 10 CheckDeviceFormat */
+        o = hook_slot(d3d, 5, (void *)hook_GetAdapterIdentifier);
+        if (o) g_adapter_id = (AdapterIdFn)o;
+        if (g_flash < 0) {
+            g_flash = read_int("Display", "Flashlight", 1) != 0;
+            if (!g_flash) log_line("flashlight: fix off (Flashlight=0)\r\n");
+        }
+        o = hook_slot(d3d, 10, (void *)hook_CheckDeviceFormat);
+        if (o) g_check_fmt = (CheckFmtFn)o;
     }
     return d3d;
 }

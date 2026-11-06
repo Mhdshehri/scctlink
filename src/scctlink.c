@@ -2616,11 +2616,11 @@ static void scctfix(bool install)
    Our own d3d8.dll for Versus (source: fix/d3d8versus.c): no 30 FPS limit, the
    mouse as 125 reports a second (fast mice make Versus' aim zigzag), FOV for
    spies and mercenaries, a wider resolution, the HUD not stretched, turning
-   speed. It reads SCCTVersusFix.ini next to it, which SCCTLink writes. It ships
+   speed, the mercenary's flashlight. It reads SCCTVersusFix.ini next to it, which SCCTLink writes. It ships
    next to SCCTLink.exe as SCCTVersusFix-d3d8.dll and is only copied if its
    SHA-256 is exactly this one (the build is reproducible: fix/build_fix.sh). */
 #define VFIX_FILE "SCCTVersusFix-d3d8.dll"
-#define VFIX_SHA "e9dc167b07c9abae601e5e81277f5b7be6d15efe38aa14251b01f4f91ac8a636"
+#define VFIX_SHA "078fb5e4a3a82ddea37651a5f25d97d2d863e87abae15f15d80b97c489685d9f"
 static void vfix_paths(char *src, char *dst, char *bak, char *ini, size_t n)
 {
     sfmt(src, n, "%s" PATHSEP VFIX_FILE, exe_dir());
@@ -2645,7 +2645,8 @@ static int vfix_state(void)
         "f680d8a6da67f66a752137c2d9b351ae961700f2483ac1f954c8929bda91c205",
         "43e219cf628d0450ffcd20637fa242bb282dc8f6b1bb28840bdf4b023f7c3176",
         "0b1a4685b1acdb870d33af788575563c332343ffc1c2cc2779b520987e20fdc9",
-        "7b2645692fdae5369bfab7029a80b38fbd3759f322fe22abeff9f0ff3db43549" };
+        "7b2645692fdae5369bfab7029a80b38fbd3759f322fe22abeff9f0ff3db43549",
+        "e9dc167b07c9abae601e5e81277f5b7be6d15efe38aa14251b01f4f91ac8a636" };
     for (size_t i = 0; i < sizeof ours / sizeof *ours; i++) if (!strcmp(hex, ours[i])) return 3;
     return 2;
 }
@@ -2685,6 +2686,8 @@ static bool vfix_write(const UiSettings *u)
          "Resolution=%s\r\n"
          "; 1 = the HUD keeps its shape on wide screens.\r\n"
          "HUD=%d\r\n"
+         "; 1 = the mercenary's flashlight is drawn on today's graphics cards.\r\n"
+         "Flashlight=1\r\n"
          "[Mouse]\r\n"
          "; 1 = the game gets the mouse as 125 reports a second (faster mice make Versus' aim zigzag).\r\n"
          "Rate125=%d\r\n"

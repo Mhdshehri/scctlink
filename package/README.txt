@@ -287,6 +287,10 @@ resolution chosen in SCCTLink, Versus' profile scripts (a new profile,
 entering Multiplayer, the game's own resolution menu) no longer change it; Live stats show the connection only
 (no FPS), with a thicker dark edge; the co-op 60 FPS signal is also a file,
 System\SCCTLink.coop.
+The Versus Fix also brings back the mercenary's flashlight on today's
+graphics cards (no 3D-Analyze needed): Versus is told depth textures aren't
+available, so it uses its own ps 1.4 shadow buffer (Flashlight=0 in
+SCCTVersusFix.ini turns this off).
 0.9.9.7 (testing): Raw mouse is now in the SCCT Fix (Windows Raw Input,
 ported from ThirteenAG's FusionFix: no acceleration, any polling rate); the
 Settings tab is rebuilt (a banner for the fix, sections, I / O switches,
