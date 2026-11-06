@@ -282,7 +282,9 @@ number (75 = the game's) widens the normal view, each player's own; settings
 also go to the copies the game really reads in ProgramData; each time Versus
 starts the Versus Fix sets its start resolution (Default.ini) and
 ScreenRes=-1 in every profile and in DefaultProfile.ini (new profiles), so a
-profile doesn't pick 1600x1200 again; Live stats show the connection only
+profile doesn't pick 1600x1200 again (also when Versus closes); with a
+resolution chosen in SCCTLink, Versus' profile scripts (a new profile,
+entering Multiplayer, the game's own resolution menu) no longer change it; Live stats show the connection only
 (no FPS), with a thicker dark edge; the co-op 60 FPS signal is also a file,
 System\SCCTLink.coop.
 0.9.9.7 (testing): Raw mouse is now in the SCCT Fix (Windows Raw Input,

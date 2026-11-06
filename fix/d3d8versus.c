@@ -457,6 +457,16 @@ static int bytes_eq(const unsigned char *a, const unsigned char *b, SIZE_T n)
 static const unsigned char RES_OLD[] = "1600x1200", LABEL_OLD[] = "1600 * 1200";
 static const WCHAR16 WRES_OLD[] = { '1', '6', '0', '0', 'x', '1', '2', '0', '0', 0 };
 static const WCHAR16 WLABEL_OLD[] = { '1', '6', '0', '0', ' ', '*', ' ', '1', '2', '0', '0', 0 };
+/* SPlayerProfile.SetRes / ForceSetRes, the only scripts that change Versus'
+   resolution: ConsoleCommand("SETRES " $ sGameRes[i]) (in memory: EX_StringConst
+   "SETRES", then sGameRes[i]). A new profile (ReinitProfile -> SetRes(Default.
+   ScreenRes), the game's default 4 = 1600x1200) and entering Multiplayer
+   (ForceSetRes(ScreenRes)) would set the menu list's resolution; with a chosen
+   resolution their command becomes "SETREZ", which does nothing, so Versus keeps
+   the one it started at (Default.ini). The game's own resolution menu goes
+   through SetRes too: SCCTLink's setting is the one that counts. */
+static const unsigned char SETRES_PAT[] = { 0x1f, 'S', 'E', 'T', 'R', 'E', 'S', 0x00, 0x10 };
+static int g_setres;
 static void scan_bytes(const unsigned char *b, SIZE_T n, unsigned char *game)
 {
     for (SIZE_T i = 0; i + 40 < n; i++) {
@@ -467,6 +477,9 @@ static void scan_bytes(const unsigned char *b, SIZE_T n, unsigned char *game)
             put_bytes(game + i + 8, b + i + 26, 4); /* SizeY */
             put_bytes(game + i + 13, f480, 4);      /* 480.0 */
             g_huds++;
+        } else if (c == 0x1f && S.res[0] && bytes_eq(b + i, SETRES_PAT, sizeof SETRES_PAT)) {
+            put_bytes(game + i + 6, (const unsigned char *)"Z", 1);
+            g_setres++;
         } else if (c == '1' && S.res[0]) {
             /* the menu's last resolution and its label, plain or wide text */
             if (bytes_eq(b + i, RES_OLD, 10)) { put_bytes(game + i, S.res, 10); g_ress++; }
@@ -524,6 +537,14 @@ static void read_settings(void)
 }
 
 /* ---- the resolution Versus starts at ----
+   Found in Versus' scripts (SBase.u, SPlayerProfile): a new profile runs
+   ReinitProfile() -> SetRes(Default.ScreenRes), and entering Multiplayer runs
+   ForceSetRes(ScreenRes) -> ConsoleCommand("SETRES " $ sGameRes[ScreenRes]);
+   sGameRes is the menu's list (its line 4 is 1600x1200). ScreenRes is a config
+   value whose default comes from DefaultProfile.ini - read before this DLL is
+   loaded (Versus loads Direct3D later). So the files are set both when this
+   DLL loads and when Versus closes (after it saved them): the next start then
+   finds -1 everywhere, and a new profile gets -1 too.
    Versus starts at Default.ini's [WinDrv.WindowsClient] Windowed/Fullscreen-
    ViewportX/Y, and each profile (ProgramData\Ubisoft\Tom Clancy's Splinter Cell
    Chaos Theory\Saved Games\Versus\<name>_prf.ini) has ScreenRes=n, a line of
@@ -631,10 +652,10 @@ static DWORD WINAPI worker(void *arg)
 {
     (void)arg;
     SetThreadPriority(GetCurrentThread(), -1 /* below normal */);
-    int last[5] = { -1, -1, -1, -1, -1 };
+    int last[6] = { -1, -1, -1, -1, -1, -1 };
     for (int pass = 0;; pass++) {
         read_settings();
-        g_cams = g_mercs = g_fovs = g_huds = g_ress = 0;
+        g_cams = g_mercs = g_fovs = g_huds = g_ress = g_setres = 0;
         MEMORY_BASIC_INFORMATION mi;
         unsigned char *p = (unsigned char *)0x10000;
         while ((DWORD)p < 0xFFFE0000u && VirtualQuery(p, &mi, sizeof mi) == sizeof mi) {
@@ -645,13 +666,13 @@ static DWORD WINAPI worker(void *arg)
             if (next <= p) break;
             p = next;
         }
-        int now[5] = { g_cams, g_mercs, g_fovs, g_huds, g_ress };
-        if (now[0] != last[0] || now[1] != last[1] || now[2] != last[2] || now[3] || now[4]) {
-            char b[200];
-            wsprintfA(b, "found: spy camera %d, mercenary aim %d, FOV %d; changed now: HUD %d, resolution texts %d\r\n",
-                      now[0], now[1], now[2], now[3], now[4]);
+        int now[6] = { g_cams, g_mercs, g_fovs, g_huds, g_ress, g_setres };
+        if (now[0] != last[0] || now[1] != last[1] || now[2] != last[2] || now[3] || now[4] || now[5]) {
+            char b[240];
+            wsprintfA(b, "found: spy camera %d, mercenary aim %d, FOV %d; changed now: HUD %d, resolution texts %d, profile SETRES %d\r\n",
+                      now[0], now[1], now[2], now[3], now[4], now[5]);
             log_line(b);
-            for (int i = 0; i < 5; i++) last[i] = now[i];
+            for (int i = 0; i < 6; i++) last[i] = now[i];
         }
         Sleep(pass < 60 ? 1000 : 3000); /* quick while the menu and the first round load */
     }
@@ -661,6 +682,11 @@ static DWORD WINAPI worker(void *arg)
 BOOL WINAPI DllEntry(HINSTANCE dll, DWORD reason, void *reserved)
 {
     (void)reserved;
+    if (reason == 0 /* DLL_PROCESS_DETACH: Versus has saved its files */ && g_dir[0]) {
+        log_line("closing:");
+        start_resolution(); /* so the next start is right, however Versus is started */
+        return 1;
+    }
     if (reason != 1 /* DLL_PROCESS_ATTACH */) return 1;
     DisableThreadLibraryCalls(dll);
     DWORD n = GetModuleFileNameA(0, g_dir, 280);
