@@ -327,10 +327,6 @@ bool run_program(const char *exe, const char *args, const char *dir)
 }
 bool game_is_running(const char *prefix) { GameNet g; game_scan(prefix, &g); return g.running; }
 /* tests: the "measured" frame rate comes from MOCK_FPS */
-static bool g_fps_on;
-bool fps_start(void) { g_fps_on = true; return getenv("MOCK_FPS") != 0; }
-void fps_stop(void) { g_fps_on = false; }
-int fps_get(void) { const char *f = getenv("MOCK_FPS"); return g_fps_on && f ? atoi(f) : -1; }
 void set_title(const char *t) { (void)t; }
 void u64_to_str(u64 v, char out[24]) { snprintf(out, 24, "%llu", (unsigned long long)v); }
 u64 str_to_u64(const char *s) { return strtoull(s, 0, 10); }
@@ -370,4 +366,13 @@ void dir_list(const char *dir, DirFn fn, void *ctx)
         fn(ctx, e->d_name, S_ISDIR(st.st_mode), (u64)st.st_size, (u64)st.st_mtim.tv_sec * 1000000000u + (u64)st.st_mtim.tv_nsec);
     }
     closedir(d);
+}
+
+void plat_coop_flag(bool on)
+{
+    static int last = -1;
+    if (last == (int)on) return;
+    last = on;
+    printf("[coop-flag] %d\n", (int)on); /* the tests read it */
+    fflush(stdout);
 }

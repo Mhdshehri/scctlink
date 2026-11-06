@@ -282,6 +282,7 @@ def main():
         h7 = relay(A, "H7", 1031, "1032,1033,1034", ["host"], d)
         procs.append(h7)
         check(h7.wait_for(r"Lobby is ready") is not None, "host ready")
+        check(h7.wait_for(r"\[coop-flag\] 1", timeout=3) is not None, "co-op session: the flag for the SCCT Fix is up (60 FPS)")
         code = re.search(r"code (\S+),", h7.log).group(1)
         lobn = LOBBY_HIGH | int("".join("{:05b}".format("0123456789ABCDEFGHJKMNPQRSTVWXYZ".index(ch)) for ch in code.replace("-", "")), 2)
         lob = str(lobn)
@@ -607,14 +608,20 @@ def main():
         os.makedirs(pd, exist_ok=True)
         with open(os.path.join(pd, "SplinterCell3User.ini"), "wb") as f:  # the host's own settings live in ProgramData
             f.write(b"[Engine.PlayerController]\r\nDesiredFOV=75.000000\r\n")
+        pdroot = os.path.dirname(pd)
+        with open(os.path.join(pdroot, "SplinterCell3.ini"), "wb") as f:  # the copy of the game's ini it reads
+            f.write(b"[WinDrv.WindowsClient]\r\nFullscreenViewportX=1024\r\nFullscreenViewportY=768\r\nStartupFullscreen=True\r\n")
+        os.makedirs(os.path.join(pd, "KAZ"), exist_ok=True)
+        with open(os.path.join(pd, "KAZ", "KAZ.ini"), "wb") as f:  # a profile: its own FOV
+            f.write(b"[Engine.PlayerInput]\r\nMouseSensitivity=100.000000\r\n[Engine.PlayerController]\r\nDesiredFOV=75.0\r\nDefaultFOV=75.0\r\n")
         ga, gb, gc = game_dir("a", modded), game_dir("b", other), game_dir("c", base)
         exe_a, exe_b = os.path.join(d, "exe_a"), os.path.join(d, "exe_b")  # each PC's SCCTLink folder
         os.makedirs(exe_a, exist_ok=True); os.makedirs(exe_b, exist_ok=True)
         hm = relay(A, "HM", 1191, "1192", ["host"], d, {"MOCK_GAME_DIR": ga, "PROGRAMDATA": os.path.join(gd, "programdata_a"),
                                                          "MOCK_EXE_DIR": exe_a}, stdin=subprocess.PIPE)
         procs.append(hm)
-        check(hm.wait_for(r"\[settings\] scctfix 0 mine 2560x1440 fov 75 fps 60 ws 120") is not None,
-              "the host's resolution, FOV (from ProgramData) and FPS limit, before anyone links")
+        check(hm.wait_for(r"\[settings\] scctfix 0 mine 1024x768 fov 75 fps 60 ws 0") is not None,
+              "the host's resolution (ProgramData's SplinterCell3.ini, the copy the game reads), FOV (from ProgramData) and FPS limit, before anyone links")
         check(hm.wait_for(r"\[mods\] #user1191 \(you\)") is not None and hm.wait_for(r"\[mods\]  system/dinput8\.dll") is not None
               and hm.wait_for(r"\[mods\] !SCCT Fix not installed") is not None,
               "Mods tab: your name, your mods and the SCCT Fix right away (no friend, no game running)")
@@ -627,21 +634,23 @@ def main():
         check(hm.wait_for(r"only on your PC: system/dinput8\.dll", timeout=3) is not None, "...the mod loader only on the host's PC")
         check(hm.wait_for(r"only on your PC: system/scripts/splintercellchaostheory\.widescreenfix\.asi", timeout=3) is not None,
               "...the widescreen fix only on the host's PC")
+        check(hm.wait_for(r"\[mods\] !Another widescreen mod \(SplinterCellChaosTheory\.WidescreenFix\.(asi|ini)\): not needed, remove it", timeout=5) is not None
+              and jm.wait_for(r"\[mods\] !Another widescreen mod: not needed, remove it", timeout=5) is not None,
+              "...the Mods tab says another widescreen mod isn't needed (on both sides)")
         check(hm.wait_for(r"different version: system/core\.u", timeout=3) is not None, "...a game file with the same size but other content")
         check(jm.wait_for(r"only on user1191's PC: system/dinput8\.dll", timeout=15) is not None, "the friend sees the same, from their side")
         check(hm.wait_for(r"\[mods\] #user1192", timeout=3) is not None and hm.wait_for(r"\[mods\] !Only on your PC: system/dinput8\.dll", timeout=3) is not None
               and hm.wait_for(r"\[mods\] !Different version: system/core\.u", timeout=3) is not None,
               "Mods tab: the friend's name, then each difference in red")
-        check(hm.wait_for(r"! FOV differs: you 75, user1192 90", timeout=3) is not None
-              and hm.wait_for(r"\[mods\] !FOV: you 75, user1192 90 - must be the same", timeout=3) is not None, "a different FOV is flagged")
+        check("FOV differs" not in hm.log and "!FOV:" not in hm.log, "a different FOV is not flagged (each player's own view)")
         modlines = "\n".join(l for l in hm.log.splitlines() if l.startswith("[mods]"))
         check("Resolution" not in modlines and "FPS limit (game)" not in modlines,
               "a different resolution and the same FPS limit are not flagged")
-        check(jm.wait_for(r"! FOV differs: you 90, user1191 75", timeout=3) is not None, "...and on the friend's side")
+        check("FOV differs" not in jm.log, "...nor on the friend's side")
         check("splintercell3.ini" not in hm.log + jm.log, "settings files (.ini) are not compared")
         check(gd not in hm.log + jm.log and gd not in open(os.path.join(d, "log_HM.txt")).read(), "the game folder's path is never sent or logged")
         # the Settings tab
-        check(hm.wait_for(r"\[settings\] scctfix 0 mine 2560x1440 fov 75 fps 60 ws 120 \| user1192 1920x1080 fov 90 fps 60 ws 0", timeout=5) is not None,
+        check(hm.wait_for(r"\[settings\] scctfix 0 mine 1024x768 fov 75 fps 60 ws 0 \| user1192 1920x1080 fov 90 fps 60 ws 0", timeout=5) is not None,
               "Settings tab: this PC's values and the friend's")
         hm.p.stdin.write("A\n1920 1080 90 60 100\n"); hm.p.stdin.flush()  # "Use friend's", FOV factor 1.00, Apply
         check(hm.wait_for(r"Settings: resolution set to 1920x1080", timeout=10) is not None
@@ -649,6 +658,10 @@ def main():
               and hm.wait_for(r"Settings: FPS limit set to 60", timeout=3) is not None
               and hm.wait_for(r"Settings: the widescreen fix's FOV factor set to 1\.00", timeout=3) is not None,
               "Apply: resolution, FOV, FPS limit and the widescreen fix's FOV factor written")
+        with open(os.path.join(pdroot, "SplinterCell3.ini"), "rb") as f:
+            check(b"FullscreenViewportX=1920\r\nFullscreenViewportY=1080\r\n" in f.read(), "...also in ProgramData's SplinterCell3.ini (the copy the game reads)")
+        with open(os.path.join(pd, "KAZ", "KAZ.ini"), "rb") as f:
+            check(b"DesiredFOV=90.000000\r\nDefaultFOV=90.000000\r\n" in f.read(), "...and the FOV in each profile (Profiles\\<name>\\<name>.ini)")
         rd = lambda *p: open(os.path.join(*p), "rb").read()
         uini = os.path.join(pd, "SplinterCell3User.ini")
         check(rd(uini) == b"[Engine.PlayerController]\r\nDesiredFOV=90.000000\r\n"
@@ -659,7 +672,7 @@ def main():
         check(rd(ga, "System", "scripts", "SplinterCellChaosTheory.WidescreenFix.ini") ==
               b"[MAIN]\r\nResX = 0\r\nResY = 0\r\nFOVFactor = 1.00\r\nFPSLimit = 60 // frame rate cap\r\n",
               "...the widescreen fix's .ini: FOV factor and FPS limit changed, its comment and ResX=0 (auto) kept")
-        check(hm.wait_for(r"\[settings\] scctfix 0 mine 1920x1080 fov 90 fps 60 ws 100", timeout=10) is not None, "the Settings tab shows the new values")
+        check(hm.wait_for(r"\[settings\] scctfix 0 mine 1920x1080 fov 90 fps 60 ws 0", timeout=10) is not None, "the Settings tab shows the new values")
         leftovers = [os.path.join(r, f) for r, _, fs in os.walk(gd) for f in fs if f.endswith(".scctlink-new")]
         check(not leftovers, "...each .ini was written in full and swapped in (no half-written files left) %s" % leftovers)
         time.sleep(1)
@@ -669,7 +682,7 @@ def main():
         check(hm.wait_for(r"! Settings: FOV must be between 50 and 130", timeout=5) is not None, "a wrong value is refused")
         check(rd(uini) == b"[Engine.PlayerController]\r\nDesiredFOV=90.000000\r\n", "...and nothing is written")
         # the SCCT Fix button
-        fixsrc = os.path.join(ROOT, "package", "SCCTFix-d3d9.dll")
+        fixsrc = os.path.join(ROOT, "build", "fix", "d3d9.dll")  # ours, built from fix/d3d9fix.c
         fixhere = os.path.join(exe_a, "SCCTFix-d3d9.dll")  # next to SCCTLink
         shutil.copy(fixsrc, fixhere)
         shutil.copy(fixsrc, os.path.join(exe_b, "SCCTFix-d3d9.dll"))
@@ -688,6 +701,18 @@ def main():
         check(hm.wait_for(r"SCCT Fix removed", timeout=10) is not None and rd(sysd3d) == b"MZanother-d3d9-mod"
               and not os.path.exists(sysd3d + ".scctlink-backup") and b"StartupFullscreen=True" in rd(ga, "System", "SplinterCell3.ini"),
               "Remove SCCT Fix: the earlier d3d9.dll is put back, fullscreen again")
+        shutil.copy(os.path.join(ROOT, "package", "SCCTFix-d3d9.dll"), sysd3d)  # the original SCCT Fix
+        at = hm.mark()
+        hm.p.stdin.write("F\n1\n"); hm.p.stdin.flush()
+        check(hm.wait_for(r"SCCT Fix installed", timeout=10, since=at) is not None and rd(sysd3d) == rd(fixsrc)
+              and not os.path.exists(sysd3d + ".scctlink-backup"), "the original SCCT Fix is replaced by ours (no backup of it)")
+        at = hm.mark()
+        hm.p.stdin.write("B\n1\n"); hm.p.stdin.flush()
+        check(hm.wait_for(r"\[settings\] chud 1", timeout=10, since=at) is not None and b"Fix=1\r\n" in rd(ga, "System", "SCCTFix.ini"),
+              "co-op HUD fix on: System\\SCCTFix.ini [HUD] Fix=1 (read by our SCCT Fix)")
+        hm.p.stdin.write("F\n0\n"); hm.p.stdin.flush()
+        check(hm.wait_for(r"SCCT Fix removed", timeout=10, since=at) is not None, "removed again")
+        check(os.path.exists(os.path.join(ga, "System", "SCCTLink.coop")), "co-op session: System\\SCCTLink.coop is there (the SCCT Fix keeps 60 FPS)")
         # the live stats window's numbers
         check(jm.wait_for(r"\[stats\] user1191   ping \d+ ms   loss [\d.-]+%?   \d+/\d+ pkt/s", timeout=10) is not None,
               "live stats: ping, loss and packets per second for the linked friend")
@@ -701,6 +726,7 @@ def main():
         check(len(cached) >= 2 and int(cached[0][0]) > 0 and int(cached[-1][1]) > 0 and int(cached[-1][0]) <= 2,
               "checksum cache: first start hashes the files, later checks reuse them %s" % cached[-2:])
         hm.stop(); jm.stop()
+        check(not os.path.exists(os.path.join(ga, "System", "SCCTLink.coop")), "...and gone when SCCTLink closes")
         hs = relay(A, "HS", 1193, "1194", ["host"], d, {"MOCK_GAME_DIR": gc})
         procs.append(hs)
         check(hs.wait_for(r"Lobby is ready") is not None, "host ready")
@@ -720,19 +746,13 @@ def main():
         check(hs.wait_for(r"only on user1194's PC: system/d3d9\.dll", timeout=10) is not None, "...and on the host's side, without clicking anything")
         hs.stop(); js.stop()
 
-        print("[17] live stats: the game's frame rate, even playing alone; the SCCT Fix reminder")
-        solo = relay(A, "SO", 1195, "", ["idle"], d, {"MOCK_GAME_DIR": gc, "MOCK_FPS": "60"}, stdin=subprocess.PIPE)
+        print("[17] live stats: the connection's numbers; the SCCT Fix reminder")
+        solo = relay(A, "SO", 1195, "", ["idle"], d, {"MOCK_GAME_DIR": gc}, stdin=subprocess.PIPE)
         procs.append(solo)
         check(solo.wait_for(r"! The SCCT Fix isn't installed\. Co-op disconnects", timeout=10) is not None,
               "without the SCCT Fix, co-op players are told to install it")
         solo.p.stdin.write("T\n1\n"); solo.p.stdin.flush()  # "Live stats"
-        check(solo.wait_for(r"\[stats\] Splinter Cell: not running", timeout=10) is not None, "live stats with no game: 'not running'")
-        game = Proc("solo-game", A.cmd([sys.executable, "-I", "-c",
-                                        "import ctypes,time;ctypes.CDLL(None).prctl(15,b'splintercell3',0,0,0);time.sleep(12)"]))
-        procs.append(game)
-        check(solo.wait_for(r"\[stats\] Splinter Cell: 60 FPS$", timeout=12) is not None or "[stats] Splinter Cell: 60 FPS" in solo.log,
-              "live stats while playing alone: the game's frame rate")
-        game.stop()
+        check(solo.wait_for(r"\[stats\] Not linked to anyone yet", timeout=10) is not None, "live stats with no one linked: says so (no FPS any more)")
         solo.stop()
 
         print("[18] Versus: only Versus files are compared; who has SCCT Versus Reloaded")
@@ -770,38 +790,72 @@ def main():
               and hv.wait_for(r"only on your PC: versus/system/dinput8\.dll", timeout=5) is not None, "the Versus files that differ are listed")
         check("system/d3d9.dll" not in hv.log and "system/d3d9.dll" not in jv.log,
               "a co-op file (System\\d3d9.dll) is not compared in Versus")
+        check("[coop-flag] 1" not in hv.log and "[coop-flag] 1" not in jv.log, "Versus: no co-op flag (the SCCT Fix isn't used)")
         hv.stop(); jv.stop()
 
-        print("[19] Raw mouse: the Settings tab's button turns UseDIMouse on and off")
+        print("[19] Raw mouse: part of the SCCT Fix (SCCTFix.ini [Mouse] Raw), the game's DirectInput mouse off")
         mouse = dict(base)
-        mouse["System/SplinterCell3.ini"] = (b"[Init]\r\nLogFlags=LNONE\r\nUseDIMouse=False\r\ndefaultRMode=5\r\n"
+        mouse["System/SplinterCell3.ini"] = (b"[Init]\r\nLogFlags=LNONE\r\nUseDIMouse=True\r\ndefaultRMode=5\r\n"
                                              b"[WinDrv.WindowsClient]\r\nStartupFullscreen=False\r\n")
         gm = game_dir("mouse", mouse)
         ini_m = os.path.join(gm, "System", "SplinterCell3.ini")
+        fix_m = os.path.join(gm, "System", "SCCTFix.ini")
+        d3d_m = os.path.join(gm, "System", "d3d9.dll")
         exe_m = os.path.join(d, "exe_m")
         os.makedirs(exe_m, exist_ok=True)
         rm = relay(A, "RM", 1198, "", ["idle"], d, {"MOCK_GAME_DIR": gm, "MOCK_EXE_DIR": exe_m}, stdin=subprocess.PIPE)
         procs.append(rm)
-        check(rm.wait_for(r"\[settings\] rawmouse 0 ", timeout=10) is not None, "raw mouse is off by default (UseDIMouse=False)")
+        check(rm.wait_for(r"\[settings\] rawmouse 0 ", timeout=10) is not None, "raw mouse is off without the SCCT Fix")
         mk = rm.mark()
         rm.p.stdin.write("U\n1\n"); rm.p.stdin.flush()
-        check(rm.wait_for(r"Raw mouse on: the game reads the mouse itself", timeout=10, since=mk) is not None
+        check(rm.wait_for(r"Raw mouse is part of the SCCT Fix: install it first", timeout=10, since=mk) is not None
+              and not os.path.exists(fix_m), "...and can't be turned on before the SCCT Fix is installed")
+        with open(os.path.join(ROOT, "build", "fix", "d3d9.dll"), "rb") as f, open(d3d_m, "wb") as o:
+            o.write(f.read())  # the SCCT Fix in place (as Install does)
+        mk = rm.mark()
+        rm.p.stdin.write("U\n1\n"); rm.p.stdin.flush()
+        check(rm.wait_for(r"Raw mouse on: no acceleration, any polling rate", timeout=10, since=mk) is not None
               and rm.wait_for(r"\[settings\] rawmouse 1 ", timeout=5, since=mk) is not None, "Raw mouse on")
         with open(ini_m, "rb") as f:
             txt = f.read()
-        check(b"UseDIMouse=True\r\n" in txt and b"LogFlags=LNONE\r\n" in txt and b"defaultRMode=5\r\n" in txt
-              and b"StartupFullscreen=False" in txt, "only the UseDIMouse line changed (Windows line ends kept)")
-        check(os.path.exists(ini_m + ".scctlink-backup"), "the original .ini is backed up first")
+        check(b"UseDIMouse=False\r\n" in txt and b"LogFlags=LNONE\r\n" in txt and b"defaultRMode=5\r\n" in txt
+              and b"StartupFullscreen=False" in txt, "...the game's DirectInput mouse off (only that line changed)")
+        with open(fix_m, "rb") as f:
+            check(b"[Mouse]\r\n" in f.read(), "...SCCTFix.ini has it")
+        with open(fix_m, "rb") as f:
+            check(b"Raw=1\r\n" in f.read(), "...Raw=1")
         mk = rm.mark()
         rm.p.stdin.write("U\n0\n"); rm.p.stdin.flush()
         check(rm.wait_for(r"\[settings\] rawmouse 0 ", timeout=10, since=mk) is not None, "Raw mouse off again")
-        with open(ini_m, "rb") as f:
-            check(b"UseDIMouse=False\r\n" in f.read(), "...UseDIMouse=False in the file")
+        with open(fix_m, "rb") as f:
+            check(b"Raw=0\r\n" in f.read(), "...Raw=0 in SCCTFix.ini")
+        check(rm.wait_for(r"\[settings\] chud \d skipintro -?\d spfps 60", timeout=5) is not None, "single-player FPS: 60 until it's changed")
+        mk = rm.mark()
+        rm.p.stdin.write("E\n-1\n"); rm.p.stdin.flush()
+        check(rm.wait_for(r"\[settings\] chud \d skipintro -?\d spfps -1", timeout=10, since=mk) is not None
+              and rm.wait_for(r"Single player: your screen's refresh rate", timeout=5, since=mk) is not None, "single-player FPS: the screen's")
+        with open(fix_m, "rb") as f:
+            t = f.read()
+        check(b"SingleFPS=-1\r\n" in t and b"Raw=0\r\n" in t, "...SingleFPS=-1 in SCCTFix.ini, the other settings kept")
+        mk = rm.mark()
+        rm.p.stdin.write("E\n0\n"); rm.p.stdin.flush()
+        check(rm.wait_for(r"spfps 0\n", timeout=10, since=mk) is not None, "single-player FPS: no limit")
+        check("[coop-flag] 1" not in rm.log, "...not in a session: no co-op flag")
+        mk = rm.mark()
+        rm.p.stdin.write("A\n2560 1440 90 0 0\n"); rm.p.stdin.flush()
+        check(rm.wait_for(r"Settings: resolution set to 2560x1440", timeout=10, since=mk) is not None
+              and rm.wait_for(r"Settings: FOV set to 90", timeout=5, since=mk) is not None, "with the SCCT Fix: resolution and FOV applied")
+        with open(fix_m, "rb") as f:
+            t = f.read()
+        check(b"Resolution=2560x1440\r\n" in t and b"FOV=90\r\n" in t and b"Raw=0\r\n" in t and b"SingleFPS=0\r\n" in t,
+              "...into SCCTFix.ini (the fix draws at it and sets the camera's FOV), the other settings kept")
         rm.stop()
 
         print("[20] Settings: co-op mouse (sensitivity, aim turn speed), Versus settings, Reset")
         st = dict(base)
-        st["System/SplinterCell3.ini"] = (b"[Init]\r\nUseDIMouse=True\r\n[SIMULATION]\r\nMAXFPS=144\r\n"
+        st["System/SplinterCell3.ini"] = (b"[GENERAL]\r\nLogosVideo=none\r\nSplashVideo=introteaser_PC.bik\r\nESRBVideo=\r\n"
+                                          b"IntroVideo=01_lighthouse_intro.bik\r\n"
+                                          b"[Init]\r\nUseDIMouse=True\r\n[SIMULATION]\r\nMAXFPS=144\r\n"
                                           b"[WinDrv.WindowsClient]\r\nFullscreenViewportX=1920\r\nFullscreenViewportY=1080\r\n")
         st["System/SplinterCell3User.ini"] = b"[Engine.PlayerInput]\r\nMouseSensitivity=100.0\r\nDesiredFOV=90.000000\r\nDefaultFOV=90.000000\r\n"
         st["System/SplinterCell3Settings.ini"] = (b"[Echelon.EPlayerController]\r\nm_speedRun=400\r\nm_turnMul=0.5\r\n"
@@ -859,7 +913,83 @@ def main():
         se.p.stdin.write("Z\n1\n"); se.p.stdin.flush()
         check(se.wait_for(r"\[settings\] versus 2560x1440 sens 1000 mult 600 profile 1", timeout=10, since=mk) is not None,
               "Reset (Versus): sensitivity 10, multiplier 6, resolution kept")
+        vids = os.path.join(gs, "Data", "Videos")
+        os.makedirs(vids, exist_ok=True)
+        for v in ("logos_PC.bik", "introteaser_PC.bik", "ESRB.bik", "01_lighthouse_intro.bik"):
+            with open(os.path.join(vids, v), "wb") as f:
+                f.write(b"BIK" + v.encode())
+        mk = se.mark()
+        se.p.stdin.write("I\n1\n"); se.p.stdin.flush()
+        check(se.wait_for(r"\[settings\] chud \d skipintro 1", timeout=10, since=mk) is not None, "Skip intro on")
+        check(os.path.exists(os.path.join(vids, "logos_PC.bik.scctlink-off")) and not os.path.exists(os.path.join(vids, "logos_PC.bik"))
+              and os.path.exists(os.path.join(vids, "ESRB.bik.scctlink-off")) and os.path.exists(os.path.join(vids, "01_lighthouse_intro.bik")),
+              "...the startup videos set aside (renamed), the story's intro kept")
+        s3 = rd(sysd, "SplinterCell3.ini")
+        check(b"LogosVideo=logos_PC.bik\r\n" in s3 and b"ESRBVideo=ESRB.bik\r\n" in s3, "...names an earlier test emptied are back in SplinterCell3.ini")
+        mk = se.mark()
+        se.p.stdin.write("I\n0\n"); se.p.stdin.flush()
+        check(se.wait_for(r"\[settings\] chud \d skipintro 0", timeout=10, since=mk) is not None
+              and os.path.exists(os.path.join(vids, "logos_PC.bik")) and not os.path.exists(os.path.join(vids, "logos_PC.bik.scctlink-off")),
+              "Skip intro off: the videos have their names back")
         se.stop()
+
+        print("[21] Versus Fix: install, its settings (SCCTVersusFix.ini), the Mods tab, remove")
+        vf = dict(base)
+        vf["Versus/System/SCCT_Versus.exe"] = b"MZ" + b"v" * 4000
+        vf["Versus/System/Default.ini"] = (b"[WinDrv.WindowsClient]\r\nWindowedViewportX=640\r\nWindowedViewportY=480\r\n"
+                                           b"FullscreenViewportX=1600\r\nFullscreenViewportY=1200\r\n")
+        gv = game_dir("vfix", vf)
+        pdx = os.path.join(gd, "programdata_v")
+        vprof = os.path.join(pdx, "Ubisoft", "Tom Clancy's Splinter Cell Chaos Theory", "Saved Games", "Versus")
+        os.makedirs(vprof, exist_ok=True)
+        with open(os.path.join(vprof, "KaZ_prf.ini"), "wb") as f:
+            f.write(b"[SBase.SPlayerProfile]\r\nMouseSensitivity=10.0\r\nScreenRes=5\r\nGraphQual=2\r\n")
+        exe_v = os.path.join(d, "exe_v")
+        os.makedirs(exe_v, exist_ok=True)
+        shutil.copy(os.path.join(ROOT, "build", "fix", "d3d8.dll"), os.path.join(exe_v, "SCCTVersusFix-d3d8.dll"))
+        vsys = os.path.join(gv, "Versus", "System")
+        vx = relay(A, "VX", 1200, "", ["idle", "--versus"], d, {"MOCK_GAME_DIR": gv, "MOCK_EXE_DIR": exe_v, "PROGRAMDATA": pdx}, stdin=subprocess.PIPE)
+        procs.append(vx)
+        check(vx.wait_for(r"\[settings\] vfix 0 fps 60 res 0x0 hud 1 rate125 1 fov 0 0 turn 100 100", timeout=10) is not None,
+              "Versus Fix not installed yet; its defaults: 60 FPS, HUD fix, mouse 125 Hz, the game's FOV and turning")
+        mk = vx.mark()
+        vx.p.stdin.write("Y\n1\n"); vx.p.stdin.flush()
+        check(vx.wait_for(r"Versus Fix installed", timeout=10, since=mk) is not None
+              and vx.wait_for(r"\[settings\] vfix 1 ", timeout=5, since=mk) is not None, "Versus Fix installed")
+        with open(os.path.join(vsys, "d3d8.dll"), "rb") as f, open(os.path.join(ROOT, "build", "fix", "d3d8.dll"), "rb") as g:
+            check(f.read() == g.read(), "...as Versus\\System\\d3d8.dll, the exact file")
+        check(os.path.exists(os.path.join(vsys, "SCCTVersusFix.ini")), "...with SCCTVersusFix.ini (its defaults)")
+        check(vx.wait_for(r"\[mods\] \+Versus Fix installed", timeout=5, since=mk) is not None, "the Mods tab shows it")
+        mk = vx.mark()
+        vx.p.stdin.write("P\n120 1920 1080 1 0 90 110\n"); vx.p.stdin.flush()
+        check(vx.wait_for(r"\[settings\] vfix 1 fps 120 res 1920x1080 hud 1 rate125 0 fov 90 110 turn 100 100", timeout=10, since=mk)
+              is not None, "Versus Fix settings saved: 120 FPS, 1920x1080, mouse as it comes, FOV 90 / 110")
+        with open(os.path.join(vsys, "Default.ini"), "rb") as f:
+            t = f.read()
+        check(b"WindowedViewportX=1920\r\nWindowedViewportY=1080\r\nFullscreenViewportX=1920\r\nFullscreenViewportY=1080\r\n" in t,
+              "...and Versus' own Default.ini starts it at 1920x1080 (window and full screen)")
+        with open(os.path.join(vprof, "KaZ_prf.ini"), "rb") as f:
+            check(b"ScreenRes=-1\r\nGraphQual=2\r\n" in f.read(), "...and the profile doesn't pick a line of the menu's list (ScreenRes=-1)")
+        mk = vx.mark()
+        vx.p.stdin.write("N\n250 300\n"); vx.p.stdin.flush()
+        check(vx.wait_for(r"\[settings\] vfix 1 fps 120 res 1920x1080 hud 1 rate125 0 fov 90 110 turn 250 300", timeout=10, since=mk)
+              is not None, "turning speed saved")
+        with open(os.path.join(vsys, "SCCTVersusFix.ini"), "rb") as f:
+            ini = f.read()
+        check(b"MaxFPS=120\r\n" in ini and b"Resolution=1920x1080\r\n" in ini and b"Rate125=0\r\n" in ini
+              and b"Spy=90\r\n" in ini and b"Merc=110\r\n" in ini and b"Spy=2.50\r\n" in ini and b"Merc=3.00\r\n" in ini,
+              "SCCTVersusFix.ini has them, as the fix reads them")
+        mk = vx.mark()
+        vx.p.stdin.write("Y\n0\n"); vx.p.stdin.flush()
+        check(vx.wait_for(r"Versus Fix removed", timeout=10, since=mk) is not None and not os.path.exists(os.path.join(vsys, "d3d8.dll")),
+              "Versus Fix removed")
+        with open(os.path.join(exe_v, "SCCTVersusFix-d3d8.dll"), "ab") as f:
+            f.write(b"x")  # a changed file is never installed
+        mk = vx.mark()
+        vx.p.stdin.write("Y\n1\n"); vx.p.stdin.flush()
+        check(vx.wait_for(r"is not the expected file, so it was NOT installed", timeout=10, since=mk) is not None
+              and not os.path.exists(os.path.join(vsys, "d3d8.dll")), "a file that isn't the pinned one is refused")
+        vx.stop()
 
         print("[13] bad internet: 10% packet loss each way and 60 ms delay each way")
         h10, j10, hg10, jg10 = session("    (setup)", d, A, B, extra={"MOCK_LOSS": "10", "MOCK_DELAY_MS": "60"}, n_stream=1000)
