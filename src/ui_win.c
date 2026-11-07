@@ -1067,7 +1067,7 @@ static void show_settings(const UiSettings *n)
     if (vs) {
         set_text(ID_SET_BANNER, n->vfix < 0 ? "Versus wasn't found" : n->vfix == 1 ? "\xe2\x9c\x93 Versus Fix installed"
                                 : n->vfix == 3 ? "Versus Fix: an older version is installed" : "Versus Fix not installed");
-        set_text(ID_SET_BANSUB, "no 30 FPS limit, mouse fix, FOV per class, widescreen HUD built in");
+        set_text(ID_SET_BANSUB, "no 30 FPS limit, mouse fix, FOV per class, widescreen HUD, flashlight fix");
         set_text(ID_SET_FIX, n->vfix == 1 ? "Remove" : n->vfix == 3 ? "Update" : "Install");
     } else {
         set_text(ID_SET_BANNER, !n->found ? "The game's folder wasn't found" : n->scctfix == 1 ? "\xe2\x9c\x93 SCCT Fix installed"

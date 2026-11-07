@@ -127,18 +127,56 @@ Chaos Theory's co-op runs the same simulation on both PCs (Quazal's *SyncSim*) a
 - A `d3d9.dll` that is already there (another mod) is kept as `d3d9.dll.scctlink-backup`. **Remove SCCT Fix** puts it back and sets fullscreen again.
 - The **Mods** tab checks that your friend has it too.
 
-## Features
+## The tabs
 
-- **Mods tab:** a line on top says whether **all party members match** (green) or who doesn't (red); below, in two columns: your name and your mods on the left, your friend's name and their mods on the right, then a green "Everything matches" or each difference in red (a mod only one of you has, another version of a file, and in co-op a setting that must match: FOV, the SCCT Fix, fullscreen, another widescreen mod). **Check again** after you change something; the Log has every detail. Each mode compares only its own files: co-op ignores the `Versus` folder, and Versus compares only the `Versus` folder and shows who has SCCT Versus Reloaded (also part of Enhanced SCCT Versus) and who doesn't.
-- **Settings tab:** on top a banner shows whether this mode's fix is installed (green) or not (red), with its **Install / Update / Remove** button. Below: **Display** (resolution; co-op: FOV with **4:3 / 16:10 / 16:9** buttons for 75 / 85 / 91 - always your choice, because in co-op both players need the same FOV; Versus: Max FPS) and the I / O switches **Widescreen HUD** and **Skip intro videos**; **Mouse** (co-op: **Raw mouse**, Versus: **Mouse fix (125 Hz)**; sensitivity; co-op's **Aim turn** - `m_turnMul`, both players need the same - or Versus' multiplier); in Versus **Per class**: FOV and turn speed for spies and mercenaries. **Reset to defaults** sits on the left, **Apply** on the right; co-op also has **Use friend's**. Every changed file is backed up first. The SCCT Fix keeps co-op at 60 FPS and has its own widescreen HUD, so there's no FPS limit or widescreen-mod setting any more; the Mods tab says when another widescreen mod is installed (it isn't needed and changes the same code). **Raw mouse** is part of the SCCT Fix: the mouse is read as Windows Raw Input (no acceleration, fast moves aren't cut short, any polling rate), ported from ThirteenAG's FusionFix; each player's own choice.
-- **Live stats:** text that floats on top of the game, with no background and a dark edge so it reads on any scene, showing while linked the ping, packet loss and packets per second for each friend.
-- **SCCT Fix reminder:** in co-op, SCCTLink tells you (in the Log) when the SCCT Fix isn't installed.
-- **How to** shows your steps as you go (`[x]` done, `[>]` do this now). **Log** shows everything that happened, with a red dot when something needs a look, a **Copy log** button, and **Report**, which opens a filled-in problem report here on GitHub and the folder with `scctlink.log` to drag into it.
-- Finds friends who are hosting automatically, with a **Refresh** button and short lobby codes.
-- Alerts when a friend links, or when the host's game is up. **Kick** for the host.
-- Opens fast: game file checksums are cached, so only files that changed are read again.
-- Tells you when your friend has a newer or older SCCTLink.
-- A dark theme by default, and a light theme.
+### How to
+Your steps for hosting or joining, ticked off as they happen:
+`[x]` done, `[>]` do this now.
+
+### Log
+Everything SCCTLink did. A dot on the tab means something needs a look.
+- **Copy log** copies it, so you can send it to a friend.
+- **Report** opens a problem report on GitHub, filled in, and the folder
+  with `scctlink.log` so you can drag it in. Reports are public. The log
+  has no IP addresses, but it does have your Steam friends' names.
+
+### Mods
+Compares your game with your friend's. The line on top is green when
+**all party members match**, or says who doesn't. Under it: your mods on
+the left, your friend's on the right, then every difference in red.
+Click **Check again** after you change something.
+Co-op compares only the co-op files; Versus compares only the Versus folder.
+
+### Settings
+On top, the fix for this mode: installed (green) or not (red), with its
+**Install**, **Update** or **Remove** button. Close the game before you
+change anything here: it saves its own settings when it closes.
+
+**Co-op**
+- **Display:** resolution, FOV (75 is the game's own), **Widescreen HUD**,
+  **Skip intro videos**, and the single-player frame rate: 60 FPS, your
+  screen's refresh rate, or **FPS unlock**.
+- **Mouse:** **Raw mouse**, sensitivity, and **Aim turn** (how fast you
+  turn while aiming; both players need the same).
+- **Use friend's** copies your friend's values into the fields.
+
+**Versus**
+- **Display:** resolution (Versus starts at it), **Max FPS** (0 = no
+  limit) and **Widescreen HUD**.
+- **Mouse:** **Mouse fix (125 Hz)** (for mice faster than 125 Hz),
+  sensitivity and multiplier.
+- **Per class:** FOV and turn speed, for spies and mercenaries.
+
+**Reset to defaults** is on the left, **Apply** on the right. The first
+time a file is changed, the original is kept next to it as
+`<name>.scctlink-backup`.
+
+### Other buttons
+- **Live stats:** text on top of the game with the ping and packet loss
+  for each friend. Drag it anywhere; right-click it to close.
+- **Details:** the connection in numbers.
+- **Kick** (host): removes a friend. **Stop** ends hosting or joining.
+- **Light mode / Dark mode** at the top right.
 
 ## How it works
 
