@@ -2345,7 +2345,7 @@ static int ini_set(const char *path, const char *section, const char *key, const
    SHA-256 is exactly this one (checked: no network functions, starts no
    programs, only writes System\SCCTFix.log). */
 #define SCCTFIX_FILE "SCCTFix-d3d9.dll"
-#define SCCTFIX_SHA "5350e4325e83d81e544133f42c27f5d07f7cd19a0865bf220cc235f58d9504fb" /* ours: fix/d3d9fix.c (fix/build_fix.sh) */
+#define SCCTFIX_SHA "c4dffdd6628a5acc9dc9d7ff0d90f7bb908e8d2920681bac8855a0fa1bca8317" /* ours: fix/d3d9fix.c (fix/build_fix.sh) */
 #define SCCTFIX_OLD_SHA "2f05d8e9e7aaf750eb2889c7ba57dd453820e3a794b9ba74c43730446a84cae9" /* the original; ours replaces it */
 bool sha256_file(const char *path, char hex[65]);
 static void scctfix_paths(char *src, char *dst, char *bak, char *ini, size_t n)
@@ -2371,7 +2371,8 @@ static int scctfix_state(void)
                                         "ab388fcc1ec495675a3ad4fa3c96b426654f4201a7672d58f597f8afa709cf86",
                                         "3f73be91b530d629e3c255d6294785160a7db360cd7d145649cc96e11531e910",
                                         "74018a1aa44700c3b971e4a6a4973dbe9fe8d3e7e5a842df6124eaf057c11ac6",
-                                        "8017a0f7e4cddd3840e44aca8023c140dd0209d784fabda3337ad754cd0e77bf" };
+                                        "8017a0f7e4cddd3840e44aca8023c140dd0209d784fabda3337ad754cd0e77bf",
+                                        "5350e4325e83d81e544133f42c27f5d07f7cd19a0865bf220cc235f58d9504fb" };
     if (!strcmp(hex, SCCTFIX_SHA)) return 1;
     if (!strcmp(hex, SCCTFIX_OLD_SHA)) return 3;
     for (size_t i = 0; i < sizeof ours / sizeof *ours; i++) if (!strcmp(hex, ours[i])) return 3;

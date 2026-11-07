@@ -952,6 +952,21 @@ static HRESULT WINAPI hook_Present(void *dev, const void *src, const void *dst, 
             if (g_next - now > g_spin) Sleep(1);
             QueryPerformanceCounter(&now);
         }
+    { /* the frames really shown: counted here (every frame passes through Present), written every 10 s */
+        static LONGLONG start;
+        static DWORD n;
+        DWORD ticks = (DWORD)(now - start);
+        if (!start || now - start > g_freq * 30) { start = now; n = 0; } /* first, or paused / minimized */
+        else if (++n, ticks >= (DWORD)g_freq * 10) {
+            DWORD ms = ticks / ((DWORD)g_freq / 1000), f10 = ms ? n * 10000 / ms : 0;
+            char b[80];
+            if (g_fps) wsprintfA(b, "FPS measured: %lu.%lu (limit %d)\r\n", f10 / 10, f10 % 10, g_fps);
+            else wsprintfA(b, "FPS measured: %lu.%lu (no limit)\r\n", f10 / 10, f10 % 10);
+            log_write(b, slen(b));
+            start = now;
+            n = 0;
+        }
+    }
     if (!(++g_frames & 31)) { /* now and then: the game may take Alt+Tab back, or move the window */
         ATOM a = GlobalFindAtomA("UnrealAltTab");
         if (a) UnregisterHotKey(g_hwnd, a);
