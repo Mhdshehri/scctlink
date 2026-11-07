@@ -203,9 +203,8 @@ time a file is changed, the original is kept next to it as
 
 **Thermal vision doesn't show heat on AMD graphics cards**
 - A known problem of the game itself: with AMD cards, thermal vision may
-  show no heat, or only cold surfaces. SCCTLink doesn't fix it, but there
-  is a community fix: see "Thermal Vision Fix for AMD GPUs" on
-  [PCGamingWiki](https://www.pcgamingwiki.com/wiki/Tom_Clancy%27s_Splinter_Cell:_Chaos_Theory).
+  show no heat, or only cold surfaces. There is a fix for it made by the
+  community, but it isn't part of SCCTLink.
 - Not tested yet: whether co-op still works when only one player has that
   fix. If the fix adds or changes game files, the **Mods** tab shows it as
   a difference.
