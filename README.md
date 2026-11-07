@@ -117,16 +117,6 @@ to switch. Everyone picks the same one.
 **Friends:** click **Join a friend**, pick the host and click **Join**.
 When you're linked, click **Start Versus** and join the host from the LAN list.
 
-## SCCT Fix
-
-Chaos Theory's co-op runs the same simulation on both PCs (Quazal's *SyncSim*) and ends the session the moment the two drift apart. In practice that happened as soon as someone drew a weapon. The SCCT Fix stops it.
-
-**Install SCCT Fix** (Settings tab) copies `SCCTFix-d3d9.dll` into the game's `System` folder as `d3d9.dll` and sets `StartupFullscreen=False` in `SplinterCell3.ini`. The DLL caps the game at 60 FPS, runs it in a borderless window, keeps Alt+Tab working and writes `System\SCCTFix.log` if the game crashes. With it on both PCs, co-op works: shooting, jumping, changing maps, no disconnects.
-
-- The SCCT Fix is built from source in this repo (`fix/d3d9fix.c`, `fix/build_fix.sh`): a line-for-line rewrite of the original made with its author's permission, plus an optional widescreen HUD and raw mouse (Settings), both ported from ThirteenAG's [FusionFix](https://github.com/ThirteenAG/WidescreenFixesPack) (MIT, see `THIRD-PARTY.txt`). SCCTLink copies the DLL only if its SHA-256 is the pinned one. It imports no network functions, starts no programs and writes no file except its log. The **Versus Fix** (`fix/d3d8versus.c`) is built and pinned the same way.
-- A `d3d9.dll` that is already there (another mod) is kept as `d3d9.dll.scctlink-backup`. **Remove SCCT Fix** puts it back and sets fullscreen again.
-- The **Mods** tab checks that your friend has it too.
-
 ## The tabs
 
 ### How to
@@ -176,6 +166,56 @@ time a file is changed, the original is kept next to it as
   for each friend. Drag it anywhere; right-click it to close.
 - **Kick** (host): removes a friend. **Stop** ends hosting or joining.
 - **Light mode / Dark mode** at the top right.
+
+## Troubleshooting
+
+**Your friend can't find the host**
+- The host must be in the game first: **Co-op → LAN → Create game**.
+- The friend clicks **Refresh**, or pastes the host's lobby code and
+  clicks **Join this code**.
+
+**The host's game isn't in the game's LAN list**
+1. Both players click **Details**. In the Log, "Your game: running" must
+   show on both PCs.
+2. The friend restarts the game while SCCTLink stays linked.
+3. Still nothing? Both click **Report** in the Log tab and attach
+   `scctlink.log`. It has no IP addresses.
+
+**Co-op disconnects**
+- The SCCT Fix must be installed on both PCs.
+- The **Mods** tab must say **All party members match**. Fix anything in red.
+- Playing co-op over LAN without SCCTLink? Set the single-player frame
+  rate to 60 FPS on both PCs. SCCTLink only holds 60 FPS by itself while it
+  hosts or joins.
+
+**The resolution or settings didn't change**
+- Close the game before you click **Apply**. The game saves its own
+  settings when it closes and would overwrite yours.
+- Co-op, first install: start the game once more after installing the SCCT Fix.
+- Versus: make a profile in Versus first, then close it and apply.
+
+**"Different SCCTLink version"**
+- Everyone needs the same SCCTLink zip.
+
+**Windows Firewall asks about Splinter Cell or SCCTLink**
+- You can click **Cancel**. The game's traffic only goes through your own
+  PC (127.x.x.x addresses), so nothing needs to be opened.
+
+**Thermal vision doesn't show heat on AMD graphics cards**
+- A known problem of the game itself: with AMD cards, thermal vision may
+  show no heat, or only cold surfaces. SCCTLink doesn't fix it, but there
+  is a community fix: see "Thermal Vision Fix for AMD GPUs" on
+  [PCGamingWiki](https://www.pcgamingwiki.com/wiki/Tom_Clancy%27s_Splinter_Cell:_Chaos_Theory).
+
+## SCCT Fix
+
+Chaos Theory's co-op runs the same simulation on both PCs (Quazal's *SyncSim*) and ends the session the moment the two drift apart. In practice that happened as soon as someone drew a weapon. The SCCT Fix stops it.
+
+**Install SCCT Fix** (Settings tab) copies `SCCTFix-d3d9.dll` into the game's `System` folder as `d3d9.dll` and sets `StartupFullscreen=False` in `SplinterCell3.ini`. The DLL caps the game at 60 FPS, runs it in a borderless window, keeps Alt+Tab working and writes `System\SCCTFix.log` if the game crashes. With it on both PCs, co-op works: shooting, jumping, changing maps, no disconnects.
+
+- The SCCT Fix is built from source in this repo (`fix/d3d9fix.c`, `fix/build_fix.sh`): a line-for-line rewrite of the original made with its author's permission, plus an optional widescreen HUD and raw mouse (Settings), both ported from ThirteenAG's [FusionFix](https://github.com/ThirteenAG/WidescreenFixesPack) (MIT, see `THIRD-PARTY.txt`). SCCTLink copies the DLL only if its SHA-256 is the pinned one. It imports no network functions, starts no programs and writes no file except its log. The **Versus Fix** (`fix/d3d8versus.c`) is built and pinned the same way.
+- A `d3d9.dll` that is already there (another mod) is kept as `d3d9.dll.scctlink-backup`. **Remove SCCT Fix** puts it back and sets fullscreen again.
+- The **Mods** tab checks that your friend has it too.
 
 ## How it works
 
