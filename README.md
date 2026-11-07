@@ -174,7 +174,6 @@ time a file is changed, the original is kept next to it as
 ### Other buttons
 - **Live stats:** text on top of the game with the ping and packet loss
   for each friend. Drag it anywhere; right-click it to close.
-- **Details:** the connection in numbers.
 - **Kick** (host): removes a friend. **Stop** ends hosting or joining.
 - **Light mode / Dark mode** at the top right.
 
