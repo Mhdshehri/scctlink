@@ -839,7 +839,7 @@ def main():
         check(b"SingleFPS=-1\r\n" in t and b"Raw=0\r\n" in t, "...SingleFPS=-1 in SCCTFix.ini, the other settings kept")
         mk = rm.mark()
         rm.p.stdin.write("E\n0\n"); rm.p.stdin.flush()
-        check(rm.wait_for(r"spfps 0\n", timeout=10, since=mk) is not None, "single-player FPS: no limit")
+        check(rm.wait_for(r"spfps 0\n", timeout=10, since=mk) is not None, "single-player FPS: FPS unlock")
         check("[coop-flag] 1" not in rm.log, "...not in a session: no co-op flag")
         mk = rm.mark()
         rm.p.stdin.write("A\n2560 1440 90 0 0\n"); rm.p.stdin.flush()

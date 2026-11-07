@@ -1,19 +1,65 @@
-<div align="center">
-
 # SCCTLink
 
-**Play Splinter Cell: Chaos Theory co-op and Versus with Steam friends.**
-No VPN. No port forwarding. No IP addresses.
+SCCTLink lets you play Splinter Cell: Chaos Theory online with your Steam
+friends: the co-op campaign and Versus (Spies vs. Mercenaries).
 
-[**Download the latest release**](../../releases/latest) · Windows · Free · MIT license
+It only works between Steam friends. Nobody else can see your game or
+join it.
 
-</div>
+[**Download the latest release**](../../releases/latest) (Windows)
 
----
+## Why it's needed
 
-Chaos Theory's online servers are gone, so its co-op and Versus only work on a LAN, and people usually reach for Hamachi or Radmin. SCCTLink does the job without a VPN. The host plays the game's normal LAN mode, and SCCTLink carries its traffic through Steam's own relay network to friends on your Steam friends list.
+Ubisoft shut down the game's online servers, so the only multiplayer left
+is LAN: both PCs have to be on the same network. To play with a friend in
+another house, people install a VPN like Hamachi or Radmin to fake that
+network: an extra program and account, your IP visible to the other side,
+and often lag or disconnects.
 
-You don't install anything and you don't touch your router. Unzip it and open it.
+SCCTLink does it through Steam instead. The host makes a normal LAN game,
+SCCTLink carries it to your friend through Valve's servers, and the game
+thinks you're on the same LAN. No VPN, nothing to set up on your router,
+and neither of you sees the other's IP.
+
+## Co-op (2 players)
+
+Chaos Theory's co-op is fragile: it runs the same game on both PCs and
+disconnects as soon as anything differs between them, like the frame
+rate, a game file, a mod or a setting. SCCTLink deals with that:
+
+- **The SCCT Fix**, installed with one click, holds both PCs at 60 FPS
+  only while you're in a co-op game through SCCTLink, so the game doesn't
+  drift apart. Outside co-op you choose in Settings: 60 FPS, your screen's
+  refresh rate, or **FPS unlock** (the game itself stops at 100 FPS). It
+  also fixes a few smaller things: the HUD isn't stretched on wide
+  screens, the game runs at your screen's resolution, the FOV can be
+  changed, and the mouse uses raw input.
+  (These improvements work in the single-player story too.)
+- **The Mods tab checks both PCs match**: the game files, mods and the
+  settings that co-op needs to be the same. If something is different, it
+  tells you what and on whose PC, so you can fix it before you play.
+
+## Versus (up to 4 players)
+
+SCCTLink is made for playing Versus with your friends, in a private game.
+
+If you want to play online with other people (public servers, a server
+list), use [Enhanced SCCT Versus](https://github.com/Joshhhuaaa/EnhancedSCCTVersus),
+which is made for that.
+
+Versus has its own problems on today's PCs, and the **Versus Fix**
+(one click in SCCTLink) fixes them:
+
+- the game is locked to 30 FPS: the limit is removed
+- aiming zigzags with fast mice: the mouse is sent the way Versus expects
+- the picture is stretched on wide screens, and the game keeps going back
+  to 1600x1200: your resolution is used, and the HUD keeps its shape
+- the mercenary's flashlight doesn't light anything on today's graphics
+  cards: it works again
+- FOV and turning speed can be set for spies and mercenaries separately
+
+You don't install anything. Unzip it and open `SCCTLink.exe`. Everyone
+playing needs it.
 
 ## Quick start
 

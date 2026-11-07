@@ -2345,7 +2345,7 @@ static int ini_set(const char *path, const char *section, const char *key, const
    SHA-256 is exactly this one (checked: no network functions, starts no
    programs, only writes System\SCCTFix.log). */
 #define SCCTFIX_FILE "SCCTFix-d3d9.dll"
-#define SCCTFIX_SHA "c4dffdd6628a5acc9dc9d7ff0d90f7bb908e8d2920681bac8855a0fa1bca8317" /* ours: fix/d3d9fix.c (fix/build_fix.sh) */
+#define SCCTFIX_SHA "512607331f52c5ae89fab9674cfdf7526bd68b06016a265fef8132a3202979dd" /* ours: fix/d3d9fix.c (fix/build_fix.sh) */
 #define SCCTFIX_OLD_SHA "2f05d8e9e7aaf750eb2889c7ba57dd453820e3a794b9ba74c43730446a84cae9" /* the original; ours replaces it */
 bool sha256_file(const char *path, char hex[65]);
 static void scctfix_paths(char *src, char *dst, char *bak, char *ini, size_t n)
@@ -2372,7 +2372,8 @@ static int scctfix_state(void)
                                         "3f73be91b530d629e3c255d6294785160a7db360cd7d145649cc96e11531e910",
                                         "74018a1aa44700c3b971e4a6a4973dbe9fe8d3e7e5a842df6124eaf057c11ac6",
                                         "8017a0f7e4cddd3840e44aca8023c140dd0209d784fabda3337ad754cd0e77bf",
-                                        "5350e4325e83d81e544133f42c27f5d07f7cd19a0865bf220cc235f58d9504fb" };
+                                        "5350e4325e83d81e544133f42c27f5d07f7cd19a0865bf220cc235f58d9504fb",
+                                        "c4dffdd6628a5acc9dc9d7ff0d90f7bb908e8d2920681bac8855a0fa1bca8317" };
     if (!strcmp(hex, SCCTFIX_SHA)) return 1;
     if (!strcmp(hex, SCCTFIX_OLD_SHA)) return 3;
     for (size_t i = 0; i < sizeof ours / sizeof *ours; i++) if (!strcmp(hex, ours[i])) return 3;
@@ -2476,7 +2477,7 @@ static bool scfini_write(int hud, int raw, int spfps)
     sfmt(t, sizeof t, "; SCCT Fix settings - written by SCCTLink.\r\n"
                       "[HUD]\r\n; 1 = the HUD, menus and text keep their shape on wide screens (4:3 in the middle).\r\nFix=%d\r\n"
                       "[Mouse]\r\n; 1 = the mouse is read as Windows Raw Input: no acceleration, any polling rate.\r\nRaw=%d\r\n"
-                      "[Display]\r\n; single player only: 60, -1 = the screen's refresh rate, 0 = no limit.\r\n"
+                      "[Display]\r\n; single player only: 60, -1 = the screen's refresh rate, 0 = FPS unlock (the game itself stops at 100).\r\n"
                       "; In an SCCTLink co-op session the SCCT Fix keeps 60 by itself.\r\nSingleFPS=%d\r\n"
                       "; WxH the game draws at; empty = the screen's own.\r\nResolution=%s\r\n"
                       "; 75 = the game's own view (wider on wide screens by itself); 40 to 150.\r\nFOV=%s\r\n",

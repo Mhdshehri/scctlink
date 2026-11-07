@@ -112,7 +112,7 @@ Settings = on top, the fix of this mode: installed (green) or not (red),
            remove it, the two change the same code). No FPS limit to set
            in co-op: the SCCT Fix keeps both PCs at 60. For single player
            the button "Single player: 60 FPS" switches to your screen's
-           refresh rate or no limit; as soon as you Host or Join a co-op
+           refresh rate or "FPS unlock" (the game itself stops at 100 FPS); as soon as you Host or Join a co-op
            game in SCCTLink, the SCCT Fix goes back to 60 by itself (and
            back to your choice when you Stop). Without SCCTLink (direct LAN
            co-op) keep it at 60.
