@@ -206,6 +206,9 @@ time a file is changed, the original is kept next to it as
   show no heat, or only cold surfaces. SCCTLink doesn't fix it, but there
   is a community fix: see "Thermal Vision Fix for AMD GPUs" on
   [PCGamingWiki](https://www.pcgamingwiki.com/wiki/Tom_Clancy%27s_Splinter_Cell:_Chaos_Theory).
+- Not tested yet: whether co-op still works when only one player has that
+  fix. If the fix adds or changes game files, the **Mods** tab shows it as
+  a difference.
 
 ## SCCT Fix
 
