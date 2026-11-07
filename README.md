@@ -209,15 +209,37 @@ time a file is changed, the original is kept next to it as
   fix. If the fix adds or changes game files, the **Mods** tab shows it as
   a difference.
 
-## SCCT Fix
+## What the fixes solve
 
-Chaos Theory's co-op runs the same simulation on both PCs (Quazal's *SyncSim*) and ends the session the moment the two drift apart. In practice that happened as soon as someone drew a weapon. The SCCT Fix stops it.
+### SCCT Fix (co-op and story)
 
-**Install SCCT Fix** (Settings tab) copies `SCCTFix-d3d9.dll` into the game's `System` folder as `d3d9.dll` and sets `StartupFullscreen=False` in `SplinterCell3.ini`. The DLL caps the game at 60 FPS, runs it in a borderless window, keeps Alt+Tab working and writes `System\SCCTFix.log` if the game crashes. With it on both PCs, co-op works: shooting, jumping, changing maps, no disconnects.
+- **Co-op disconnects:** the two PCs drifted apart when their frame rates
+  differed. While SCCTLink hosts or joins, the game is held at 60 FPS on
+  both PCs. The rest of the time you choose: 60, your screen's refresh
+  rate, or FPS unlock (the game itself stops at 100).
+- **Stretched HUD on wide screens:** the HUD and menus keep their shape.
+- **Wrong resolution:** the game runs at the resolution you choose, or your
+  screen's, even with Windows display scaling.
+- **FOV can't be changed:** the game ignores its own FOV setting, so the
+  fix sets the camera's FOV. Wide screens also see more on the sides.
+- **Mouse acceleration:** raw mouse input, with any polling rate.
+- **Alt+Tab problems:** the game runs in a borderless window.
 
-- The SCCT Fix is built from source in this repo (`fix/d3d9fix.c`, `fix/build_fix.sh`): a line-for-line rewrite of the original made with its author's permission, plus an optional widescreen HUD and raw mouse (Settings), both ported from ThirteenAG's [FusionFix](https://github.com/ThirteenAG/WidescreenFixesPack) (MIT, see `THIRD-PARTY.txt`). SCCTLink copies the DLL only if its SHA-256 is the pinned one. It imports no network functions, starts no programs and writes no file except its log. The **Versus Fix** (`fix/d3d8versus.c`) is built and pinned the same way.
-- A `d3d9.dll` that is already there (another mod) is kept as `d3d9.dll.scctlink-backup`. **Remove SCCT Fix** puts it back and sets fullscreen again.
-- The **Mods** tab checks that your friend has it too.
+The widescreen HUD, FOV and raw mouse come from ThirteenAG's
+[FusionFix](https://github.com/ThirteenAG/WidescreenFixesPack) (MIT).
+
+### Versus Fix
+
+- **Locked to 30 FPS:** the limit is removed (Max FPS in Settings).
+- **Aim zigzags with fast mice:** the mouse is sent the way Versus expects
+  (125 reports a second).
+- **Keeps going back to 1600x1200:** each time Versus starts and closes,
+  your resolution is set again in the game's files and profiles.
+- **Stretched HUD on wide screens:** the HUD keeps its shape.
+- **Mercenary's flashlight doesn't light anything:** Versus is switched to
+  its other way of drawing shadows, which works on today's graphics cards.
+- **One FOV and turn speed for everyone:** set them for spies and
+  mercenaries separately.
 
 ## How it works
 
@@ -247,10 +269,10 @@ Chaos Theory's co-op runs the same simulation on both PCs (Quazal's *SyncSim*) a
 | 🧱 **Nothing opened** | No ports are opened on your PC or router. SCCTLink only listens on loopback addresses (your own PC). |
 | 🎮 **Only the game** | Packets from other programs, or from other PCs on your network, are dropped. |
 | 📦 **Packets checked** | Oversized packets and floods are dropped; compressed and encrypted data is bounds-checked before it is read. |
-| ✅ **Pinned DLLs** | `steam_api.dll` is Valve's signed file from [Steamworks.NET 2025.164.1](https://github.com/rlabrecque/Steamworks.NET/releases/tag/2025.164.1); SCCTLink checks its SHA-256 (`fdafb7c6…eb65da`) and refuses anything else. The SCCT Fix DLL is pinned the same way. |
+| ✅ **Checked files** | `steam_api.dll` is Valve's signed file from [Steamworks.NET 2025.164.1](https://github.com/rlabrecque/Steamworks.NET/releases/tag/2025.164.1); SCCTLink checks its SHA-256 (`fdafb7c6…eb65da`) and refuses anything else. The SCCT Fix and the Versus Fix are built from this repo and checked the same way before they're installed; neither uses the network or starts programs. |
 | 🧩 **No third-party code** | `SCCTLink.exe` uses only core Windows DLLs (kernel32, user32, gdi32, comctl32, shell32, ws2_32, msvcrt). A few more (winmm, iphlpapi, dwmapi, uxtheme) are loaded from System32 only. |
-| ✍️ **Writes only when you click** | In its own folder: `steam_appid.txt`, `scctlink.log` (never contains IP addresses), `scctlink_cache.txt` (game file checksums) and `scctlink_theme.txt`. In the game folder only when you click **Apply** or **Install/Remove SCCT Fix**, always with backups. To remove SCCTLink, click **Remove SCCT Fix** and delete its folder. |
-| 🛡️ **No ban risk** | Chaos Theory's LAN mode has no anti-cheat and its online servers are gone. SCCTLink doesn't inject anything into the game. |
+| ✍️ **What it writes** | In its own folder: `steam_appid.txt`, `scctlink.log` (never contains IP addresses), `scctlink_cache.txt` (game file checksums) and `scctlink_theme.txt`. In the game folder: the settings files when you click **Apply**, and the fix when you click **Install** or **Remove**, always with backups. While it hosts or joins co-op it also leaves `System\SCCTLink.coop` (the 60 FPS signal). The Versus Fix sets the resolution lines in Versus' `Default.ini` and profiles each time Versus starts and closes. To remove everything, click **Remove** on each fix and delete SCCTLink's folder. |
+| 🛡️ **No ban risk** | Chaos Theory's LAN mode has no anti-cheat and its online servers are gone. SCCTLink itself doesn't touch the running game; the fixes are files the game loads by itself, like any graphics mod. |
 
 Windows SmartScreen may warn you because SCCTLink is new and not code-signed. Check the files first if you like: open a command prompt in the folder and compare `certutil -hashfile SCCTLink.exe SHA256` with `SHA256SUMS.txt`.
 
