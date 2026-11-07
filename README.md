@@ -61,32 +61,61 @@ Versus has its own problems on today's PCs, and the **Versus Fix**
 You don't install anything. Unzip it and open `SCCTLink.exe`. Everyone
 playing needs it.
 
-## Quick start
+## Getting started
 
-Both players: download `SCCTLink-<version>.zip` from [Releases](../../releases), unzip it anywhere, and open **SCCTLink.exe**. Windows asks for administrator rights, because SCCTLink can change the game's settings files, which are in Program Files. Steam must be running, you both need the same SCCTLink version, and the host must be on your Steam friends list. Co-op is 2 players; Versus (Spies vs. Mercenaries) is up to 4.
+### What you need
 
-### 🔧 First time (co-op)
+- Splinter Cell: Chaos Theory on Steam
+- Steam open and online
+- The other players on your Steam friends list
+- The same SCCTLink version as your friends
 
-Close the game, open the **Settings** tab and click **Install SCCT Fix**. Both players do this once. Without it, co-op disconnects as soon as someone draws a weapon ([why](#scct-fix)).
+### Open SCCTLink
 
-### 🎮 Host
+1. Download `SCCTLink-<version>.zip` from [Releases](../../releases/latest)
+   and unzip it anywhere (the Desktop is fine). Keep the files together.
+2. Open `SCCTLink.exe`. Windows asks for administrator rights: SCCTLink
+   changes the game's settings files, which are inside Program Files.
+3. If Windows says "Windows protected your PC", click **More info**, then
+   **Run anyway**. It shows up because SCCTLink is new and not signed with a
+   paid certificate.
 
+The button next to **Join a friend** says **Co-op** or **Versus**. Click it
+to switch. Everyone picks the same one.
+
+### Co-op
+
+**First time (both players, once):**
+1. Start the game once from Steam and close it, so it makes its settings files.
+2. In SCCTLink, open the **Settings** tab and click **Install** in the
+   SCCT Fix banner at the top.
+3. Start the game once more and close it. From then on it's ready.
+
+**Host:**
 1. Click **Host a game**.
-2. Click **Start Splinter Cell**, then **Co-op → LAN → Create game**.
-3. Keep SCCTLink open while you play.
+2. Click **Start Splinter Cell**, then in the game: **Co-op → LAN → Create game**.
+3. Leave SCCTLink open while you play.
 
-When a friend links, they show up in your list. SCCTLink also flashes in the taskbar with a short sound. To remove someone, pick them and click **Kick**.
-
-### 🤝 Friend
-
+**Friend:**
 1. Click **Join a friend**, pick the host and click **Join**.
-   The host isn't listed yet? Click **Refresh**, or paste their short lobby code (like `1MCE-2B2`) and click **Join this code**.
-2. Wait until the log says the host's game is up. SCCTLink flashes and plays a sound when it is.
-3. Click **Start Splinter Cell**, then **Co-op → LAN → Join game** and pick the host.
+   Not in the list? Click **Refresh**, or paste the host's lobby code
+   (like `1MCE-2B2`) and click **Join this code**.
+2. When SCCTLink says you're linked, click **Start Splinter Cell**, then
+   in the game: **Co-op → LAN → Join game** and pick the host.
+3. Leave SCCTLink open while you play.
 
-For Versus, both pick **Versus** with the button next to **Join a friend** first. SCCTLink starts `SCCT_Versus.exe` for you.
+### Versus
 
-> The full player guide, with troubleshooting and lag tips, is in the zip as `README.txt` ([read it here](package/README.txt)).
+**First time (everyone, once):**
+1. Start Versus once, make a profile, and close the game. SCCTLink can't
+   set things up before the profile exists.
+2. In SCCTLink, switch the button to **Versus**, open the **Settings** tab
+   and click **Install** in the Versus Fix banner.
+
+**Host:** click **Host a game**, then **Start Versus** and create a LAN game.
+
+**Friends:** click **Join a friend**, pick the host and click **Join**.
+When you're linked, click **Start Versus** and join the host from the LAN list.
 
 ## SCCT Fix
 
