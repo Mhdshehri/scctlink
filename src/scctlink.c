@@ -3743,6 +3743,7 @@ static bool steam_start(void);
 
 static void set_versus(bool v)
 {
+    if (g_versus != v) g_uiset.note[0] = 0; /* the last Settings message was about the other mode's fix */
     g_versus = v;
     g_exe = g_exe_opt ? g_exe_opt : v ? "SCCT_Versus" : "splintercell3";
     g_max_players = g_max_players_opt ? g_max_players_opt : v ? 4 : 2;

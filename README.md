@@ -137,10 +137,19 @@ the left, your friend's on the right, then every difference in red.
 Click **Check again** after you change something.
 Co-op compares only the co-op files; Versus compares only the Versus folder.
 
+<p align="center">
+  <img src="docs/images/mods-coop.png" width="300" alt="Mods tab in co-op">
+  <img src="docs/images/mods-versus.png" width="300" alt="Mods tab in Versus">
+</p>
+
 ### Settings
 On top, the fix for this mode: installed (green) or not (red), with its
 **Install**, **Update** or **Remove** button. Close the game before you
 change anything here: it saves its own settings when it closes.
+
+<p align="center">
+  <img src="docs/images/settings-coop.png" width="300" alt="Settings tab in co-op">
+</p>
 
 **Co-op**
 - **Display:** resolution, FOV (75 is the game's own), **Widescreen HUD**,
@@ -156,6 +165,10 @@ change anything here: it saves its own settings when it closes.
 - **Mouse:** **Mouse fix (125 Hz)** (for mice faster than 125 Hz),
   sensitivity and multiplier.
 - **Per class:** FOV and turn speed, for spies and mercenaries.
+
+<p align="center">
+  <img src="docs/images/settings-versus.png" width="420" alt="Settings tab in Versus">
+</p>
 
 **Reset to defaults** is on the left, **Apply** on the right. The first
 time a file is changed, the original is kept next to it as

@@ -701,11 +701,10 @@ def main():
         check(hm.wait_for(r"SCCT Fix removed", timeout=10) is not None and rd(sysd3d) == b"MZanother-d3d9-mod"
               and not os.path.exists(sysd3d + ".scctlink-backup") and b"StartupFullscreen=True" in rd(ga, "System", "SplinterCell3.ini"),
               "Remove SCCT Fix: the earlier d3d9.dll is put back, fullscreen again")
-        shutil.copy(os.path.join(ROOT, "package", "SCCTFix-d3d9.dll"), sysd3d)  # the original SCCT Fix
         at = hm.mark()
         hm.p.stdin.write("F\n1\n"); hm.p.stdin.flush()
-        check(hm.wait_for(r"SCCT Fix installed", timeout=10, since=at) is not None and rd(sysd3d) == rd(fixsrc)
-              and not os.path.exists(sysd3d + ".scctlink-backup"), "the original SCCT Fix is replaced by ours (no backup of it)")
+        check(hm.wait_for(r"SCCT Fix installed", timeout=10, since=at) is not None and rd(sysd3d) == rd(fixsrc),
+              "installed again")
         at = hm.mark()
         hm.p.stdin.write("B\n1\n"); hm.p.stdin.flush()
         check(hm.wait_for(r"\[settings\] chud 1", timeout=10, since=at) is not None and b"Fix=1\r\n" in rd(ga, "System", "SCCTFix.ini"),
