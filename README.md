@@ -278,20 +278,27 @@ Windows SmartScreen may warn you because SCCTLink is new and not code-signed. Ch
 
 As with any game, only play with people you trust. Found a security problem? See [SECURITY.md](SECURITY.md).
 
-## Building from source
+## For developers
 
-You need `clang`, `lld`, `llvm-dlltool`, `llvm-rc` and `llvm-cvtres`. No Windows SDK is needed: the few Windows functions SCCTLink uses are declared by hand.
+### Building
+
+You need `clang`, `lld`, `llvm-dlltool`, `llvm-rc` and `llvm-cvtres`. No
+Windows SDK: the few Windows functions used are declared by hand.
 
 ```sh
-sh build_windows.sh                    # -> build/win/SCCTLink.exe (32-bit, windowed)
-sh package.sh path/to/steam_api.dll    # -> dist/SCCTLink-<version>.zip (checks both DLLs' SHA-256)
+sh build_windows.sh                    # build/win/SCCTLink.exe (32-bit)
+sh fix/build_fix.sh                    # build/fix/d3d9.dll and d3d8.dll (the two fixes)
+sh package.sh path/to/steam_api.dll    # dist/SCCTLink-<version>.zip
 ```
 
-The build is **reproducible**: the same source always gives the same SHA-256.
+The builds are reproducible: the same source always gives the same
+SHA-256, and SCCTLink only installs fix files with the expected one.
 
-## Tests
+### Tests
 
-The tests run on Linux as root, with a mock Steam and a stand-in for the game, under AddressSanitizer and UBSan. Each player gets their own network namespace: a separate "PC" with its own LAN and broadcast domain.
+The tests run on Linux as root, with a mock Steam and a stand-in for the
+game, under AddressSanitizer and UBSan. Each player gets its own network
+namespace (a separate "PC").
 
 ```sh
 mkdir -p build
@@ -299,34 +306,40 @@ gcc -std=c11 -fsanitize=address,undefined -o build/scctlink_mock src/scctlink.c 
 sudo python3 test/run_tests.py   # prints ALL OK
 ```
 
-The tests cover:
-- **Play:** LAN discovery in both directions; the game's real encrypted Net-Z discovery reply; joining at the address inside it; 2000 mixed-size packets byte-exact and in order; a level-load burst; TCP streams; latency; 10% packet loss with 60 ms delay each way; Versus with a host and two friends on three "PCs".
-- **Privacy:** the host's address hidden in raw, text and LZO-compressed form, with every checksum redone; a second network adapter's address; Steam's direct connections turned off.
-- **Safety:** strangers blocked; programs other than the game blocked; foreign lobbies refused; kicking.
-- **Finding the host:** every discovery path, including a host Steam shows in the game instead of Spacewar; lobby codes; Refresh; invites; join confirmation.
-- **Game check and settings:** a mod on one PC only, another patch, identical games, Check again; the settings comparison; the Settings tab (files written in full, backups kept, bad values refused); installing and removing the SCCT Fix and its reminder; live stats (ping and loss while linked); the checksum cache.
+They cover joining and playing (packets exact and in order, TCP, 10%
+loss with 60 ms delay, Versus with three "PCs"), privacy (addresses hidden
+in every form the game sends them, direct connections off), safety
+(strangers and other programs blocked, kicking), finding the host, the
+Mods check and the Settings tab.
 
-**Tested with the real game:** a host and a friend in different homes play co-op with the SCCT Fix on both PCs: joining, shooting, jumping and changing maps without disconnects.
-
-## Project layout
+### Project layout
 
 | File | What it does |
 |---|---|
-| `src/scctlink.c` | The engine: lobbies, discovery, relay, address swapping, safety checks, game files check, settings, SCCT Fix |
-| `src/ui_win.c` | The Windows window and the live stats window |
+| `src/scctlink.c` | Lobbies, relay, address hiding, safety checks, Mods check, settings, installing the fixes |
+| `src/ui_win.c` | The window and Live stats |
 | `src/ui_console.c` | A text front end that the tests drive |
-| `src/steam_win.c` | Loads the pinned `steam_api.dll` |
-| `src/plat_win.c` | Windows sockets, the game's open ports, clipboard and file helpers |
-| `src/lobbycode.c` | Short lobby codes like `1MCE-2B2` |
-| `src/sha256.c` | Checks the pinned DLLs and game files |
-| `src/crt0_win.c`, `src/*.h` | Program start-up and the small headers |
-| `res/` | Icon, Windows manifest and version info |
-| `package/` | The player guide and the SCCT Fix DLL that go in the zip |
-| `build_windows.sh`, `package.sh` | Build `SCCTLink.exe` and the release zip |
-| `test/` | Mock Steam, the game stand-in and the end-to-end tests |
+| `src/steam_win.c` | Loads the checked `steam_api.dll` |
+| `src/plat_win.c` | Windows sockets, the game's open ports, file helpers |
+| `src/lobbycode.c`, `src/sha256.c` | Lobby codes, checksums |
+| `fix/d3d9fix.c` | The SCCT Fix |
+| `fix/d3d8versus.c` | The Versus Fix |
+| `res/`, `package/` | Icon and manifest; the player guide in the zip |
+| `test/` | Mock Steam, the game stand-in and the tests |
 
 ## Credits
 
-By [Mhdshehri](https://github.com/Mhdshehri). The relay pattern comes from the [Co-op Anything](https://github.com/cranebeaker/coop-anything) playbook (Steam Spacewar networking). Splinter Cell: Chaos Theory is by Ubisoft. SCCTLink is not affiliated with Ubisoft or with Valve.
+By [Mhdshehri](https://github.com/Mhdshehri).
+- The widescreen HUD, camera FOV and raw mouse in the SCCT Fix are ported
+  from ThirteenAG's [FusionFix](https://github.com/ThirteenAG/WidescreenFixesPack)
+  (MIT, see `THIRD-PARTY.txt`).
+- The relay idea comes from the [Co-op Anything](https://github.com/cranebeaker/coop-anything)
+  playbook (Steam Spacewar networking).
 
-SCCTLink's own code is released under the [MIT license](LICENSE). `steam_api.dll`, which ships in the release zip, is Valve Corporation's Steamworks redistributable (from Steamworks.NET 2025.164.1). It is not covered by the MIT license; it is distributed under the Steamworks SDK terms.
+Splinter Cell: Chaos Theory is by Ubisoft. SCCTLink is not affiliated with
+Ubisoft or Valve.
+
+SCCTLink's own code is under the [MIT license](LICENSE). `steam_api.dll`,
+which ships in the release zip, is Valve's Steamworks redistributable
+(from Steamworks.NET 2025.164.1). It is not covered by the MIT license; it
+is distributed under the Steamworks SDK terms.
