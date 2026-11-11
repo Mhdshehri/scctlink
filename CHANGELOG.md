@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.9.9
+
+Renamed so the latest build can't be mixed up with earlier 0.9.9.8 zips. Since those: the Versus Fix brings back the mercenary's flashlight; Versus profiles no longer change the chosen resolution; single player's "no limit" is now FPS unlock (the game itself stops at 100 FPS); the SCCT Fix writes the measured FPS to SCCTFix.log; How to shows the first-time steps for co-op and Versus; the README and the player guide were rewritten; co-op's ~34 FPS in missions is explained (the game's own steps).
+
 ## 0.9.9.8 (testing)
 
 co-op draws at the resolution you choose (or your screen's; the SCCT Fix opens a window always and is DPI aware, so a scaled 2K desktop isn't shown as 1920x1080); the FOV works: the game ignores DesiredFOV, so the SCCT Fix sets the camera's FOV (from ThirteenAG's FusionFix) - wide screens see more on the sides by themselves, and the FOV number (75 = the game's) widens the normal view, each player's own; settings also go to the copies the game really reads in ProgramData; each time Versus starts the Versus Fix sets its start resolution (Default.ini) and ScreenRes=-1 in every profile and in DefaultProfile.ini (new profiles), so a profile doesn't pick 1600x1200 again (also when Versus closes); with a resolution chosen in SCCTLink, Versus' profile scripts (a new profile, entering Multiplayer, the game's own resolution menu) no longer change it; Live stats show the connection only (no FPS), with a thicker dark edge; the co-op 60 FPS signal is also a file, System\SCCTLink.coop. The Versus Fix also brings back the mercenary's flashlight on today's graphics cards (no 3D-Analyze needed): Versus is told depth textures aren't available, so it uses its own ps 1.4 shadow buffer (Flashlight=0 in SCCTVersusFix.ini turns this off). Single player's "no limit" is now called FPS unlock (the game itself stops at 100 FPS); the SCCT Fix writes the measured FPS to SCCTFix.log every 10 seconds (up to 512 KB).

@@ -1,4 +1,4 @@
-SCCTLink 0.9.9.8 - Splinter Cell: Chaos Theory online with your Steam friends
+SCCTLink 0.9.9.9 - Splinter Cell: Chaos Theory online with your Steam friends
 =============================================================================
 
 SCCTLink lets you play Chaos Theory's co-op campaign (2 players) and
@@ -16,7 +16,7 @@ WHAT YOU NEED
   * Splinter Cell: Chaos Theory on Steam
   * Steam open and online
   * The other players on your Steam friends list
-  * The same SCCTLink version as your friends (0.9.9.8)
+  * The same SCCTLink version as your friends (0.9.9.9)
 
 Keep the files in this folder together. Open SCCTLink.exe. Windows asks for
 administrator rights: SCCTLink changes the game's settings files, which are
