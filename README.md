@@ -207,6 +207,11 @@ time a file is changed, the original is kept next to it as
 - Co-op, first install: start the game once more after installing the SCCT Fix.
 - Versus: make a profile in Versus first, then close it and apply.
 
+**Co-op runs at about 34 FPS in a mission**
+- That's the game itself: its co-op moves both PCs forward in fixed steps,
+  about 34 a second, so they stay together. It happens on a real LAN too.
+  The menus still run at 60.
+
 **"Different SCCTLink version"**
 - Everyone needs the same SCCTLink zip.
 

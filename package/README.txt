@@ -118,6 +118,9 @@ The resolution or settings didn't change
   -> Close the game before "Apply" (it saves its own settings when it
      closes). Co-op, first install: start the game once more. Versus:
      make a profile first.
+Co-op runs at about 34 FPS in a mission
+  -> That's the game itself: its co-op moves both PCs forward in fixed
+     steps, about 34 a second, so they stay together (on a real LAN too).
 "Different SCCTLink version"
   -> Everyone needs the same SCCTLink zip.
 Windows Firewall asks about Splinter Cell or SCCTLink
