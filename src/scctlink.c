@@ -2345,7 +2345,7 @@ static int ini_set(const char *path, const char *section, const char *key, const
    SHA-256 is exactly this one (checked: no network functions, starts no
    programs, only writes System\SCCTFix.log). */
 #define SCCTFIX_FILE "SCCTFix-d3d9.dll"
-#define SCCTFIX_SHA "5350e4325e83d81e544133f42c27f5d07f7cd19a0865bf220cc235f58d9504fb" /* ours: fix/d3d9fix.c (fix/build_fix.sh) */
+#define SCCTFIX_SHA "512607331f52c5ae89fab9674cfdf7526bd68b06016a265fef8132a3202979dd" /* ours: fix/d3d9fix.c (fix/build_fix.sh) */
 #define SCCTFIX_OLD_SHA "2f05d8e9e7aaf750eb2889c7ba57dd453820e3a794b9ba74c43730446a84cae9" /* the original; ours replaces it */
 bool sha256_file(const char *path, char hex[65]);
 static void scctfix_paths(char *src, char *dst, char *bak, char *ini, size_t n)
@@ -2371,7 +2371,9 @@ static int scctfix_state(void)
                                         "ab388fcc1ec495675a3ad4fa3c96b426654f4201a7672d58f597f8afa709cf86",
                                         "3f73be91b530d629e3c255d6294785160a7db360cd7d145649cc96e11531e910",
                                         "74018a1aa44700c3b971e4a6a4973dbe9fe8d3e7e5a842df6124eaf057c11ac6",
-                                        "8017a0f7e4cddd3840e44aca8023c140dd0209d784fabda3337ad754cd0e77bf" };
+                                        "8017a0f7e4cddd3840e44aca8023c140dd0209d784fabda3337ad754cd0e77bf",
+                                        "5350e4325e83d81e544133f42c27f5d07f7cd19a0865bf220cc235f58d9504fb",
+                                        "c4dffdd6628a5acc9dc9d7ff0d90f7bb908e8d2920681bac8855a0fa1bca8317" };
     if (!strcmp(hex, SCCTFIX_SHA)) return 1;
     if (!strcmp(hex, SCCTFIX_OLD_SHA)) return 3;
     for (size_t i = 0; i < sizeof ours / sizeof *ours; i++) if (!strcmp(hex, ours[i])) return 3;
@@ -2475,7 +2477,7 @@ static bool scfini_write(int hud, int raw, int spfps)
     sfmt(t, sizeof t, "; SCCT Fix settings - written by SCCTLink.\r\n"
                       "[HUD]\r\n; 1 = the HUD, menus and text keep their shape on wide screens (4:3 in the middle).\r\nFix=%d\r\n"
                       "[Mouse]\r\n; 1 = the mouse is read as Windows Raw Input: no acceleration, any polling rate.\r\nRaw=%d\r\n"
-                      "[Display]\r\n; single player only: 60, -1 = the screen's refresh rate, 0 = no limit.\r\n"
+                      "[Display]\r\n; single player only: 60, -1 = the screen's refresh rate, 0 = FPS unlock (the game itself stops at 100).\r\n"
                       "; In an SCCTLink co-op session the SCCT Fix keeps 60 by itself.\r\nSingleFPS=%d\r\n"
                       "; WxH the game draws at; empty = the screen's own.\r\nResolution=%s\r\n"
                       "; 75 = the game's own view (wider on wide screens by itself); 40 to 150.\r\nFOV=%s\r\n",
@@ -2616,11 +2618,11 @@ static void scctfix(bool install)
    Our own d3d8.dll for Versus (source: fix/d3d8versus.c): no 30 FPS limit, the
    mouse as 125 reports a second (fast mice make Versus' aim zigzag), FOV for
    spies and mercenaries, a wider resolution, the HUD not stretched, turning
-   speed. It reads SCCTVersusFix.ini next to it, which SCCTLink writes. It ships
+   speed, the mercenary's flashlight. It reads SCCTVersusFix.ini next to it, which SCCTLink writes. It ships
    next to SCCTLink.exe as SCCTVersusFix-d3d8.dll and is only copied if its
    SHA-256 is exactly this one (the build is reproducible: fix/build_fix.sh). */
 #define VFIX_FILE "SCCTVersusFix-d3d8.dll"
-#define VFIX_SHA "0b1a4685b1acdb870d33af788575563c332343ffc1c2cc2779b520987e20fdc9"
+#define VFIX_SHA "078fb5e4a3a82ddea37651a5f25d97d2d863e87abae15f15d80b97c489685d9f"
 static void vfix_paths(char *src, char *dst, char *bak, char *ini, size_t n)
 {
     sfmt(src, n, "%s" PATHSEP VFIX_FILE, exe_dir());
@@ -2644,7 +2646,9 @@ static int vfix_state(void)
         "3661f8434c4b8a3e2d87756a08c6a35322bd26b9a42d9c1fee43a4034ace204d",
         "f680d8a6da67f66a752137c2d9b351ae961700f2483ac1f954c8929bda91c205",
         "43e219cf628d0450ffcd20637fa242bb282dc8f6b1bb28840bdf4b023f7c3176",
-        "7b2645692fdae5369bfab7029a80b38fbd3759f322fe22abeff9f0ff3db43549" };
+        "0b1a4685b1acdb870d33af788575563c332343ffc1c2cc2779b520987e20fdc9",
+        "7b2645692fdae5369bfab7029a80b38fbd3759f322fe22abeff9f0ff3db43549",
+        "e9dc167b07c9abae601e5e81277f5b7be6d15efe38aa14251b01f4f91ac8a636" };
     for (size_t i = 0; i < sizeof ours / sizeof *ours; i++) if (!strcmp(hex, ours[i])) return 3;
     return 2;
 }
@@ -2684,6 +2688,8 @@ static bool vfix_write(const UiSettings *u)
          "Resolution=%s\r\n"
          "; 1 = the HUD keeps its shape on wide screens.\r\n"
          "HUD=%d\r\n"
+         "; 1 = the mercenary's flashlight is drawn on today's graphics cards.\r\n"
+         "Flashlight=1\r\n"
          "[Mouse]\r\n"
          "; 1 = the game gets the mouse as 125 reports a second (faster mice make Versus' aim zigzag).\r\n"
          "Rate125=%d\r\n"
@@ -2778,6 +2784,8 @@ static bool vfix_res_ini(int w, int h)
     ok &= ini_set(p, "WinDrv.WindowsClient", "WindowedViewportY", v) >= 0;
     /* each Versus profile picks a line of the menu's list (ScreenRes=n) and sets it
        when it's loaded; -1 = none, so the resolution above is kept */
+    sfmt(p, sizeof p, "%s" PATHSEP "Versus" PATHSEP "System" PATHSEP "DefaultProfile.ini", g_mf_dir); /* new profiles start from it */
+    if (file_exists(p)) ini_set(p, "SBase.SPlayerProfile", "ScreenRes", "-1");
     if (g_vprf[0]) {
         char dir[900];
         sfmt(dir, sizeof dir, "%s", g_vprf);
@@ -3735,6 +3743,7 @@ static bool steam_start(void);
 
 static void set_versus(bool v)
 {
+    if (g_versus != v) g_uiset.note[0] = 0; /* the last Settings message was about the other mode's fix */
     g_versus = v;
     g_exe = g_exe_opt ? g_exe_opt : v ? "SCCT_Versus" : "splintercell3";
     g_max_players = g_max_players_opt ? g_max_players_opt : v ? 4 : 2;

@@ -166,7 +166,7 @@ enum {
     ID_SL_VFPS, ID_SET_VFPS, ID_SET_VHUD, ID_SET_VRATE, ID_SL_VFOV, ID_SET_VFOVS, ID_SET_VFOVM, ID_SL_VTURN, ID_SET_VTURNS,
     ID_SET_VTURNM, ID_SF_VFOV, ID_SET_CHUD, ID_SET_INTRO,
     /* the Settings tab's banner, section titles and notes */
-    ID_SET_BANNER, ID_SET_BANSUB, ID_SEC_DISP, ID_SEC_MOUSE, ID_SEC_CLASS, ID_SET_RAWNOTE, ID_SET_VRATENOTE, ID_SET_SPFPS,
+    ID_SET_BANNER, ID_SET_BANSUB, ID_SEC_DISP, ID_SEC_MOUSE, ID_SEC_CLASS, ID_SET_RAWNOTE, ID_SET_SPNOTE, ID_SET_VRATENOTE, ID_SET_SPFPS,
     ID_SET_APPLY, ID_STATS,
     ID_GAMEMODE, /* keep last */
 };
@@ -759,6 +759,8 @@ static void build(void)
     ctl(ID_SET_INTRO, B, WTEXT("Skip intro videos"), OD, 0, 206, 522, 180, 24, g_font);
     /* single player's frame rate (co-op is always 60): click for 60 / the screen's / no limit */
     ctl(ID_SET_SPFPS, B, WTEXT("Single player: 60 FPS"), OD, 0, 392, 522, 180, 24, g_font);
+    /* shown with "FPS unlock": the game itself stops at 100 FPS in play (measured, SCCTFix.log) */
+    ctl(ID_SET_SPNOTE, T_, WTEXT(""), 0x2 /* SS_RIGHT */ | ELL, 0, 276, 446, 300, 16, g_font);
     ctl(ID_SET_MOUSE, B, WTEXT("Raw mouse"), OD, 0, 28, 576, 150, 24, g_font);
     ctl(ID_SET_RAWNOTE, T_, WTEXT("no acceleration, any polling rate (in the SCCT Fix)"), ELL, 0, 186, 580, 390, 18, g_font);
     /* not shown any more (the SCCT Fix keeps 60 FPS; no other widescreen fix is needed), still read for the check */
@@ -805,7 +807,7 @@ static bool set_versus_only(int id) { return (id >= ID_SL_VFPS && id <= ID_SF_VF
 static bool set_coop_only(int id)
 {
     return id == ID_SL_FOV || id == ID_SET_FOV || id == ID_SF_FOV || id == ID_SET_FRIEND || id == ID_SET_MOUSE ||
-           (id >= ID_FOV43 && id <= ID_FOV169) || id == ID_SET_CHUD || id == ID_SET_INTRO || id == ID_SET_RAWNOTE || id == ID_SET_SPFPS;
+           (id >= ID_FOV43 && id <= ID_FOV169) || id == ID_SET_CHUD || id == ID_SET_INTRO || id == ID_SET_RAWNOTE || id == ID_SET_SPFPS || id == ID_SET_SPNOTE;
 }
 static void move_ctl(int id, int x, int y) { SetWindowPos(g_c[id], 0, S_(x), S_(y), 0, 0, 0x1 | 0x4 | 0x10 /* no size, z-order, activate */); }
 /* a framed text box: the frame at x, y, the box inside it */
@@ -912,9 +914,11 @@ static void build_howto(const UiState *s, char *o, int n)
             "- FRIEND: click \"Join a friend\".\r\n\r\n"
             "Everyone needs: Steam running and online, Splinter Cell: Chaos Theory, the same\r\n"
             "SCCTLink version, and to be Steam friends with the host.\r\n\r\n"
-            "Before your first game: Steam -> right-click the game -> Properties -> Installed Files\r\n"
-            "-> Verify integrity of game files. Use the same mods on every PC.\r\n"
-            "For co-op, everyone opens the Settings tab and clicks \"Install\" (SCCT Fix, with the game closed).\r\n\r\n"
+            "First time, co-op (everyone, once): start the game once and close it, then open the\r\n"
+            "Settings tab and click \"Install\" (SCCT Fix). Start the game once more and close it.\r\n"
+            "First time, Versus (everyone, once): start Versus, make a profile and close it, then\r\n"
+            "switch to Versus, open the Settings tab and click \"Install\" (Versus Fix).\r\n"
+            "Use the same mods on every PC.\r\n\r\n"
             "In the steps, [x] = done and [>] = what to do now.\r\n"
             "Everything SCCTLink does is in the Log (a dot on Log = something needs a look).\r\n"
             "The Mods tab compares your game files and mods with your friend's when you link.");
@@ -1065,7 +1069,7 @@ static void show_settings(const UiSettings *n)
     if (vs) {
         set_text(ID_SET_BANNER, n->vfix < 0 ? "Versus wasn't found" : n->vfix == 1 ? "\xe2\x9c\x93 Versus Fix installed"
                                 : n->vfix == 3 ? "Versus Fix: an older version is installed" : "Versus Fix not installed");
-        set_text(ID_SET_BANSUB, "no 30 FPS limit, mouse fix, FOV per class, widescreen HUD built in");
+        set_text(ID_SET_BANSUB, "no 30 FPS limit, mouse fix, FOV per class, widescreen HUD, flashlight fix");
         set_text(ID_SET_FIX, n->vfix == 1 ? "Remove" : n->vfix == 3 ? "Update" : "Install");
     } else {
         set_text(ID_SET_BANNER, !n->found ? "The game's folder wasn't found" : n->scctfix == 1 ? "\xe2\x9c\x93 SCCT Fix installed"
@@ -1083,9 +1087,10 @@ static void show_settings(const UiSettings *n)
     bool fixed = !vs && n->scctfix == 1;
     EnableWindow(g_c[ID_SET_CHUD], n->chud >= 0 && fixed);
     EnableWindow(g_c[ID_SET_INTRO], n->skipintro >= 0);
-    set_text(ID_SET_SPFPS, n->spfps == -1 ? "Single player: screen's Hz" : n->spfps == 0 ? "Single player: no limit"
+    set_text(ID_SET_SPFPS, n->spfps == -1 ? "Single player: screen's Hz" : n->spfps == 0 ? "Single player: FPS unlock"
                          : n->spfps > 0 && n->spfps != 60 ? "Single player: custom FPS" : "Single player: 60 FPS");
     EnableWindow(g_c[ID_SET_SPFPS], fixed && n->spfps > -2);
+    set_text(ID_SET_SPNOTE, fixed && n->spfps == 0 ? "FPS unlock: the game's own limit is 100" : "");
     RedrawWindow(g_c[ID_SET_CHUD], 0, 0, 0x1 | 0x4);
     RedrawWindow(g_c[ID_SET_INTRO], 0, 0, 0x1 | 0x4);
     RedrawWindow(g_c[ID_SET_MOUSE], 0, 0, 0x1 | 0x4);
