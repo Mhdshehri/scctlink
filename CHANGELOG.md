@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0
+
+First release. Since 0.9.9.9: Versus' Fullscreen can be turned off (a borderless window the size of the screen, for crashes, Alt+Tab and the Windows key); Versus' Settings are simpler (sensitivity is set in the game; turn speed per side as a percent); co-op's hidden FPS and FOV-factor fields are gone, and SCCTLink no longer writes settings the game ignores (DesiredFOV, MAXFPS) - the FOV goes through the SCCT Fix. Known: Versus' HUD is still stretched on wide screens.
+
 ## 0.9.9.9
 
 Renamed so the latest build can't be mixed up with earlier 0.9.9.8 zips. Since those: the Versus Fix brings back the mercenary's flashlight; Versus profiles no longer change the chosen resolution; single player's "no limit" is now FPS unlock (the game itself stops at 100 FPS); the SCCT Fix writes the measured FPS to SCCTFix.log; How to shows the first-time steps for co-op and Versus; the README and the player guide were rewritten; co-op's ~34 FPS in missions is explained (the game's own steps).
