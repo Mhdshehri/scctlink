@@ -527,10 +527,30 @@ static const WCHAR16 WLABEL_OLD[] = { '1', '6', '0', '0', ' ', '*', ' ', '1', '2
    through SetRes too: SCCTLink's setting is the one that counts. */
 static const unsigned char SETRES_PAT[] = { 0x1f, 'S', 'E', 'T', 'R', 'E', 'S', 0x00, 0x10 };
 static int g_setres;
+/* testing: every script that uses 640.0 or 480.0 (the HUD's base size), logged
+   once per place, to find what draws the stretched distance labels */
+static unsigned char *g_seen[96];
+static int g_nseen;
+static void note_const(const unsigned char *b, SIZE_T i, unsigned char *game)
+{
+    unsigned char *at = game + i;
+    char line[200];
+    int k, o;
+    for (k = 0; k < g_nseen; k++) if (g_seen[k] == at) return;
+    if (g_nseen >= 96) return;
+    g_seen[g_nseen++] = at;
+    o = wsprintfA(line, "const %s at %08lx:", b[i + 3] == 0x20 ? "640" : "480", (DWORD)(SIZE_T)at);
+    for (k = i >= 24 ? -24 : -(int)i; k < 8; k++) o += wsprintfA(line + o, k == 0 ? " [%02x" : (k == 5 ? "] %02x" : " %02x"), b[i + k]);
+    line[o] = '\r'; line[o + 1] = '\n'; line[o + 2] = 0;
+    log_line(line);
+}
 static void scan_bytes(const unsigned char *b, SIZE_T n, unsigned char *game)
 {
     for (SIZE_T i = 0; i + 40 < n; i++) {
         unsigned char c = b[i];
+        if (c == 0x1e && b[i + 1] == 0x00 && b[i + 2] == 0x00 &&
+            ((b[i + 3] == 0x20 && b[i + 4] == 0x44) || (b[i + 3] == 0xf0 && b[i + 4] == 0x43)))
+            note_const(b, i, game);
         if (c == 0x0f && S.hud && hud_at(b, i) && b[i + 13] == 0x00 && b[i + 14] == 0x00 && b[i + 15] == 0x20 &&
             b[i + 16] == 0x44) { /* still SizeX / 640.0 */
             static const unsigned char f480[4] = { 0x00, 0x00, 0xf0, 0x43 };
