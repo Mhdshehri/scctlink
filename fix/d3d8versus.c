@@ -741,6 +741,63 @@ static void hud_test(int k, int on)
     wsprintfA(b, "hud test %c: %s\r\n", 'A' + k, on ? "ON" : "off");
     log_line(b);
 }
+/* testing: places that multiply by the X scale (+0xb0) next to the Y scale (+0xb4);
+   [Display] HudScale bits 1..32 (one per group) make a group use the Y scale. */
+static const struct { DWORD va; int g; } XS[] = {
+    { 0x1095e107, 0 },
+    { 0x1095e3c9, 0 },
+    { 0x10961233, 1 },
+    { 0x10962a8a, 1 },
+    { 0x109630a9, 1 },
+    { 0x10963ddd, 1 },
+    { 0x109649f6, 2 },
+    { 0x10964a0e, 2 },
+    { 0x10964a55, 2 },
+    { 0x10964d4d, 2 },
+    { 0x1096569d, 2 },
+    { 0x10966559, 2 },
+    { 0x109667ee, 2 },
+    { 0x10982e92, 3 },
+    { 0x10985391, 3 },
+    { 0x10985465, 3 },
+    { 0x1098f504, 3 },
+    { 0x10997e20, 3 },
+    { 0x1099e3c2, 3 },
+    { 0x1099e62c, 3 },
+    { 0x109b833c, 4 },
+    { 0x109b9d65, 4 },
+    { 0x109ba863, 4 },
+    { 0x109bf181, 4 },
+    { 0x10a04eba, 5 },
+    { 0x10a04f05, 5 },
+    { 0x10a13b12, 5 },
+    { 0x10a13d8e, 5 },
+    { 0x10a38b93, 5 },
+    { 0x10a38e24, 5 },
+    { 0x10a3966e, 5 },
+    { 0x10a3e91f, 5 },
+    { 0x10a56195, 5 },
+    { 0x10a5b1f2, 5 },
+    { 0x10a5b25c, 5 },
+    { 0x10a902b6, 5 }
+};
+static void hud_scale_test(int mask)
+{
+    unsigned char *base = (unsigned char *)GetModuleHandleA(0);
+    int done[6] = { 0 }, bad = 0;
+    for (unsigned k = 0; k < sizeof XS / sizeof XS[0]; k++) {
+        if (!(mask & (1 << XS[k].g))) continue;
+        unsigned char *at = base + (XS[k].va - 0x10900000) + 2;
+        if (at[0] != 0xb0 || at[1] || at[2] || at[3]) { bad++; continue; }
+        put_bytes(at, "\xb4", 1);
+        done[XS[k].g]++;
+    }
+    char b[160];
+    wsprintfA(b, "hud scale test %d: groups changed %d %d %d %d %d %d, unexpected %d\r\n", mask,
+              done[0], done[1], done[2], done[3], done[4], done[5], bad);
+    log_line(b);
+}
+
 static DWORD WINAPI worker(void *arg)
 {
     (void)arg;
@@ -808,6 +865,8 @@ BOOL WINAPI DllEntry(HINSTANCE dll, DWORD reason, void *reserved)
     { /* testing: [Display] HudTest = bits 1 (A), 2 (B), 4 (C), applied before the game draws anything */
         int m = read_int("Display", "HudTest", 0);
         for (int k = 0; k < 3; k++) if (m & (1 << k)) hud_test(k, 1);
+        m = read_int("Display", "HudScale", 0);
+        if (m) hud_scale_test(m);
     }
     if (t) CloseHandle(t);
     return 1;
