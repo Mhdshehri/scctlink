@@ -64,7 +64,6 @@ IMP BOOL WINAPI ReadProcessMemory(HANDLE, const void *, void *, SIZE_T, SIZE_T *
 IMP BOOL WINAPI WriteProcessMemory(HANDLE, void *, const void *, SIZE_T, SIZE_T *);
 IMP BOOL WINAPI VirtualProtect(void *, SIZE_T, DWORD, DWORD *);
 IMP HMODULE WINAPI GetModuleHandleA(const char *);
-IMP short WINAPI GetAsyncKeyState(int);
 IMP BOOL WINAPI QueryPerformanceCounter(long long *);
 IMP BOOL WINAPI QueryPerformanceFrequency(long long *);
 IMP UINT WINAPI timeBeginPeriod(UINT);
@@ -711,8 +710,8 @@ static void start_resolution(void)
 
 /* testing (Nov 2026): the in-game HUD is scaled in the exe, not in the scripts.
    SCCT_Versus.ex has three places that scale a width by 1/640 and a height by
-   1/480; F6, F7 and F8 switch each one to use the height for both (so nothing is
-   stretched), F9 puts all three back. Each switch is logged. */
+   1/480; [Display] HudTest switches them (bits 1, 2, 4) to use the height for
+   both, so nothing is stretched. Each one is logged. */
 typedef struct { DWORD va; unsigned char n, old[4], neu[4]; } HPatch;
 static const HPatch HP[3][2] = {
     { { 0x10b12428, 4, { 0xdb, 0x44, 0x24, 0x4c }, { 0xdb, 0x44, 0x24, 0x48 } },   /* fild [esp+4c] -> [esp+48] */
@@ -739,27 +738,9 @@ static void hud_test(int k, int on)
     for (int j = 0; j < 2; j++)
         put_bytes(base + (HP[k][j].va - 0x10900000), on ? HP[k][j].neu : HP[k][j].old, HP[k][j].n);
     g_hp[k] = on;
-    wsprintfA(b, "hud test %c (F%d): %s\r\n", 'A' + k, 6 + k, on ? "ON" : "off");
+    wsprintfA(b, "hud test %c: %s\r\n", 'A' + k, on ? "ON" : "off");
     log_line(b);
 }
-static DWORD WINAPI keys(void *arg)
-{
-    (void)arg;
-    int was[4] = { 0, 0, 0, 0 };
-    for (;;) {
-        for (int k = 0; k < 4; k++) {
-            int down = (GetAsyncKeyState(0x75 + k) & 0x8000) != 0; /* F6..F9 */
-            if (down && !was[k]) {
-                if (k < 3) hud_test(k, !g_hp[k]);
-                else for (int i = 0; i < 3; i++) if (g_hp[i]) hud_test(i, 0);
-            }
-            was[k] = down;
-        }
-        Sleep(50);
-    }
-    return 0;
-}
-
 static DWORD WINAPI worker(void *arg)
 {
     (void)arg;
@@ -824,7 +805,10 @@ BOOL WINAPI DllEntry(HINSTANCE dll, DWORD reason, void *reserved)
     patch_dinput();
     log_line(g_rate125 ? "mouse: 125 reports a second\r\n" : "mouse: as it comes\r\n");
     HANDLE t = CreateThread(0, 0, worker, 0, 0, 0);
-    { HANDLE kt = CreateThread(0, 0, keys, 0, 0, 0); if (kt) CloseHandle(kt); }
+    { /* testing: [Display] HudTest = bits 1 (A), 2 (B), 4 (C), applied before the game draws anything */
+        int m = read_int("Display", "HudTest", 0);
+        for (int k = 0; k < 3; k++) if (m & (1 << k)) hud_test(k, 1);
+    }
     if (t) CloseHandle(t);
     return 1;
 }
