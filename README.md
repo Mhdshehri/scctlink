@@ -172,7 +172,7 @@ change anything here: it saves its own settings when it closes.
 - **Per class:** FOV for spies and mercenaries.
 
 <p align="center">
-  <img src="docs/images/settings-versus.png" width="420" alt="Settings tab in Versus">
+  <img src="docs/images/settings-versus.png" width="300" alt="Settings tab in Versus">
 </p>
 
 **Reset to defaults** is on the left, **Apply** on the right. The first
