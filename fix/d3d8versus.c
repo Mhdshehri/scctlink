@@ -64,6 +64,7 @@ IMP BOOL WINAPI ReadProcessMemory(HANDLE, const void *, void *, SIZE_T, SIZE_T *
 IMP BOOL WINAPI WriteProcessMemory(HANDLE, void *, const void *, SIZE_T, SIZE_T *);
 IMP BOOL WINAPI VirtualProtect(void *, SIZE_T, DWORD, DWORD *);
 IMP HMODULE WINAPI GetModuleHandleA(const char *);
+IMP short WINAPI GetAsyncKeyState(int);
 IMP BOOL WINAPI QueryPerformanceCounter(long long *);
 IMP BOOL WINAPI QueryPerformanceFrequency(long long *);
 IMP UINT WINAPI timeBeginPeriod(UINT);
@@ -509,17 +510,6 @@ static int hud_at(const unsigned char *b, SIZE_T i)
            b[i + 30] == 0x1e && b[i + 31] == 0x00 && b[i + 32] == 0x00 && b[i + 33] == 0xf0 && b[i + 34] == 0x43 &&
            b[i + 35] == 0x16;
 }
-/* The in-game HUD (found with the 640/480 log, Nov 2026) has its own copy, Y first
-   and with local variables (ac 00):
-       0f 01 [RatioY] ac 00 [SizeY] 1e 480.0 16  0f 01 [RatioX] ac 00 [SizeX] 1e 640.0 16
-   Same fix: the second one becomes SizeY / 480. */
-static int hud2_at(const unsigned char *b, SIZE_T i)
-{
-    return b[i] == 0x0f && b[i + 1] == 0x01 && b[i + 6] == 0xac && b[i + 7] == 0x00 && b[i + 12] == 0x1e &&
-           b[i + 13] == 0x00 && b[i + 14] == 0x00 && b[i + 15] == 0xf0 && b[i + 16] == 0x43 && b[i + 17] == 0x16 &&
-           b[i + 18] == 0x0f && b[i + 19] == 0x01 && b[i + 24] == 0xac && b[i + 25] == 0x00 && b[i + 30] == 0x1e &&
-           b[i + 31] == 0x00 && b[i + 32] == 0x00 && b[i + 33] == 0x20 && b[i + 34] == 0x44 && b[i + 35] == 0x16;
-}
 static int bytes_eq(const unsigned char *a, const unsigned char *b, SIZE_T n)
 {
     for (SIZE_T i = 0; i < n; i++) if (a[i] != b[i]) return 0;
@@ -538,40 +528,15 @@ static const WCHAR16 WLABEL_OLD[] = { '1', '6', '0', '0', ' ', '*', ' ', '1', '2
    through SetRes too: SCCTLink's setting is the one that counts. */
 static const unsigned char SETRES_PAT[] = { 0x1f, 'S', 'E', 'T', 'R', 'E', 'S', 0x00, 0x10 };
 static int g_setres;
-/* testing: every script that uses 640.0 or 480.0 (the HUD's base size), logged
-   once per place, to find what draws the stretched distance labels */
-static unsigned char *g_seen[96];
-static int g_nseen;
-static void note_const(const unsigned char *b, SIZE_T i, unsigned char *game)
-{
-    unsigned char *at = game + i;
-    char line[200];
-    int k, o;
-    for (k = 0; k < g_nseen; k++) if (g_seen[k] == at) return;
-    if (g_nseen >= 96) return;
-    g_seen[g_nseen++] = at;
-    o = wsprintfA(line, "const %s at %08lx:", b[i + 3] == 0x20 ? "640" : "480", (DWORD)(SIZE_T)at);
-    for (k = i >= 24 ? -24 : -(int)i; k < 8; k++) o += wsprintfA(line + o, k == 0 ? " [%02x" : (k == 5 ? "] %02x" : " %02x"), b[i + k]);
-    line[o] = '\r'; line[o + 1] = '\n'; line[o + 2] = 0;
-    log_line(line);
-}
 static void scan_bytes(const unsigned char *b, SIZE_T n, unsigned char *game)
 {
     for (SIZE_T i = 0; i + 40 < n; i++) {
         unsigned char c = b[i];
-        if (c == 0x1e && b[i + 1] == 0x00 && b[i + 2] == 0x00 &&
-            ((b[i + 3] == 0x20 && b[i + 4] == 0x44) || (b[i + 3] == 0xf0 && b[i + 4] == 0x43)))
-            note_const(b, i, game);
         if (c == 0x0f && S.hud && hud_at(b, i) && b[i + 13] == 0x00 && b[i + 14] == 0x00 && b[i + 15] == 0x20 &&
             b[i + 16] == 0x44) { /* still SizeX / 640.0 */
             static const unsigned char f480[4] = { 0x00, 0x00, 0xf0, 0x43 };
             put_bytes(game + i + 8, b + i + 26, 4); /* SizeY */
             put_bytes(game + i + 13, f480, 4);      /* 480.0 */
-            g_huds++;
-        } else if (c == 0x0f && S.hud && hud2_at(b, i)) { /* in-game HUD: still SizeX / 640.0 */
-            static const unsigned char f480b[4] = { 0x00, 0x00, 0xf0, 0x43 };
-            put_bytes(game + i + 26, b + i + 8, 4); /* SizeY */
-            put_bytes(game + i + 31, f480b, 4);     /* 480.0 */
             g_huds++;
         } else if (c == 0x1f && S.res[0] && bytes_eq(b + i, SETRES_PAT, sizeof SETRES_PAT)) {
             put_bytes(game + i + 6, (const unsigned char *)"Z", 1);
@@ -744,6 +709,57 @@ static void start_resolution(void)
     log_line(b);
 }
 
+/* testing (Nov 2026): the in-game HUD is scaled in the exe, not in the scripts.
+   SCCT_Versus.ex has three places that scale a width by 1/640 and a height by
+   1/480; F6, F7 and F8 switch each one to use the height for both (so nothing is
+   stretched), F9 puts all three back. Each switch is logged. */
+typedef struct { DWORD va; unsigned char n, old[4], neu[4]; } HPatch;
+static const HPatch HP[3][2] = {
+    { { 0x10b12428, 4, { 0xdb, 0x44, 0x24, 0x4c }, { 0xdb, 0x44, 0x24, 0x48 } },   /* fild [esp+4c] -> [esp+48] */
+      { 0x10b12437, 4, { 0x80, 0x0d, 0xc1, 0x10 }, { 0x58, 0x0b, 0xc1, 0x10 } } }, /* 1/640 -> 1/480 */
+    { { 0x10aaa91b, 1, { 0xa0 }, { 0xa4 } },                                      /* fild [eax+a0] -> [eax+a4] */
+      { 0x10aaa932, 4, { 0x80, 0x0d, 0xc1, 0x10 }, { 0x58, 0x0b, 0xc1, 0x10 } } },
+    { { 0x10a00ed4, 1, { 0x34 }, { 0x38 } },                                      /* fld [edi+34] -> [edi+38] */
+      { 0x10a00ed8, 4, { 0x80, 0x0d, 0xc1, 0x10 }, { 0x58, 0x0b, 0xc1, 0x10 } } },
+};
+static int g_hp[3];
+static void hud_test(int k, int on)
+{
+    char b[120];
+    unsigned char *base = (unsigned char *)GetModuleHandleA(0);
+    for (int j = 0; j < 2; j++) {
+        unsigned char *at = base + (HP[k][j].va - 0x10900000);
+        const unsigned char *want = on ? HP[k][j].old : HP[k][j].neu;
+        if (!bytes_eq(at, want, HP[k][j].n)) {
+            wsprintfA(b, "hud test %c: bytes at %08lx not as expected, left alone\r\n", 'A' + k, (DWORD)(SIZE_T)at);
+            log_line(b);
+            return;
+        }
+    }
+    for (int j = 0; j < 2; j++)
+        put_bytes(base + (HP[k][j].va - 0x10900000), on ? HP[k][j].neu : HP[k][j].old, HP[k][j].n);
+    g_hp[k] = on;
+    wsprintfA(b, "hud test %c (F%d): %s\r\n", 'A' + k, 6 + k, on ? "ON" : "off");
+    log_line(b);
+}
+static DWORD WINAPI keys(void *arg)
+{
+    (void)arg;
+    int was[4] = { 0, 0, 0, 0 };
+    for (;;) {
+        for (int k = 0; k < 4; k++) {
+            int down = (GetAsyncKeyState(0x75 + k) & 0x8000) != 0; /* F6..F9 */
+            if (down && !was[k]) {
+                if (k < 3) hud_test(k, !g_hp[k]);
+                else for (int i = 0; i < 3; i++) if (g_hp[i]) hud_test(i, 0);
+            }
+            was[k] = down;
+        }
+        Sleep(50);
+    }
+    return 0;
+}
+
 static DWORD WINAPI worker(void *arg)
 {
     (void)arg;
@@ -808,6 +824,7 @@ BOOL WINAPI DllEntry(HINSTANCE dll, DWORD reason, void *reserved)
     patch_dinput();
     log_line(g_rate125 ? "mouse: 125 reports a second\r\n" : "mouse: as it comes\r\n");
     HANDLE t = CreateThread(0, 0, worker, 0, 0, 0);
+    { HANDLE kt = CreateThread(0, 0, keys, 0, 0, 0); if (kt) CloseHandle(kt); }
     if (t) CloseHandle(t);
     return 1;
 }

@@ -41,7 +41,7 @@ llvm-dlltool -m i386 -k -d "$OUT/lib/kernel32v.def" -l "$OUT/lib/kernel32v.lib"
 mkdef winmmv timeBeginPeriod@4
 sed -i 's/^LIBRARY winmmv.dll/LIBRARY winmm.dll/' "$OUT/lib/winmmv.def"
 llvm-dlltool -m i386 -k -d "$OUT/lib/winmmv.def" -l "$OUT/lib/winmmv.lib"
-mkdef user32v wsprintfA
+mkdef user32v wsprintfA GetAsyncKeyState@4
 sed -i 's/^LIBRARY user32v.dll/LIBRARY user32.dll/' "$OUT/lib/user32v.def"
 llvm-dlltool -m i386 -k -d "$OUT/lib/user32v.def" -l "$OUT/lib/user32v.lib"
 clang --target=i686-pc-windows-msvc -O2 -Wall -Wextra -fno-builtin -fno-stack-protector -ffreestanding \
