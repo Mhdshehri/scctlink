@@ -1265,6 +1265,11 @@ static void refresh_controls(void)
     ShowWindow(g_c[ID_ACTION], idle ? 0 : 5);
     EnableWindow(g_c[ID_ACTION], !g_closing && ((join && !s->lobby) || (host && g_nview[LIST_FRIENDS_ONLINE] > 0)));
     ShowWindow(g_c[ID_REFRESH], host ? 0 : 5);
+    { /* level with the top of the list, or under Join when Join shows */
+        static int ry = -1;
+        int y = idle ? 190 : 230;
+        if (y != ry) { move_ctl(ID_REFRESH, 452, y); ry = y; }
+    }
     EnableWindow(g_c[ID_REFRESH], !g_closing && (idle || (join && !s->lobby)));
     EnableWindow(g_c[ID_LAUNCH], !g_closing);
     EnableWindow(g_c[ID_GAMEMODE], idle && !g_closing);
