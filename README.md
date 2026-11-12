@@ -166,9 +166,10 @@ change anything here: it saves its own settings when it closes.
 - **Display:** resolution (Versus starts at it), **Max FPS** (0 = no
   limit) and **Fullscreen** (off = a borderless window the size of the
   screen).
-- **Mouse:** **Mouse fix (125 Hz)** (for mice faster than 125 Hz),
-  sensitivity and multiplier.
-- **Per class:** FOV and turn speed, for spies and mercenaries.
+- **Mouse:** **Mouse fix (125 Hz)** (for mice faster than 125 Hz) and
+  turn speed for spies and mercenaries (100% = the game's own).
+  Sensitivity is set in the game itself.
+- **Per class:** FOV for spies and mercenaries.
 
 <p align="center">
   <img src="docs/images/settings-versus.png" width="420" alt="Settings tab in Versus">

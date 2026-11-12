@@ -2808,7 +2808,7 @@ static void apply_vfix(u64 a, bool turns)
     vfix_read(&u);
     if (turns) {
         int s = (int)(a & 65535), m = (int)(a >> 16 & 65535);
-        if (s < 10 || s > 1000 || m < 10 || m > 1000) { set_say("! Versus Fix: turning speed must be between 0.1 and 10."); settings_publish(); return; }
+        if (s < 10 || s > 1000 || m < 10 || m > 1000) { set_say("! Versus Fix: turn speed must be between 10% and 1000% (100% = the game's own)."); settings_publish(); return; }
         u.vf_spyturn = s; u.vf_mercturn = m;
     } else {
         int fps = (int)(a & 2047), w = (int)(a >> 11 & 8191), h = (int)(a >> 24 & 8191), sf = (int)(a >> 39 & 255), mf = (int)(a >> 47 & 255);

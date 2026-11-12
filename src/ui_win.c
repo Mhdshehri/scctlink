@@ -164,7 +164,7 @@ enum {
     ID_SL_MOUSE, ID_SET_SENS, ID_SL_TURN, ID_SET_TURN, ID_SF_MOUSE, ID_SET_RESET,
     /* Versus Fix (Versus only) */
     ID_SL_VFPS, ID_SET_VFPS, ID_SET_VHUD, ID_SET_VRATE, ID_SL_VFOV, ID_SET_VFOVS, ID_SET_VFOVM, ID_SL_VTURN, ID_SET_VTURNS,
-    ID_SET_VTURNM, ID_SF_VFOV, ID_SET_CHUD, ID_SET_INTRO,
+    ID_SET_VTURNM, ID_SL_VSPY1, ID_SL_VMERC1, ID_SL_VSPY2, ID_SL_VMERC2, ID_SF_VFOV, ID_SET_CHUD, ID_SET_INTRO,
     /* the Settings tab's banner, section titles and notes */
     ID_SET_BANNER, ID_SET_BANSUB, ID_SEC_DISP, ID_SEC_MOUSE, ID_SEC_CLASS, ID_SET_RAWNOTE, ID_SET_SPNOTE, ID_SET_VRATENOTE, ID_SET_SPFPS,
     ID_SET_APPLY, ID_STATS,
@@ -740,7 +740,7 @@ static void build(void)
     ctl(ID_SET_FIX, B, WTEXT("Install"), OD, 0, 470, BANNER_Y + 9, 96, 24, g_font);
     ctl(ID_SEC_DISP, T_, WTEXT("DISPLAY"), 0, 0, 28, 444, 300, 16, g_font);
     ctl(ID_SEC_MOUSE, T_, WTEXT("MOUSE"), 0, 0, 28, 554, 300, 16, g_font);
-    ctl(ID_SEC_CLASS, T_, WTEXT("PER CLASS  (spy, merc)"), 0, 0, 28, 608, 400, 16, g_font);
+    ctl(ID_SEC_CLASS, T_, WTEXT("PER CLASS"), 0, 0, 28, 608, 400, 16, g_font);
     ctl(ID_SL_RES, T_, WTEXT("Resolution"), ELL, 0, 28, 470, 150, 18, g_font);
     framed(ID_SET_W, E, NUM, 180, 466, 64, 24, 6, 4);
     ctl(ID_SL_X, T_, WTEXT("x"), 0, 0, 250, 470, 12, 18, g_font);
@@ -783,12 +783,17 @@ static void build(void)
     ctl(ID_SET_VHUD, B, WTEXT("Fullscreen"), OD, 0, 300, 494, 220, 24, g_font); /* off: a borderless window */
     ctl(ID_SET_VRATE, B, WTEXT("Mouse fix (125 Hz)"), OD, 0, 28, 548, 200, 24, g_font);
     ctl(ID_SET_VRATENOTE, T_, WTEXT("for mice faster than 125 Hz (and Steam Link)"), ELL, 0, 236, 552, 340, 18, g_font);
+    /* Versus: turn speed with the mouse, FOV per class; each box named Spy / Merc */
+    ctl(ID_SL_VTURN, T_, WTEXT("Turn speed (%)"), ELL, 0, 28, 584, 150, 18, g_font);
+    ctl(ID_SL_VSPY1, T_, WTEXT("Spy"), 0, 0, 180, 584, 34, 18, g_font);
+    framed(ID_SET_VTURNS, E, NUM, 214, 580, 56, 24, 6, 4);
+    ctl(ID_SL_VMERC1, T_, WTEXT("Merc"), 0, 0, 300, 584, 44, 18, g_font);
+    framed(ID_SET_VTURNM, E, NUM, 344, 580, 56, 24, 6, 4);
     ctl(ID_SL_VFOV, T_, WTEXT("FOV"), ELL, 0, 28, 634, 140, 18, g_font);
-    framed(ID_SET_VFOVS, E, NUM, 180, 630, 52, 24, 6, 4);
-    framed(ID_SET_VFOVM, E, NUM, 236, 630, 52, 24, 6, 4);
-    ctl(ID_SL_VTURN, T_, WTEXT("Turn speed"), ELL, 0, 300, 634, 96, 18, g_font);
-    framed(ID_SET_VTURNS, E, TXT, 400, 630, 52, 24, 6, 4);
-    framed(ID_SET_VTURNM, E, TXT, 456, 630, 52, 24, 6, 4);
+    ctl(ID_SL_VSPY2, T_, WTEXT("Spy"), 0, 0, 180, 634, 34, 18, g_font);
+    framed(ID_SET_VFOVS, E, NUM, 214, 630, 56, 24, 6, 4);
+    ctl(ID_SL_VMERC2, T_, WTEXT("Merc"), 0, 0, 300, 634, 44, 18, g_font);
+    framed(ID_SET_VFOVM, E, NUM, 344, 630, 56, 24, 6, 4);
     g_frame_tab = -1;
     ctl(ID_SET_NOTE, T_, WTEXT(""), ELL, 0, 28, 654, 548, 16, g_font);
     ctl(ID_SET_RESET, B, WTEXT("Reset to defaults"), OD, 0, 28, 676, 140, 24, g_font);
@@ -807,6 +812,7 @@ static bool set_versus_only(int id) { return (id >= ID_SL_VFPS && id <= ID_SF_VF
 static bool set_coop_only(int id)
 {
     return id == ID_SL_FOV || id == ID_SET_FOV || id == ID_SF_FOV || id == ID_SET_FRIEND || id == ID_SET_MOUSE ||
+           (id >= ID_SL_MOUSE && id <= ID_SF_MOUSE) || /* Versus: sensitivity is set in the game itself */
            (id >= ID_FOV43 && id <= ID_FOV169) || id == ID_SET_CHUD || id == ID_SET_INTRO || id == ID_SET_RAWNOTE || id == ID_SET_SPFPS || id == ID_SET_SPNOTE;
 }
 static void move_ctl(int id, int x, int y) { SetWindowPos(g_c[id], 0, S_(x), S_(y), 0, 0, 0x1 | 0x4 | 0x10 /* no size, z-order, activate */); }
@@ -821,14 +827,13 @@ static void move_framed(int id, int x, int y)
 static void place_settings(bool versus)
 {
     move_ctl(ID_SEC_MOUSE, 28, versus ? 526 : 554);
-    int m = versus ? 576 : 604; /* the sensitivity row */
-    move_ctl(ID_SL_MOUSE, 28, m + 4);
-    move_framed(ID_SET_SENS, 180, m);
-    move_ctl(ID_SL_TURN, 300, m + 4);
-    move_framed(ID_SET_TURN, 400, m);
-    move_ctl(ID_SF_MOUSE, versus ? 464 : 180, versus ? m + 4 : 632);
-    SetWindowPos(g_c[ID_SF_MOUSE], 0, 0, 0, S_(versus ? 112 : 396), S_(16), 0x2 | 0x4 | 0x10 /* no move */);
-    set_text(ID_SL_TURN, versus ? "Multiplier" : "Aim turn");
+    /* co-op's sensitivity / aim turn row (Versus has none: its sensitivity is set in the game) */
+    move_ctl(ID_SL_MOUSE, 28, 608);
+    move_framed(ID_SET_SENS, 180, 604);
+    move_ctl(ID_SL_TURN, 300, 608);
+    move_framed(ID_SET_TURN, 400, 604);
+    move_ctl(ID_SF_MOUSE, 180, 632);
+    set_text(ID_SL_TURN, "Aim turn");
     move_ctl(ID_SET_NOTE, 28, versus ? 658 : 654);
 }
 
@@ -1028,8 +1033,8 @@ static void show_settings(const UiSettings *n)
         if (first || o.vf_fps != n->vf_fps) { char f[16]; sfmt(f, sizeof f, "%d", n->vf_fps); set_text(ID_SET_VFPS, f); }
         if (first || o.vf_spyfov != n->vf_spyfov) set_num(ID_SET_VFOVS, n->vf_spyfov ? n->vf_spyfov : 75);
         if (first || o.vf_mercfov != n->vf_mercfov) set_num(ID_SET_VFOVM, n->vf_mercfov ? n->vf_mercfov : 95);
-        if (first || o.vf_spyturn != n->vf_spyturn) set_ws(ID_SET_VTURNS, n->vf_spyturn);
-        if (first || o.vf_mercturn != n->vf_mercturn) set_ws(ID_SET_VTURNM, n->vf_mercturn);
+        if (first || o.vf_spyturn != n->vf_spyturn) set_num(ID_SET_VTURNS, n->vf_spyturn); /* x100 = percent */
+        if (first || o.vf_mercturn != n->vf_mercturn) set_num(ID_SET_VTURNM, n->vf_mercturn);
         if (first || o.vf_hud != n->vf_hud || o.vf_rate125 != n->vf_rate125 || o.vf_full != n->vf_full) { g_vf_hud = n->vf_hud; g_vf_rate = n->vf_rate125; g_vf_full = n->vf_full; }
         vf_switch_texts();
         set_text(ID_SF_RES, "Versus starts at it");
@@ -1118,13 +1123,11 @@ static int edit_num(int id, bool ws)
 static void apply_versus_clicked(void)
 {
     /* the Versus profile's mouse */
-    int sens = edit_num(ID_SET_SENS, true), mult = edit_num(ID_SET_TURN, true);
-    if (sens == g_set.vsens || !g_set.have_vprofile) sens = 0;
-    if (mult == g_set.vmult || !g_set.have_vprofile) mult = 0;
+    int sens = 0, mult = 0; /* Versus' own sensitivity is set in the game */
     /* the Versus Fix */
     int w = edit_num(ID_SET_W, false), h = edit_num(ID_SET_H, false), fps = edit_num(ID_SET_VFPS, false),
         sf = edit_num(ID_SET_VFOVS, false), mf = edit_num(ID_SET_VFOVM, false),
-        st = edit_num(ID_SET_VTURNS, true), mt = edit_num(ID_SET_VTURNM, true);
+        st = edit_num(ID_SET_VTURNS, false), mt = edit_num(ID_SET_VTURNM, false); /* percent = x100 */
     if ((w && !h) || (h && !w)) { g_set_warn = true; set_text(ID_SET_NOTE, "Type both the width and the height."); return; }
     if (sens > 65535 || mult > 65535 || w > 8191 || h > 8191 || fps > 2047 || sf > 255 || mf > 255 || st > 65535 || mt > 65535) {
         g_set_warn = true;
