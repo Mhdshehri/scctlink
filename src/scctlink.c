@@ -289,17 +289,17 @@ static const uint8_t NETZ_LAN_KEY[16] = {
 
 static void rc4_crypt(const uint8_t *key, int klen, uint8_t *d, int n)
 {
-    uint8_t S[256];
-    for (int i = 0; i < 256; i++) S[i] = (uint8_t)i;
+    uint8_t box[256]; /* RC4 state (not the Steam API table S) */
+    for (int i = 0; i < 256; i++) box[i] = (uint8_t)i;
     for (int i = 0, j = 0; i < 256; i++) {
-        j = (j + S[i] + key[i % klen]) & 255;
-        uint8_t t = S[i]; S[i] = S[j]; S[j] = t;
+        j = (j + box[i] + key[i % klen]) & 255;
+        uint8_t t = box[i]; box[i] = box[j]; box[j] = t;
     }
     for (int k = 0, i = 0, j = 0; k < n; k++) {
         i = (i + 1) & 255;
-        j = (j + S[i]) & 255;
-        uint8_t t = S[i]; S[i] = S[j]; S[j] = t;
-        d[k] ^= S[(S[i] + S[j]) & 255];
+        j = (j + box[i]) & 255;
+        uint8_t t = box[i]; box[i] = box[j]; box[j] = t;
+        d[k] ^= box[(box[i] + box[j]) & 255];
     }
 }
 
@@ -2970,25 +2970,15 @@ static void reset_settings(bool versus)
     g_uiset.note_warn = false;
     if (settings_ready("Reset")) {
         bool err = false;
-        char p[900], user_sys[900];
+        char p[900];
         if (!versus) {
             sfmt(p, sizeof p, "%s" PATHSEP "System" PATHSEP "SplinterCell3.ini", g_mf_dir);
-            sfmt(user_sys, sizeof user_sys, "%s" PATHSEP "System" PATHSEP "SplinterCell3User.ini", g_mf_dir);
-            const char *users[2] = { g_user_ini, user_sys };
-            for (int i = 0; i < 2; i++) if (users[i][0]) {
-                err |= ini_set(users[i], 0, "DesiredFOV", "75.000000") < 0;
-                err |= ini_set(users[i], 0, "DefaultFOV", "75.000000") < 0;
-            }
-            for (int i = 0; i < g_nprof; i++) {
-                err |= ini_set(g_prof_ini[i], "Engine.PlayerController", "DesiredFOV", "75.000000") < 0;
-                err |= ini_set(g_prof_ini[i], "Engine.PlayerController", "DefaultFOV", "75.000000") < 0;
-            }
-            err |= ini_set(p, 0, "DesiredFOV", "75.000000") < 0;
-            err |= ini_set(p, "SIMULATION", "MAXFPS", "60") < 0;
+            /* the game ignores DesiredFOV and MAXFPS: the SCCT Fix sets the FOV and the frame rate */
+            if (scctfix_state() == 1 && !scfini_display(0, "75")) err = true;
             err |= ini_set(p, "Init", "UseDIMouse", "False") < 0;
             err |= set_coop_mouse(100, 50) < 0;
             set_say(err ? "! Reset: some files couldn't be written (are they read-only?)."
-                        : "Reset: co-op settings are the game's own again: FOV 75, FPS limit 60, mouse sensitivity 100, "
+                        : "Reset: co-op settings are the game's own again: FOV 75, mouse sensitivity 100, "
                           "aim turn speed 0.50, raw mouse off (the resolution is kept).");
         } else {
             if (g_vprf[0]) err |= ini_set(g_vprf, 0, "MouseSensitivity", "10.00") < 0;
@@ -3061,25 +3051,12 @@ static void apply_settings_(u64 a)
         }
         set_say(n ? "Settings: resolution set to %dx%d." : "! Settings: the resolution setting wasn't found in the game's files.", w, h);
     }
-    if (fov) {
-        int n = 0;
-        sfmt(v, sizeof v, "%d.000000", fov);
-        for (int i = 0; i < 2; i++) if (users[i][0]) {
-            SET(users[i], 0, "DesiredFOV", v); n += r > 0;
-            SET(users[i], 0, "DefaultFOV", v); n += r > 0;
-        }
-        SET(sys_ini, 0, "DesiredFOV", v); n += r > 0;
-        for (int i = 0; i < g_nprof; i++) { /* each profile has its own */
-            SET(g_prof_ini[i], "Engine.PlayerController", "DesiredFOV", v); n += r > 0;
-            SET(g_prof_ini[i], "Engine.PlayerController", "DefaultFOV", v); n += r > 0;
-        }
-        if (scctfix_state() == 1) { /* the game ignores DesiredFOV: the SCCT Fix sets the camera's */
-            char fv[8];
-            sfmt(fv, sizeof fv, "%d", fov);
-            if (scfini_display(0, fv)) n++; else err = true;
-        }
-        if (n) set_say("Settings: FOV set to %d.", fov);
-        else set_say("! Settings: the game's files have no FOV setting to change%s.", g_ws_ini[0] ? " - use the widescreen fix's FOV factor" : "");
+    if (fov) { /* the game ignores its own DesiredFOV: only the SCCT Fix changes the camera's FOV */
+        char fv[8];
+        sfmt(fv, sizeof fv, "%d", fov);
+        if (scctfix_state() != 1) set_say("! Settings: the FOV needs the SCCT Fix (Install, at the top of this tab).");
+        else if (scfini_display(0, fv)) set_say("Settings: FOV set to %d.", fov);
+        else err = true;
     }
     if (fps) {
         sfmt(v, sizeof v, "%d", fps);
