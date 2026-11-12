@@ -509,6 +509,17 @@ static int hud_at(const unsigned char *b, SIZE_T i)
            b[i + 30] == 0x1e && b[i + 31] == 0x00 && b[i + 32] == 0x00 && b[i + 33] == 0xf0 && b[i + 34] == 0x43 &&
            b[i + 35] == 0x16;
 }
+/* The in-game HUD (found with the 640/480 log, Nov 2026) has its own copy, Y first
+   and with local variables (ac 00):
+       0f 01 [RatioY] ac 00 [SizeY] 1e 480.0 16  0f 01 [RatioX] ac 00 [SizeX] 1e 640.0 16
+   Same fix: the second one becomes SizeY / 480. */
+static int hud2_at(const unsigned char *b, SIZE_T i)
+{
+    return b[i] == 0x0f && b[i + 1] == 0x01 && b[i + 6] == 0xac && b[i + 7] == 0x00 && b[i + 12] == 0x1e &&
+           b[i + 13] == 0x00 && b[i + 14] == 0x00 && b[i + 15] == 0xf0 && b[i + 16] == 0x43 && b[i + 17] == 0x16 &&
+           b[i + 18] == 0x0f && b[i + 19] == 0x01 && b[i + 24] == 0xac && b[i + 25] == 0x00 && b[i + 30] == 0x1e &&
+           b[i + 31] == 0x00 && b[i + 32] == 0x00 && b[i + 33] == 0x20 && b[i + 34] == 0x44 && b[i + 35] == 0x16;
+}
 static int bytes_eq(const unsigned char *a, const unsigned char *b, SIZE_T n)
 {
     for (SIZE_T i = 0; i < n; i++) if (a[i] != b[i]) return 0;
@@ -556,6 +567,11 @@ static void scan_bytes(const unsigned char *b, SIZE_T n, unsigned char *game)
             static const unsigned char f480[4] = { 0x00, 0x00, 0xf0, 0x43 };
             put_bytes(game + i + 8, b + i + 26, 4); /* SizeY */
             put_bytes(game + i + 13, f480, 4);      /* 480.0 */
+            g_huds++;
+        } else if (c == 0x0f && S.hud && hud2_at(b, i)) { /* in-game HUD: still SizeX / 640.0 */
+            static const unsigned char f480b[4] = { 0x00, 0x00, 0xf0, 0x43 };
+            put_bytes(game + i + 26, b + i + 8, 4); /* SizeY */
+            put_bytes(game + i + 31, f480b, 4);     /* 480.0 */
             g_huds++;
         } else if (c == 0x1f && S.res[0] && bytes_eq(b + i, SETRES_PAT, sizeof SETRES_PAT)) {
             put_bytes(game + i + 6, (const unsigned char *)"Z", 1);
