@@ -472,12 +472,12 @@ static void draw_tab(DrawItem *d)
 }
 
 /* An I / O switch: a pill (green with I when on, grey with O when off) and its name. */
-static bool g_vf_hud, g_vf_rate;
+static bool g_vf_hud, g_vf_rate, g_vf_full = true;
 static bool is_switch(UINT id) { return id == ID_SET_CHUD || id == ID_SET_INTRO || id == ID_SET_MOUSE || id == ID_SET_VHUD || id == ID_SET_VRATE; }
 static bool switch_on(UINT id)
 {
     return id == ID_SET_CHUD ? g_set.chud == 1 : id == ID_SET_INTRO ? g_set.skipintro == 1 : id == ID_SET_MOUSE ? g_set.rawmouse == 1
-         : id == ID_SET_VHUD ? g_vf_hud : g_vf_rate;
+         : id == ID_SET_VHUD ? g_vf_full : g_vf_rate;
 }
 static void draw_switch(DrawItem *d)
 {
@@ -780,7 +780,7 @@ static void build(void)
     /* Versus: the Versus Fix */
     ctl(ID_SL_VFPS, T_, WTEXT("Max FPS (0 = no limit)"), ELL, 0, 28, 498, 150, 18, g_font);
     framed(ID_SET_VFPS, E, NUM, 180, 494, 64, 24, 6, 4);
-    ctl(ID_SET_VHUD, B, WTEXT("Widescreen HUD"), OD, 0, 300, 494, 220, 24, g_font);
+    ctl(ID_SET_VHUD, B, WTEXT("Fullscreen"), OD, 0, 300, 494, 220, 24, g_font); /* off: a borderless window */
     ctl(ID_SET_VRATE, B, WTEXT("Mouse fix (125 Hz)"), OD, 0, 28, 548, 200, 24, g_font);
     ctl(ID_SET_VRATENOTE, T_, WTEXT("for mice faster than 125 Hz (and Steam Link)"), ELL, 0, 236, 552, 340, 18, g_font);
     ctl(ID_SL_VFOV, T_, WTEXT("FOV"), ELL, 0, 28, 634, 140, 18, g_font);
@@ -1030,7 +1030,7 @@ static void show_settings(const UiSettings *n)
         if (first || o.vf_mercfov != n->vf_mercfov) set_num(ID_SET_VFOVM, n->vf_mercfov ? n->vf_mercfov : 95);
         if (first || o.vf_spyturn != n->vf_spyturn) set_ws(ID_SET_VTURNS, n->vf_spyturn);
         if (first || o.vf_mercturn != n->vf_mercturn) set_ws(ID_SET_VTURNM, n->vf_mercturn);
-        if (first || o.vf_hud != n->vf_hud || o.vf_rate125 != n->vf_rate125) { g_vf_hud = n->vf_hud; g_vf_rate = n->vf_rate125; }
+        if (first || o.vf_hud != n->vf_hud || o.vf_rate125 != n->vf_rate125 || o.vf_full != n->vf_full) { g_vf_hud = n->vf_hud; g_vf_rate = n->vf_rate125; g_vf_full = n->vf_full; }
         vf_switch_texts();
         set_text(ID_SF_RES, "Versus starts at it");
         set_text(ID_SF_VFOV, "game: spy 75, merc 95");
@@ -1133,13 +1133,13 @@ static void apply_versus_clicked(void)
     }
     int osf = g_set.vf_spyfov ? g_set.vf_spyfov : 75, omf = g_set.vf_mercfov ? g_set.vf_mercfov : 95;
     bool vf = g_set.vfix >= 0 && (w != g_set.vf_w || h != g_set.vf_h || fps != g_set.vf_fps || sf != osf || mf != omf ||
-                                  g_vf_hud != g_set.vf_hud || g_vf_rate != g_set.vf_rate125);
+                                  g_vf_full != g_set.vf_full || g_vf_rate != g_set.vf_rate125);
     bool vt = g_set.vfix >= 0 && (st != g_set.vf_spyturn || mt != g_set.vf_mercturn);
     g_set_warn = false;
     set_text(ID_SET_NOTE, "Saving...");
     if (sens || mult || (!vf && !vt)) push_cmd(CMD_APPLY_VERSUS, versus_pack(0, 0, sens, mult));
     if (vf) push_cmd(CMD_APPLY_VFIX, vfix_pack(fps, w, h, g_vf_hud, g_vf_rate, sf == 75 && !g_set.vf_spyfov ? 0 : sf,
-                                               mf == 95 && !g_set.vf_mercfov ? 0 : mf));
+                                               mf == 95 && !g_set.vf_mercfov ? 0 : mf, g_vf_full));
     if (vt) push_cmd(CMD_APPLY_VFIX2, (u64)(st & 65535) | (u64)(mt & 65535) << 16);
 }
 
@@ -1605,7 +1605,7 @@ static void on_command(int id, int code)
         set_text(ID_SET_NOTE, "Working...");
         push_cmd(CMD_CHUD, g_set.chud == 1 ? 0 : 1);
         break;
-    case ID_SET_VHUD: g_vf_hud = !g_vf_hud; vf_switch_texts(); set_text(ID_SET_NOTE, "Click Apply to save."); break;
+    case ID_SET_VHUD: g_vf_full = !g_vf_full; vf_switch_texts(); set_text(ID_SET_NOTE, "Click Apply to save."); break;
     case ID_SET_VRATE: g_vf_rate = !g_vf_rate; vf_switch_texts(); set_text(ID_SET_NOTE, "Click Apply to save."); break;
     case ID_SET_RESET:
         if (MessageBoxW(g_wnd, g_shown.versus ? WTEXT("Put Versus back to the game's own settings?\n\nMouse sensitivity 10, multiplier 6; the Versus Fix: 60 FPS, mouse 125 Hz, HUD fix on, the game's FOV and turning, the game's resolution list.")

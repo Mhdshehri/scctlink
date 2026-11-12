@@ -200,10 +200,55 @@ static void set_frame_rate(int refresh)
 /* ---- Direct3D 8: straight to the real one; its CreateDevice is watched ---- */
 typedef long(WINAPI *CreateDevFn)(void *, UINT, UINT, void *, DWORD, DWORD *, void **);
 static CreateDevFn g_create_dev;
+/* ---- Fullscreen off: a borderless window the size of the screen ----
+   [Display] Fullscreen=0 (SCCTLink's Settings, Versus). Versus asks for a
+   fullscreen device; it gets a windowed one instead, in a window without a
+   border that covers the screen, so Alt+Tab and the Windows key don't drop
+   the game or change the screen mode. D3DPRESENT_PARAMETERS (D3D8), as DWORDs:
+   0 width, 1 height, 2 back buffer format, 6 window, 7 windowed,
+   11 refresh rate, 12 present interval. */
+typedef void *HWND;
+IMP LONG WINAPI SetWindowLongA(HWND, int, LONG);
+IMP BOOL WINAPI SetWindowPos(HWND, HWND, int, int, int, int, UINT);
+IMP int WINAPI GetSystemMetrics(int);
+static int g_full = -1;
+typedef long(WINAPI *ModeFn)(void *, UINT, DWORD *);
+static ModeFn g_mode;
+static void *g_d3d;
+static void go_windowed(DWORD *pp, void *wnd)
+{
+    if (g_full < 0) g_full = read_int("Display", "Fullscreen", 1) != 0;
+    if (g_full || pp[7]) return;
+    DWORD m[4] = { 0, 0, 0, 0 }; /* D3DDISPLAYMODE: width, height, refresh, format */
+    if (g_mode && g_d3d) g_mode(g_d3d, 0, m);
+    pp[7] = 1;
+    pp[11] = 0;
+    pp[12] = 0;
+    if (m[3]) pp[2] = m[3]; /* a window uses the desktop's format */
+    HWND h = pp[6] ? (HWND)(SIZE_T)pp[6] : (HWND)wnd;
+    if (h) {
+        SetWindowLongA(h, -16, (LONG)(0x80000000 | 0x10000000)); /* GWL_STYLE: WS_POPUP | WS_VISIBLE */
+        SetWindowPos(h, 0, 0, 0, GetSystemMetrics(0), GetSystemMetrics(1), 0x0020 | 0x0004 | 0x0040); /* FRAMECHANGED | NOZORDER | SHOWWINDOW */
+    }
+}
+typedef long(WINAPI *ResetFn)(void *, DWORD *);
+static ResetFn g_reset;
+static long WINAPI hook_Reset(void *dev, DWORD *pp)
+{
+    go_windowed(pp, 0);
+    return g_reset(dev, pp);
+}
 static long WINAPI hook_CreateDevice(void *d3d, UINT ad, UINT type, void *wnd, DWORD flags, DWORD *pp, void **out)
 {
     if (g_limiter_patched) set_frame_rate((int)pp[11] ? (int)pp[11] : 60);
+    g_d3d = d3d;
+    go_windowed(pp, wnd);
+    if (!g_full) log_line("fullscreen: off (borderless window)\r\n");
     long hr = g_create_dev(d3d, ad, type, wnd, flags, pp, out);
+    if (hr >= 0 && out && *out && !g_full) { /* IDirect3DDevice8::Reset (Alt+Tab, resolution change) */
+        void *o = hook_slot(*out, 14, (void *)hook_Reset);
+        if (o) g_reset = (ResetFn)o;
+    }
     char b[120]; /* D3DPRESENT_PARAMETERS (8): width, height, ..., windowed at 7 */
     wsprintfA(b, "screen: %lux%lu%s\r\n", pp[0], pp[1], pp[7] ? " (window)" : "");
     log_line(b);
@@ -286,6 +331,7 @@ __declspec(dllexport) void *WINAPI Direct3DCreate8(UINT sdk)
         }
         o = hook_slot(d3d, 10, (void *)hook_CheckDeviceFormat);
         if (o) g_check_fmt = (CheckFmtFn)o;
+        g_mode = (ModeFn)(*(void ***)d3d)[8]; /* IDirect3D8::GetAdapterDisplayMode */
     }
     return d3d;
 }
@@ -708,96 +754,6 @@ static void start_resolution(void)
     log_line(b);
 }
 
-/* testing (Nov 2026): the in-game HUD is scaled in the exe, not in the scripts.
-   SCCT_Versus.ex has three places that scale a width by 1/640 and a height by
-   1/480; [Display] HudTest switches them (bits 1, 2, 4) to use the height for
-   both, so nothing is stretched. Each one is logged. */
-typedef struct { DWORD va; unsigned char n, old[4], neu[4]; } HPatch;
-static const HPatch HP[3][2] = {
-    { { 0x10b12428, 4, { 0xdb, 0x44, 0x24, 0x4c }, { 0xdb, 0x44, 0x24, 0x48 } },   /* fild [esp+4c] -> [esp+48] */
-      { 0x10b12437, 4, { 0x80, 0x0d, 0xc1, 0x10 }, { 0x58, 0x0b, 0xc1, 0x10 } } }, /* 1/640 -> 1/480 */
-    { { 0x10aaa91b, 1, { 0xa0 }, { 0xa4 } },                                      /* fild [eax+a0] -> [eax+a4] */
-      { 0x10aaa932, 4, { 0x80, 0x0d, 0xc1, 0x10 }, { 0x58, 0x0b, 0xc1, 0x10 } } },
-    { { 0x10a00ed4, 1, { 0x34 }, { 0x38 } },                                      /* fld [edi+34] -> [edi+38] */
-      { 0x10a00ed8, 4, { 0x80, 0x0d, 0xc1, 0x10 }, { 0x58, 0x0b, 0xc1, 0x10 } } },
-};
-static int g_hp[3];
-static void hud_test(int k, int on)
-{
-    char b[120];
-    unsigned char *base = (unsigned char *)GetModuleHandleA(0);
-    for (int j = 0; j < 2; j++) {
-        unsigned char *at = base + (HP[k][j].va - 0x10900000);
-        const unsigned char *want = on ? HP[k][j].old : HP[k][j].neu;
-        if (!bytes_eq(at, want, HP[k][j].n)) {
-            wsprintfA(b, "hud test %c: bytes at %08lx not as expected, left alone\r\n", 'A' + k, (DWORD)(SIZE_T)at);
-            log_line(b);
-            return;
-        }
-    }
-    for (int j = 0; j < 2; j++)
-        put_bytes(base + (HP[k][j].va - 0x10900000), on ? HP[k][j].neu : HP[k][j].old, HP[k][j].n);
-    g_hp[k] = on;
-    wsprintfA(b, "hud test %c: %s\r\n", 'A' + k, on ? "ON" : "off");
-    log_line(b);
-}
-/* testing: places that multiply by the X scale (+0xb0) next to the Y scale (+0xb4);
-   [Display] HudScale bits 1..32 (one per group) make a group use the Y scale. */
-static const struct { DWORD va; int g; } XS[] = {
-    { 0x1095e107, 0 },
-    { 0x1095e3c9, 0 },
-    { 0x10961233, 1 },
-    { 0x10962a8a, 1 },
-    { 0x109630a9, 1 },
-    { 0x10963ddd, 1 },
-    { 0x109649f6, 2 },
-    { 0x10964a0e, 2 },
-    { 0x10964a55, 2 },
-    { 0x10964d4d, 2 },
-    { 0x1096569d, 2 },
-    { 0x10966559, 2 },
-    { 0x109667ee, 2 },
-    { 0x10982e92, 3 },
-    { 0x10985391, 3 },
-    { 0x10985465, 3 },
-    { 0x1098f504, 3 },
-    { 0x10997e20, 3 },
-    { 0x1099e3c2, 3 },
-    { 0x1099e62c, 3 },
-    { 0x109b833c, 4 },
-    { 0x109b9d65, 4 },
-    { 0x109ba863, 4 },
-    { 0x109bf181, 4 },
-    { 0x10a04eba, 5 },
-    { 0x10a04f05, 5 },
-    { 0x10a13b12, 5 },
-    { 0x10a13d8e, 5 },
-    { 0x10a38b93, 5 },
-    { 0x10a38e24, 5 },
-    { 0x10a3966e, 5 },
-    { 0x10a3e91f, 5 },
-    { 0x10a56195, 5 },
-    { 0x10a5b1f2, 5 },
-    { 0x10a5b25c, 5 },
-    { 0x10a902b6, 5 }
-};
-static void hud_scale_test(int mask)
-{
-    unsigned char *base = (unsigned char *)GetModuleHandleA(0);
-    int done[6] = { 0 }, bad = 0;
-    for (unsigned k = 0; k < sizeof XS / sizeof XS[0]; k++) {
-        if (!(mask & (1 << XS[k].g))) continue;
-        unsigned char *at = base + (XS[k].va - 0x10900000) + 2;
-        if (at[0] != 0xb0 || at[1] || at[2] || at[3]) { bad++; continue; }
-        put_bytes(at, "\xb4", 1);
-        done[XS[k].g]++;
-    }
-    char b[160];
-    wsprintfA(b, "hud scale test %d: groups changed %d %d %d %d %d %d, unexpected %d\r\n", mask,
-              done[0], done[1], done[2], done[3], done[4], done[5], bad);
-    log_line(b);
-}
-
 static DWORD WINAPI worker(void *arg)
 {
     (void)arg;
@@ -862,12 +818,6 @@ BOOL WINAPI DllEntry(HINSTANCE dll, DWORD reason, void *reserved)
     patch_dinput();
     log_line(g_rate125 ? "mouse: 125 reports a second\r\n" : "mouse: as it comes\r\n");
     HANDLE t = CreateThread(0, 0, worker, 0, 0, 0);
-    { /* testing: [Display] HudTest = bits 1 (A), 2 (B), 4 (C), applied before the game draws anything */
-        int m = read_int("Display", "HudTest", 0);
-        for (int k = 0; k < 3; k++) if (m & (1 << k)) hud_test(k, 1);
-        m = read_int("Display", "HudGroups", 62);
-        if (m) hud_scale_test(m);
-    }
     if (t) CloseHandle(t);
     return 1;
 }

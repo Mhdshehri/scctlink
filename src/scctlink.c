@@ -2622,7 +2622,7 @@ static void scctfix(bool install)
    next to SCCTLink.exe as SCCTVersusFix-d3d8.dll and is only copied if its
    SHA-256 is exactly this one (the build is reproducible: fix/build_fix.sh). */
 #define VFIX_FILE "SCCTVersusFix-d3d8.dll"
-#define VFIX_SHA "078fb5e4a3a82ddea37651a5f25d97d2d863e87abae15f15d80b97c489685d9f"
+#define VFIX_SHA "7a768dccab65b6eeddfd814ad23c9ae51fbeb5865ffa6aecd2206c6da82621e5"
 static void vfix_paths(char *src, char *dst, char *bak, char *ini, size_t n)
 {
     sfmt(src, n, "%s" PATHSEP VFIX_FILE, exe_dir());
@@ -2648,7 +2648,8 @@ static int vfix_state(void)
         "43e219cf628d0450ffcd20637fa242bb282dc8f6b1bb28840bdf4b023f7c3176",
         "0b1a4685b1acdb870d33af788575563c332343ffc1c2cc2779b520987e20fdc9",
         "7b2645692fdae5369bfab7029a80b38fbd3759f322fe22abeff9f0ff3db43549",
-        "e9dc167b07c9abae601e5e81277f5b7be6d15efe38aa14251b01f4f91ac8a636" };
+        "e9dc167b07c9abae601e5e81277f5b7be6d15efe38aa14251b01f4f91ac8a636",
+        "078fb5e4a3a82ddea37651a5f25d97d2d863e87abae15f15d80b97c489685d9f" };
     for (size_t i = 0; i < sizeof ours / sizeof *ours; i++) if (!strcmp(hex, ours[i])) return 3;
     return 2;
 }
@@ -2657,7 +2658,7 @@ static void vfix_read(UiSettings *u)
 {
     char src[900], dst[900], bak[900], ini[900], v[32];
     vfix_paths(src, dst, bak, ini, sizeof src);
-    u->vf_fps = 60; u->vf_w = u->vf_h = 0; u->vf_hud = true; u->vf_rate125 = true;
+    u->vf_fps = 60; u->vf_w = u->vf_h = 0; u->vf_hud = true; u->vf_rate125 = true; u->vf_full = true;
     u->vf_spyfov = u->vf_mercfov = 0; u->vf_spyturn = u->vf_mercturn = 100;
     if (ini_get(ini, "Display", "MaxFPS", v, sizeof v)) u->vf_fps = num_at(v, 1);
     if (ini_get(ini, "Display", "Resolution", v, sizeof v)) {
@@ -2667,6 +2668,7 @@ static void vfix_read(UiSettings *u)
     }
     if (ini_get(ini, "Display", "HUD", v, sizeof v)) u->vf_hud = v[0] != '0';
     if (ini_get(ini, "Mouse", "Rate125", v, sizeof v)) u->vf_rate125 = v[0] != '0';
+    if (ini_get(ini, "Display", "Fullscreen", v, sizeof v)) u->vf_full = v[0] != '0';
     if (ini_get(ini, "FOV", "Spy", v, sizeof v)) u->vf_spyfov = num_at(v, 1);
     if (ini_get(ini, "FOV", "Merc", v, sizeof v)) u->vf_mercfov = num_at(v, 1);
     if (ini_get(ini, "Turning", "Spy", v, sizeof v)) u->vf_spyturn = num_at(v, 100);
@@ -2690,6 +2692,8 @@ static bool vfix_write(const UiSettings *u)
          "HUD=%d\r\n"
          "; 1 = the mercenary's flashlight is drawn on today's graphics cards.\r\n"
          "Flashlight=1\r\n"
+         "; 0 = a borderless window the size of the screen instead of fullscreen.\r\n"
+         "Fullscreen=%d\r\n"
          "[Mouse]\r\n"
          "; 1 = the game gets the mouse as 125 reports a second (faster mice make Versus' aim zigzag).\r\n"
          "Rate125=%d\r\n"
@@ -2703,7 +2707,7 @@ static bool vfix_write(const UiSettings *u)
          "Merc=%d.%02d\r\n"
          "SpyVertical=1.00\r\n"
          "MercVertical=1.00\r\n",
-         u->vf_fps, res, u->vf_hud ? 1 : 0, u->vf_rate125 ? 1 : 0, u->vf_spyfov, u->vf_mercfov,
+         u->vf_fps, res, u->vf_hud ? 1 : 0, u->vf_full ? 1 : 0, u->vf_rate125 ? 1 : 0, u->vf_spyfov, u->vf_mercfov,
          u->vf_spyturn / 100, u->vf_spyturn % 100, u->vf_mercturn / 100, u->vf_mercturn % 100);
     FILE *f = fopen(ini, "wb");
     if (!f) return false;
@@ -2811,7 +2815,7 @@ static void apply_vfix(u64 a, bool turns)
         if (fps && (fps < 30 || fps > 1000)) { set_say("! Versus Fix: Max FPS must be 0 (no limit) or 30 to 1000."); settings_publish(); return; }
         if ((w || h) && (w < 640 || h < 480 || w > 9999 || h > 9999)) { set_say("! Versus Fix: that resolution doesn't look right."); settings_publish(); return; }
         if ((sf && (sf < 40 || sf > 150)) || (mf && (mf < 40 || mf > 150))) { set_say("! Versus Fix: FOV must be 40 to 150 (0 = the game's own)."); settings_publish(); return; }
-        u.vf_fps = fps; u.vf_w = w; u.vf_h = h; u.vf_hud = (a >> 37) & 1; u.vf_rate125 = (a >> 38) & 1; u.vf_spyfov = sf; u.vf_mercfov = mf;
+        u.vf_fps = fps; u.vf_w = w; u.vf_h = h; u.vf_hud = (a >> 37) & 1; u.vf_rate125 = (a >> 38) & 1; u.vf_full = (a >> 55) & 1; u.vf_spyfov = sf; u.vf_mercfov = mf;
     }
     if (vfix_state() < 0) set_say("! Versus Fix: Versus wasn't found in the game's folder (only Steam copies).");
     else if (!vfix_write(&u)) set_say("! Versus Fix: couldn't write SCCTVersusFix.ini.");
