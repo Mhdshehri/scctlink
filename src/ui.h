@@ -6,7 +6,7 @@
 #pragma once
 #include "mini.h"
 
-#define SCCTLINK_VERSION "0.9.9.9"
+#define SCCTLINK_VERSION "1.0"
 
 typedef enum {
     CMD_NONE,
@@ -80,7 +80,7 @@ typedef struct {
     int spfps;                  /* single-player FPS limit (SCCT Fix): 60, -1 the screen's, 0 none; -2 no game folder */
     int vfix;                   /* the Versus Fix: 0 not there, 1 installed, 2 another d3d8.dll, -1 no Versus */
     int vf_fps, vf_w, vf_h, vf_spyfov, vf_mercfov, vf_spyturn, vf_mercturn; /* 0 = the game's own; turns x100 */
-    bool vf_hud, vf_rate125;
+    bool vf_hud, vf_rate125, vf_full;
     int rawmouse, frawmouse;    /* UseDIMouse: 1 on, 0 off, -1 not found (frawmouse: the friend's) */
     int scctfix;                 /* the SCCT Fix: 0 not there, 1 installed, 2 another d3d9.dll is there, -1 no game folder */
     char note[200];             /* what the last Apply did */
@@ -93,10 +93,10 @@ static inline u64 settings_pack(int w, int h, int fov, int fps, int ws)
     return (u64)(w & 8191) | (u64)(h & 8191) << 13 | (u64)(fov & 255) << 26 | (u64)(fps & 1023) << 34 | (u64)(ws & 4095) << 44;
 }
 /* Versus Fix: FPS 11 bits (0 = no limit), width 13, height 13, HUD 1, 125 Hz mouse 1, spy FOV 8, merc FOV 8 */
-static inline u64 vfix_pack(int fps, int w, int h, int hud, int rate, int spyfov, int mercfov)
+static inline u64 vfix_pack(int fps, int w, int h, int hud, int rate, int spyfov, int mercfov, int full)
 {
     return (u64)(fps & 2047) | (u64)(w & 8191) << 11 | (u64)(h & 8191) << 24 | (u64)(hud & 1) << 37 | (u64)(rate & 1) << 38 |
-           (u64)(spyfov & 255) << 39 | (u64)(mercfov & 255) << 47;
+           (u64)(spyfov & 255) << 39 | (u64)(mercfov & 255) << 47 | (u64)(full & 1) << 55;
 }
 static inline u64 mouse_pack(int sens, int turn) { return (u64)(sens & 65535) | (u64)(turn & 65535) << 16; }
 static inline u64 versus_pack(int w, int h, int sens, int mult)

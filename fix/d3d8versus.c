@@ -200,10 +200,55 @@ static void set_frame_rate(int refresh)
 /* ---- Direct3D 8: straight to the real one; its CreateDevice is watched ---- */
 typedef long(WINAPI *CreateDevFn)(void *, UINT, UINT, void *, DWORD, DWORD *, void **);
 static CreateDevFn g_create_dev;
+/* ---- Fullscreen off: a borderless window the size of the screen ----
+   [Display] Fullscreen=0 (SCCTLink's Settings, Versus). Versus asks for a
+   fullscreen device; it gets a windowed one instead, in a window without a
+   border that covers the screen, so Alt+Tab and the Windows key don't drop
+   the game or change the screen mode. D3DPRESENT_PARAMETERS (D3D8), as DWORDs:
+   0 width, 1 height, 2 back buffer format, 6 window, 7 windowed,
+   11 refresh rate, 12 present interval. */
+typedef void *HWND;
+IMP LONG WINAPI SetWindowLongA(HWND, int, LONG);
+IMP BOOL WINAPI SetWindowPos(HWND, HWND, int, int, int, int, UINT);
+IMP int WINAPI GetSystemMetrics(int);
+static int g_full = -1;
+typedef long(WINAPI *ModeFn)(void *, UINT, DWORD *);
+static ModeFn g_mode;
+static void *g_d3d;
+static void go_windowed(DWORD *pp, void *wnd)
+{
+    if (g_full < 0) g_full = read_int("Display", "Fullscreen", 1) != 0;
+    if (g_full || pp[7]) return;
+    DWORD m[4] = { 0, 0, 0, 0 }; /* D3DDISPLAYMODE: width, height, refresh, format */
+    if (g_mode && g_d3d) g_mode(g_d3d, 0, m);
+    pp[7] = 1;
+    pp[11] = 0;
+    pp[12] = 0;
+    if (m[3]) pp[2] = m[3]; /* a window uses the desktop's format */
+    HWND h = pp[6] ? (HWND)(SIZE_T)pp[6] : (HWND)wnd;
+    if (h) {
+        SetWindowLongA(h, -16, (LONG)(0x80000000 | 0x10000000)); /* GWL_STYLE: WS_POPUP | WS_VISIBLE */
+        SetWindowPos(h, 0, 0, 0, GetSystemMetrics(0), GetSystemMetrics(1), 0x0020 | 0x0004 | 0x0040); /* FRAMECHANGED | NOZORDER | SHOWWINDOW */
+    }
+}
+typedef long(WINAPI *ResetFn)(void *, DWORD *);
+static ResetFn g_reset;
+static long WINAPI hook_Reset(void *dev, DWORD *pp)
+{
+    go_windowed(pp, 0);
+    return g_reset(dev, pp);
+}
 static long WINAPI hook_CreateDevice(void *d3d, UINT ad, UINT type, void *wnd, DWORD flags, DWORD *pp, void **out)
 {
     if (g_limiter_patched) set_frame_rate((int)pp[11] ? (int)pp[11] : 60);
+    g_d3d = d3d;
+    go_windowed(pp, wnd);
+    if (!g_full) log_line("fullscreen: off (borderless window)\r\n");
     long hr = g_create_dev(d3d, ad, type, wnd, flags, pp, out);
+    if (hr >= 0 && out && *out && !g_full) { /* IDirect3DDevice8::Reset (Alt+Tab, resolution change) */
+        void *o = hook_slot(*out, 14, (void *)hook_Reset);
+        if (o) g_reset = (ResetFn)o;
+    }
     char b[120]; /* D3DPRESENT_PARAMETERS (8): width, height, ..., windowed at 7 */
     wsprintfA(b, "screen: %lux%lu%s\r\n", pp[0], pp[1], pp[7] ? " (window)" : "");
     log_line(b);
@@ -286,6 +331,7 @@ __declspec(dllexport) void *WINAPI Direct3DCreate8(UINT sdk)
         }
         o = hook_slot(d3d, 10, (void *)hook_CheckDeviceFormat);
         if (o) g_check_fmt = (CheckFmtFn)o;
+        g_mode = (ModeFn)(*(void ***)d3d)[8]; /* IDirect3D8::GetAdapterDisplayMode */
     }
     return d3d;
 }

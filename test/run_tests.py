@@ -654,25 +654,24 @@ def main():
               "Settings tab: this PC's values and the friend's")
         hm.p.stdin.write("A\n1920 1080 90 60 100\n"); hm.p.stdin.flush()  # "Use friend's", FOV factor 1.00, Apply
         check(hm.wait_for(r"Settings: resolution set to 1920x1080", timeout=10) is not None
-              and hm.wait_for(r"Settings: FOV set to 90", timeout=3) is not None
+              and hm.wait_for(r"! Settings: the FOV needs the SCCT Fix", timeout=3) is not None
               and hm.wait_for(r"Settings: FPS limit set to 60", timeout=3) is not None
               and hm.wait_for(r"Settings: the widescreen fix's FOV factor set to 1\.00", timeout=3) is not None,
-              "Apply: resolution, FOV, FPS limit and the widescreen fix's FOV factor written")
+              "Apply: resolution, FPS limit and the widescreen fix's FOV factor written; the FOV waits for the SCCT Fix")
         with open(os.path.join(pdroot, "SplinterCell3.ini"), "rb") as f:
             check(b"FullscreenViewportX=1920\r\nFullscreenViewportY=1080\r\n" in f.read(), "...also in ProgramData's SplinterCell3.ini (the copy the game reads)")
         with open(os.path.join(pd, "KAZ", "KAZ.ini"), "rb") as f:
-            check(b"DesiredFOV=90.000000\r\nDefaultFOV=90.000000\r\n" in f.read(), "...and the FOV in each profile (Profiles\\<name>\\<name>.ini)")
+            check(b"DesiredFOV=90" not in f.read(), "...the game's own FOV (which it ignores) is not written to the profiles")
         rd = lambda *p: open(os.path.join(*p), "rb").read()
         uini = os.path.join(pd, "SplinterCell3User.ini")
-        check(rd(uini) == b"[Engine.PlayerController]\r\nDesiredFOV=90.000000\r\n"
-              and rd(uini + ".scctlink-backup") == b"[Engine.PlayerController]\r\nDesiredFOV=75.000000\r\n",
-              "...FOV in the user's settings (ProgramData), the original kept as a backup")
+        check(rd(uini) == b"[Engine.PlayerController]\r\nDesiredFOV=75.000000\r\n",
+              "...nor to the user's settings (ProgramData)")
         check(rd(ga, "System", "SplinterCell3.ini") == b"[WinDrv.WindowsClient]\r\nFullscreenViewportX=1920\r\nFullscreenViewportY=1080\r\nStartupFullscreen=True\r\n[SIMULATION]\r\nMAXFPS=60\r\n",
               "...resolution in SplinterCell3.ini, the rest of the file unchanged")
         check(rd(ga, "System", "scripts", "SplinterCellChaosTheory.WidescreenFix.ini") ==
               b"[MAIN]\r\nResX = 0\r\nResY = 0\r\nFOVFactor = 1.00\r\nFPSLimit = 60 // frame rate cap\r\n",
               "...the widescreen fix's .ini: FOV factor and FPS limit changed, its comment and ResX=0 (auto) kept")
-        check(hm.wait_for(r"\[settings\] scctfix 0 mine 1920x1080 fov 90 fps 60 ws 0", timeout=10) is not None, "the Settings tab shows the new values")
+        check(hm.wait_for(r"\[settings\] scctfix 0 mine 1920x1080 fov 75 fps 60 ws 0", timeout=10) is not None, "the Settings tab shows the new values")
         leftovers = [os.path.join(r, f) for r, _, fs in os.walk(gd) for f in fs if f.endswith(".scctlink-new")]
         check(not leftovers, "...each .ini was written in full and swapped in (no half-written files left) %s" % leftovers)
         time.sleep(1)
@@ -680,7 +679,7 @@ def main():
         check(hm.log.count("[mods] #user1192") >= 2 and "!FOV:" not in last, "...and the check is done again: FOV now the same (no longer flagged)")
         hm.p.stdin.write("A\n0 0 30 0 0\n"); hm.p.stdin.flush()
         check(hm.wait_for(r"! Settings: FOV must be between 50 and 130", timeout=5) is not None, "a wrong value is refused")
-        check(rd(uini) == b"[Engine.PlayerController]\r\nDesiredFOV=90.000000\r\n", "...and nothing is written")
+        check(rd(uini) == b"[Engine.PlayerController]\r\nDesiredFOV=75.000000\r\n", "...and nothing is written")
         # the SCCT Fix button
         fixsrc = os.path.join(ROOT, "build", "fix", "d3d9.dll")  # ours, built from fix/d3d9fix.c
         fixhere = os.path.join(exe_a, "SCCTFix-d3d9.dll")  # next to SCCTLink
@@ -903,10 +902,10 @@ def main():
         check(se.wait_for(r"Reset: co-op settings are the game's own again", timeout=10, since=mk) is not None
               and se.wait_for(r"\[settings\] mouse sens 100 turn 50 ", timeout=5, since=mk) is not None, "Reset (co-op)")
         s3, us = rd(sysd, "SplinterCell3.ini"), rd(sysd, "SplinterCell3User.ini")
-        check(b"UseDIMouse=False" in s3 and b"MAXFPS=60\r\n" in s3 and b"FullscreenViewportX=1920" in s3
-              and b"DesiredFOV=75.000000" in us and b"MouseSensitivity=100.0" in us
+        check(b"UseDIMouse=False" in s3 and b"MAXFPS=144\r\n" in s3 and b"FullscreenViewportX=1920" in s3
+              and b"DesiredFOV=90.000000" in us and b"MouseSensitivity=100.0" in us
               and rd(sysd, "SplinterCell3Settings.ini").count(b"m_turnMul=0.50") == 2,
-              "co-op defaults: FOV 75, FPS 60, raw mouse off, sensitivity 100, aim turn 0.50; resolution kept")
+              "co-op defaults: raw mouse off, sensitivity 100, aim turn 0.50; resolution kept; ignored settings left alone")
         check(b"Speed=0.50" in rd(prof, "KaZ_kbd_0.ini"), "co-op's Reset leaves Versus alone")
         mk = se.mark()
         se.p.stdin.write("Z\n1\n"); se.p.stdin.flush()

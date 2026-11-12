@@ -159,12 +159,12 @@ enum {
     ID_LISTLABEL, ID_LIST, ID_ACTION, ID_LAUNCH, ID_COPYCONN, ID_LOG, ID_TITLE, ID_REFRESH, ID_ACCENT, ID_THEME, ID_TAB_HOWTO, ID_TAB_LOG, ID_COPYLOG, ID_REPORT, ID_HOWTO,
     ID_LOBBYLABEL, ID_TAB_MODS, ID_MODS, ID_MODS2, ID_MODSDIV, ID_MODSTOP, ID_RECHECK,
     /* the Settings tab */
-    ID_TAB_SET, ID_SET_NOTE, ID_SL_RES, ID_SL_X, ID_SL_FOV, ID_SL_FPS, ID_SL_WS, ID_SET_W, ID_SET_H, ID_SET_FOV, ID_SET_FPS,
-    ID_SET_WS, ID_SF_RES, ID_SF_FOV, ID_SF_FPS, ID_SF_WS, ID_SET_FRIEND, ID_SET_FIX, ID_SET_MOUSE, ID_FOV43, ID_FOV1610, ID_FOV169,
+    ID_TAB_SET, ID_SET_NOTE, ID_SL_RES, ID_SL_X, ID_SL_FOV, ID_SET_W, ID_SET_H, ID_SET_FOV,
+    ID_SF_RES, ID_SF_FOV, ID_SET_FRIEND, ID_SET_FIX, ID_SET_MOUSE,
     ID_SL_MOUSE, ID_SET_SENS, ID_SL_TURN, ID_SET_TURN, ID_SF_MOUSE, ID_SET_RESET,
     /* Versus Fix (Versus only) */
     ID_SL_VFPS, ID_SET_VFPS, ID_SET_VHUD, ID_SET_VRATE, ID_SL_VFOV, ID_SET_VFOVS, ID_SET_VFOVM, ID_SL_VTURN, ID_SET_VTURNS,
-    ID_SET_VTURNM, ID_SF_VFOV, ID_SET_CHUD, ID_SET_INTRO,
+    ID_SET_VTURNM, ID_SL_VSPY1, ID_SL_VMERC1, ID_SL_VSPY2, ID_SL_VMERC2, ID_SF_VFOV, ID_SET_CHUD, ID_SET_INTRO,
     /* the Settings tab's banner, section titles and notes */
     ID_SET_BANNER, ID_SET_BANSUB, ID_SEC_DISP, ID_SEC_MOUSE, ID_SEC_CLASS, ID_SET_RAWNOTE, ID_SET_SPNOTE, ID_SET_VRATENOTE, ID_SET_SPFPS,
     ID_SET_APPLY, ID_STATS,
@@ -472,12 +472,12 @@ static void draw_tab(DrawItem *d)
 }
 
 /* An I / O switch: a pill (green with I when on, grey with O when off) and its name. */
-static bool g_vf_hud, g_vf_rate;
+static bool g_vf_hud, g_vf_rate, g_vf_full = true;
 static bool is_switch(UINT id) { return id == ID_SET_CHUD || id == ID_SET_INTRO || id == ID_SET_MOUSE || id == ID_SET_VHUD || id == ID_SET_VRATE; }
 static bool switch_on(UINT id)
 {
     return id == ID_SET_CHUD ? g_set.chud == 1 : id == ID_SET_INTRO ? g_set.skipintro == 1 : id == ID_SET_MOUSE ? g_set.rawmouse == 1
-         : id == ID_SET_VHUD ? g_vf_hud : g_vf_rate;
+         : id == ID_SET_VHUD ? g_vf_full : g_vf_rate;
 }
 static void draw_switch(DrawItem *d)
 {
@@ -626,7 +626,7 @@ static LRESULT control_colors(UINT msg, HDC dc, HWND ctl_)
     int sid = 0; /* a label on the Settings tab? */
     for (int i = ID_SET_NOTE; i <= ID_SET_APPLY && !sid; i++) if (ctl_ == g_c[i]) sid = i;
     bool box = msg != WM_CTLCOLORSTATIC || ctl_ == g_c[ID_LOG] || ctl_ == g_c[ID_LOBBY] || ctl_ == g_c[ID_HOWTO] || ctl_ == g_c[ID_MODS] || ctl_ == g_c[ID_MODS2] || ctl_ == g_c[ID_MODSTOP] || sid;
-    bool dim = ctl_ == g_c[ID_LISTLABEL] || ctl_ == g_c[ID_LOBBYLABEL] || (sid >= ID_SF_RES && sid <= ID_SF_WS) || sid == ID_SF_MOUSE || sid == ID_SF_VFOV ||
+    bool dim = ctl_ == g_c[ID_LISTLABEL] || ctl_ == g_c[ID_LOBBYLABEL] || (sid >= ID_SF_RES && sid <= ID_SF_FOV) || sid == ID_SF_MOUSE || sid == ID_SF_VFOV ||
                (sid == ID_SET_NOTE && !g_set_warn) || (sid >= ID_SET_BANSUB && sid <= ID_SET_VRATENOTE);
     DWORD tc = sid == ID_SET_NOTE && g_set_warn ? T.status : dim ? T.dim : T.text;
     if (sid == ID_SET_BANNER) tc = fix_ok() ? T.status : red_text();
@@ -740,7 +740,7 @@ static void build(void)
     ctl(ID_SET_FIX, B, WTEXT("Install"), OD, 0, 470, BANNER_Y + 9, 96, 24, g_font);
     ctl(ID_SEC_DISP, T_, WTEXT("DISPLAY"), 0, 0, 28, 444, 300, 16, g_font);
     ctl(ID_SEC_MOUSE, T_, WTEXT("MOUSE"), 0, 0, 28, 554, 300, 16, g_font);
-    ctl(ID_SEC_CLASS, T_, WTEXT("PER CLASS  (spy, merc)"), 0, 0, 28, 608, 400, 16, g_font);
+    ctl(ID_SEC_CLASS, T_, WTEXT("PER CLASS"), 0, 0, 28, 608, 400, 16, g_font);
     ctl(ID_SL_RES, T_, WTEXT("Resolution"), ELL, 0, 28, 470, 150, 18, g_font);
     framed(ID_SET_W, E, NUM, 180, 466, 64, 24, 6, 4);
     ctl(ID_SL_X, T_, WTEXT("x"), 0, 0, 250, 470, 12, 18, g_font);
@@ -751,9 +751,6 @@ static void build(void)
     framed(ID_SET_FOV, E, NUM, 180, 494, 64, 24, 6, 4);
     /* FOV for the screen's shape (the game's default 75 is for 4:3). Co-op
        needs the same number on both PCs, so it's a choice, never automatic. */
-    ctl(ID_FOV43, B, WTEXT("4:3"), OD, 0, 250, 494, 32, 24, g_font);
-    ctl(ID_FOV1610, B, WTEXT("16:10"), OD, 0, 285, 494, 40, 24, g_font);
-    ctl(ID_FOV169, B, WTEXT("16:9"), OD, 0, 328, 494, 34, 24, g_font);
     ctl(ID_SF_FOV, T_, WTEXT(""), ELL, 0, 250, 498, 326, 18, g_font);
     ctl(ID_SET_CHUD, B, WTEXT("Widescreen HUD"), OD, 0, 28, 522, 172, 24, g_font);
     ctl(ID_SET_INTRO, B, WTEXT("Skip intro videos"), OD, 0, 206, 522, 180, 24, g_font);
@@ -764,12 +761,6 @@ static void build(void)
     ctl(ID_SET_MOUSE, B, WTEXT("Raw mouse"), OD, 0, 28, 576, 150, 24, g_font);
     ctl(ID_SET_RAWNOTE, T_, WTEXT("no acceleration, any polling rate (in the SCCT Fix)"), ELL, 0, 186, 580, 390, 18, g_font);
     /* not shown any more (the SCCT Fix keeps 60 FPS; no other widescreen fix is needed), still read for the check */
-    ctl(ID_SL_FPS, T_, WTEXT("FPS limit"), 0, 0, 0, 0, 1, 1, g_font);
-    ctl(ID_SF_FPS, T_, WTEXT(""), 0, 0, 0, 0, 1, 1, g_font);
-    ctl(ID_SET_FPS, E, WTEXT(""), NUM, 0, 0, 0, 1, 1, g_font);
-    ctl(ID_SL_WS, T_, WTEXT(""), 0, 0, 0, 0, 1, 1, g_font);
-    ctl(ID_SF_WS, T_, WTEXT(""), 0, 0, 0, 0, 1, 1, g_font);
-    ctl(ID_SET_WS, E, WTEXT(""), TXT, 0, 0, 0, 1, 1, g_font);
     ctl(ID_SF_VFOV, T_, WTEXT(""), 0, 0, 0, 0, 1, 1, g_font);
     /* the mouse: co-op "sensitivity / aim turn", Versus "sensitivity / multiplier" (moved by place_settings) */
     ctl(ID_SL_MOUSE, T_, WTEXT("Sensitivity"), ELL, 0, 28, 608, 150, 18, g_font);
@@ -780,15 +771,20 @@ static void build(void)
     /* Versus: the Versus Fix */
     ctl(ID_SL_VFPS, T_, WTEXT("Max FPS (0 = no limit)"), ELL, 0, 28, 498, 150, 18, g_font);
     framed(ID_SET_VFPS, E, NUM, 180, 494, 64, 24, 6, 4);
-    ctl(ID_SET_VHUD, B, WTEXT("Widescreen HUD"), OD, 0, 300, 494, 220, 24, g_font);
+    ctl(ID_SET_VHUD, B, WTEXT("Fullscreen"), OD, 0, 300, 494, 220, 24, g_font); /* off: a borderless window */
     ctl(ID_SET_VRATE, B, WTEXT("Mouse fix (125 Hz)"), OD, 0, 28, 548, 200, 24, g_font);
     ctl(ID_SET_VRATENOTE, T_, WTEXT("for mice faster than 125 Hz (and Steam Link)"), ELL, 0, 236, 552, 340, 18, g_font);
+    /* Versus: turn speed with the mouse, FOV per class; each box named Spy / Merc */
+    ctl(ID_SL_VTURN, T_, WTEXT("Turn speed (%)"), ELL, 0, 28, 584, 150, 18, g_font);
+    ctl(ID_SL_VSPY1, T_, WTEXT("Spy"), 0, 0, 180, 584, 34, 18, g_font);
+    framed(ID_SET_VTURNS, E, NUM, 214, 580, 56, 24, 6, 4);
+    ctl(ID_SL_VMERC1, T_, WTEXT("Merc"), 0, 0, 300, 584, 44, 18, g_font);
+    framed(ID_SET_VTURNM, E, NUM, 344, 580, 56, 24, 6, 4);
     ctl(ID_SL_VFOV, T_, WTEXT("FOV"), ELL, 0, 28, 634, 140, 18, g_font);
-    framed(ID_SET_VFOVS, E, NUM, 180, 630, 52, 24, 6, 4);
-    framed(ID_SET_VFOVM, E, NUM, 236, 630, 52, 24, 6, 4);
-    ctl(ID_SL_VTURN, T_, WTEXT("Turn speed"), ELL, 0, 300, 634, 96, 18, g_font);
-    framed(ID_SET_VTURNS, E, TXT, 400, 630, 52, 24, 6, 4);
-    framed(ID_SET_VTURNM, E, TXT, 456, 630, 52, 24, 6, 4);
+    ctl(ID_SL_VSPY2, T_, WTEXT("Spy"), 0, 0, 180, 634, 34, 18, g_font);
+    framed(ID_SET_VFOVS, E, NUM, 214, 630, 56, 24, 6, 4);
+    ctl(ID_SL_VMERC2, T_, WTEXT("Merc"), 0, 0, 300, 634, 44, 18, g_font);
+    framed(ID_SET_VFOVM, E, NUM, 344, 630, 56, 24, 6, 4);
     g_frame_tab = -1;
     ctl(ID_SET_NOTE, T_, WTEXT(""), ELL, 0, 28, 654, 548, 16, g_font);
     ctl(ID_SET_RESET, B, WTEXT("Reset to defaults"), OD, 0, 28, 676, 140, 24, g_font);
@@ -799,15 +795,14 @@ static void build(void)
 /* The Settings tab in co-op and in Versus: what each shows. */
 static bool set_never(int id)
 {
-    return (id >= ID_FOV43 && id <= ID_FOV169) || /* the SCCT Fix widens the FOV for the screen by itself */
-           (id >= ID_SL_FPS && id <= ID_SL_WS) || id == ID_SET_FPS || id == ID_SET_WS || id == ID_SF_FPS || id == ID_SF_WS ||
-           id == ID_SF_VFOV;
+    return id == ID_SF_VFOV;
 }
 static bool set_versus_only(int id) { return (id >= ID_SL_VFPS && id <= ID_SF_VFOV) || id == ID_SEC_CLASS || id == ID_SET_VRATENOTE; }
 static bool set_coop_only(int id)
 {
     return id == ID_SL_FOV || id == ID_SET_FOV || id == ID_SF_FOV || id == ID_SET_FRIEND || id == ID_SET_MOUSE ||
-           (id >= ID_FOV43 && id <= ID_FOV169) || id == ID_SET_CHUD || id == ID_SET_INTRO || id == ID_SET_RAWNOTE || id == ID_SET_SPFPS || id == ID_SET_SPNOTE;
+           (id >= ID_SL_MOUSE && id <= ID_SF_MOUSE) || /* Versus: sensitivity is set in the game itself */
+           id == ID_SET_CHUD || id == ID_SET_INTRO || id == ID_SET_RAWNOTE || id == ID_SET_SPFPS || id == ID_SET_SPNOTE;
 }
 static void move_ctl(int id, int x, int y) { SetWindowPos(g_c[id], 0, S_(x), S_(y), 0, 0, 0x1 | 0x4 | 0x10 /* no size, z-order, activate */); }
 /* a framed text box: the frame at x, y, the box inside it */
@@ -821,14 +816,13 @@ static void move_framed(int id, int x, int y)
 static void place_settings(bool versus)
 {
     move_ctl(ID_SEC_MOUSE, 28, versus ? 526 : 554);
-    int m = versus ? 576 : 604; /* the sensitivity row */
-    move_ctl(ID_SL_MOUSE, 28, m + 4);
-    move_framed(ID_SET_SENS, 180, m);
-    move_ctl(ID_SL_TURN, 300, m + 4);
-    move_framed(ID_SET_TURN, 400, m);
-    move_ctl(ID_SF_MOUSE, versus ? 464 : 180, versus ? m + 4 : 632);
-    SetWindowPos(g_c[ID_SF_MOUSE], 0, 0, 0, S_(versus ? 112 : 396), S_(16), 0x2 | 0x4 | 0x10 /* no move */);
-    set_text(ID_SL_TURN, versus ? "Multiplier" : "Aim turn");
+    /* co-op's sensitivity / aim turn row (Versus has none: its sensitivity is set in the game) */
+    move_ctl(ID_SL_MOUSE, 28, 608);
+    move_framed(ID_SET_SENS, 180, 604);
+    move_ctl(ID_SL_TURN, 300, 608);
+    move_framed(ID_SET_TURN, 400, 604);
+    move_ctl(ID_SF_MOUSE, 180, 632);
+    set_text(ID_SL_TURN, "Aim turn");
     move_ctl(ID_SET_NOTE, 28, versus ? 658 : 654);
 }
 
@@ -1028,9 +1022,9 @@ static void show_settings(const UiSettings *n)
         if (first || o.vf_fps != n->vf_fps) { char f[16]; sfmt(f, sizeof f, "%d", n->vf_fps); set_text(ID_SET_VFPS, f); }
         if (first || o.vf_spyfov != n->vf_spyfov) set_num(ID_SET_VFOVS, n->vf_spyfov ? n->vf_spyfov : 75);
         if (first || o.vf_mercfov != n->vf_mercfov) set_num(ID_SET_VFOVM, n->vf_mercfov ? n->vf_mercfov : 95);
-        if (first || o.vf_spyturn != n->vf_spyturn) set_ws(ID_SET_VTURNS, n->vf_spyturn);
-        if (first || o.vf_mercturn != n->vf_mercturn) set_ws(ID_SET_VTURNM, n->vf_mercturn);
-        if (first || o.vf_hud != n->vf_hud || o.vf_rate125 != n->vf_rate125) { g_vf_hud = n->vf_hud; g_vf_rate = n->vf_rate125; }
+        if (first || o.vf_spyturn != n->vf_spyturn) set_num(ID_SET_VTURNS, n->vf_spyturn); /* x100 = percent */
+        if (first || o.vf_mercturn != n->vf_mercturn) set_num(ID_SET_VTURNM, n->vf_mercturn);
+        if (first || o.vf_hud != n->vf_hud || o.vf_rate125 != n->vf_rate125 || o.vf_full != n->vf_full) { g_vf_hud = n->vf_hud; g_vf_rate = n->vf_rate125; g_vf_full = n->vf_full; }
         vf_switch_texts();
         set_text(ID_SF_RES, "Versus starts at it");
         set_text(ID_SF_VFOV, "game: spy 75, merc 95");
@@ -1045,8 +1039,6 @@ static void show_settings(const UiSettings *n)
     EnableWindow(g_c[ID_SET_SENS], vs ? n->have_vprofile : n->sens > 0);
     EnableWindow(g_c[ID_SET_TURN], vs ? n->have_vprofile : n->turn > 0);
     if (first || o.fov != n->fov) set_num(ID_SET_FOV, n->fov);
-    if (first || o.fps != n->fps) set_num(ID_SET_FPS, n->fps);
-    if (first || o.wsfov != n->wsfov) set_ws(ID_SET_WS, n->wsfov);
     char b[160];
     const char *who = n->friend_name[0] ? n->friend_name : "friend";
 #define FR(id, have, ...) do { if (!n->friend_) b[0] = 0; else if (have) sfmt(b, sizeof b, __VA_ARGS__); \
@@ -1055,21 +1047,17 @@ static void show_settings(const UiSettings *n)
     if (!vs && n->scctfix == 1 && !n->friend_) set_text(ID_SF_RES, "the SCCT Fix draws at it");
     if (!vs && n->scctfix == 1 && !n->friend_) set_text(ID_SF_FOV, "75 = the game's; wide screens see more by themselves");
     FR(ID_SF_FOV, n->ffov, "%s: %d", who, n->ffov);
-    FR(ID_SF_FPS, n->ffps, "%s: %d%s", who, n->ffps, n->ffps != n->fps ? "  <- must match" : "");
-    FR(ID_SF_WS, n->fwsfov, "%s: %d.%02d%s", who, n->fwsfov / 100, n->fwsfov % 100, n->fwsfov != n->wsfov ? "  <- must match" : "");
     if (!vs) FR(ID_SF_MOUSE, n->fturn, "%s: aim turn %d.%02d%s", who, n->fturn / 100, n->fturn % 100, n->fturn != n->turn ? "  <- must match" : "");
     if (vs) set_text(ID_SF_MOUSE, n->have_vprofile ? "" : "(no profile yet)");
 #undef FR
     if (!n->have_fov && !n->friend_) set_text(ID_SF_FOV, "(not in the game's files)");
     EnableWindow(g_c[ID_SET_FOV], n->have_fov);
-    for (int i = ID_FOV43; i <= ID_FOV169; i++) EnableWindow(g_c[i], n->have_fov);
-    EnableWindow(g_c[ID_SET_WS], n->have_ws);
     /* the banner: the fix, installed or not */
     int fixst = vs ? n->vfix : n->scctfix;
     if (vs) {
         set_text(ID_SET_BANNER, n->vfix < 0 ? "Versus wasn't found" : n->vfix == 1 ? "\xe2\x9c\x93 Versus Fix installed"
                                 : n->vfix == 3 ? "Versus Fix: an older version is installed" : "Versus Fix not installed");
-        set_text(ID_SET_BANSUB, "no 30 FPS limit, mouse fix, FOV per class, widescreen HUD, flashlight fix");
+        set_text(ID_SET_BANSUB, "no 30 FPS limit, mouse fix, FOV per class, flashlight fix, borderless option");
         set_text(ID_SET_FIX, n->vfix == 1 ? "Remove" : n->vfix == 3 ? "Update" : "Install");
     } else {
         set_text(ID_SET_BANNER, !n->found ? "The game's folder wasn't found" : n->scctfix == 1 ? "\xe2\x9c\x93 SCCT Fix installed"
@@ -1118,13 +1106,11 @@ static int edit_num(int id, bool ws)
 static void apply_versus_clicked(void)
 {
     /* the Versus profile's mouse */
-    int sens = edit_num(ID_SET_SENS, true), mult = edit_num(ID_SET_TURN, true);
-    if (sens == g_set.vsens || !g_set.have_vprofile) sens = 0;
-    if (mult == g_set.vmult || !g_set.have_vprofile) mult = 0;
+    int sens = 0, mult = 0; /* Versus' own sensitivity is set in the game */
     /* the Versus Fix */
     int w = edit_num(ID_SET_W, false), h = edit_num(ID_SET_H, false), fps = edit_num(ID_SET_VFPS, false),
         sf = edit_num(ID_SET_VFOVS, false), mf = edit_num(ID_SET_VFOVM, false),
-        st = edit_num(ID_SET_VTURNS, true), mt = edit_num(ID_SET_VTURNM, true);
+        st = edit_num(ID_SET_VTURNS, false), mt = edit_num(ID_SET_VTURNM, false); /* percent = x100 */
     if ((w && !h) || (h && !w)) { g_set_warn = true; set_text(ID_SET_NOTE, "Type both the width and the height."); return; }
     if (sens > 65535 || mult > 65535 || w > 8191 || h > 8191 || fps > 2047 || sf > 255 || mf > 255 || st > 65535 || mt > 65535) {
         g_set_warn = true;
@@ -1133,13 +1119,13 @@ static void apply_versus_clicked(void)
     }
     int osf = g_set.vf_spyfov ? g_set.vf_spyfov : 75, omf = g_set.vf_mercfov ? g_set.vf_mercfov : 95;
     bool vf = g_set.vfix >= 0 && (w != g_set.vf_w || h != g_set.vf_h || fps != g_set.vf_fps || sf != osf || mf != omf ||
-                                  g_vf_hud != g_set.vf_hud || g_vf_rate != g_set.vf_rate125);
+                                  g_vf_full != g_set.vf_full || g_vf_rate != g_set.vf_rate125);
     bool vt = g_set.vfix >= 0 && (st != g_set.vf_spyturn || mt != g_set.vf_mercturn);
     g_set_warn = false;
     set_text(ID_SET_NOTE, "Saving...");
     if (sens || mult || (!vf && !vt)) push_cmd(CMD_APPLY_VERSUS, versus_pack(0, 0, sens, mult));
     if (vf) push_cmd(CMD_APPLY_VFIX, vfix_pack(fps, w, h, g_vf_hud, g_vf_rate, sf == 75 && !g_set.vf_spyfov ? 0 : sf,
-                                               mf == 95 && !g_set.vf_mercfov ? 0 : mf));
+                                               mf == 95 && !g_set.vf_mercfov ? 0 : mf, g_vf_full));
     if (vt) push_cmd(CMD_APPLY_VFIX2, (u64)(st & 65535) | (u64)(mt & 65535) << 16);
 }
 
@@ -1151,12 +1137,10 @@ static void apply_clicked(void)
     if (turn == g_set.turn || !g_set.turn) turn = 0;
     if (sens > 65535 || turn > 65535) { g_set_warn = true; set_text(ID_SET_NOTE, "One of the values is too big."); return; }
     int w = edit_num(ID_SET_W, false), h = edit_num(ID_SET_H, false), fov = edit_num(ID_SET_FOV, false),
-        fps = edit_num(ID_SET_FPS, false), ws = edit_num(ID_SET_WS, true);
+        fps = 0, ws = 0; /* the FPS limit and another widescreen mod's FOV factor: not set from here */
     /* only what changed (0 = leave it) */
     if (w == g_set.w && h == g_set.h) w = h = 0;
     if (fov == g_set.fov || !g_set.have_fov) fov = 0;
-    if (fps == g_set.fps) fps = 0;
-    if (ws == g_set.wsfov || !g_set.have_ws) ws = 0;
     if (w > 8191 || h > 8191 || fov > 255 || fps > 1023 || ws > 4095) {
         g_set_warn = true;
         set_text(ID_SET_NOTE, "One of the values is too big.");
@@ -1178,8 +1162,6 @@ static void use_friends(void)
     if (!g_set.friend_) return;
     if (g_set.fw && g_set.fh) { set_num(ID_SET_W, g_set.fw); set_num(ID_SET_H, g_set.fh); }
     if (g_set.ffov && g_set.have_fov) set_num(ID_SET_FOV, g_set.ffov);
-    if (g_set.ffps) set_num(ID_SET_FPS, g_set.ffps);
-    if (g_set.fwsfov && g_set.have_ws) set_ws(ID_SET_WS, g_set.fwsfov);
     if (g_set.fturn && g_set.turn) set_ws(ID_SET_TURN, g_set.fturn); /* the aim turn speed must match; sensitivity is each player's own */
     g_set_warn = false;
     set_text(ID_SET_NOTE, "Your friend's values are in the fields. Click Apply to save them.");
@@ -1283,6 +1265,11 @@ static void refresh_controls(void)
     ShowWindow(g_c[ID_ACTION], idle ? 0 : 5);
     EnableWindow(g_c[ID_ACTION], !g_closing && ((join && !s->lobby) || (host && g_nview[LIST_FRIENDS_ONLINE] > 0)));
     ShowWindow(g_c[ID_REFRESH], host ? 0 : 5);
+    { /* level with the top of the list, or under Join when Join shows */
+        static int ry = -1;
+        int y = idle ? 190 : 230;
+        if (y != ry) { move_ctl(ID_REFRESH, 452, y); ry = y; }
+    }
     EnableWindow(g_c[ID_REFRESH], !g_closing && (idle || (join && !s->lobby)));
     EnableWindow(g_c[ID_LAUNCH], !g_closing);
     EnableWindow(g_c[ID_GAMEMODE], idle && !g_closing);
@@ -1576,13 +1563,6 @@ static void on_command(int id, int code)
     case ID_TAB_SET: show_tab(TAB_SET); break;
     case ID_SET_APPLY: apply_clicked(); break;
     case ID_SET_FRIEND: use_friends(); break;
-    case ID_FOV43: case ID_FOV1610: case ID_FOV169:
-        set_text(ID_SET_FOV, id == ID_FOV43 ? "75" : id == ID_FOV1610 ? "85" : "91");
-        g_set_warn = false;
-        set_text(ID_SET_NOTE, id == ID_FOV43 ? "FOV 75 (4:3, the game's default). Click Apply. In co-op your friend needs the same FOV."
-                              : id == ID_FOV1610 ? "FOV 85 (16:10 screens). Click Apply. In co-op your friend needs the same FOV."
-                                                 : "FOV 91 (16:9 screens). Click Apply. In co-op your friend needs the same FOV.");
-        break;
     case ID_STATS: stats_toggle(); break;
     case ID_SET_FIX: /* co-op: the SCCT Fix; Versus: the Versus Fix */
         g_set_warn = false;
@@ -1605,7 +1585,7 @@ static void on_command(int id, int code)
         set_text(ID_SET_NOTE, "Working...");
         push_cmd(CMD_CHUD, g_set.chud == 1 ? 0 : 1);
         break;
-    case ID_SET_VHUD: g_vf_hud = !g_vf_hud; vf_switch_texts(); set_text(ID_SET_NOTE, "Click Apply to save."); break;
+    case ID_SET_VHUD: g_vf_full = !g_vf_full; vf_switch_texts(); set_text(ID_SET_NOTE, "Click Apply to save."); break;
     case ID_SET_VRATE: g_vf_rate = !g_vf_rate; vf_switch_texts(); set_text(ID_SET_NOTE, "Click Apply to save."); break;
     case ID_SET_RESET:
         if (MessageBoxW(g_wnd, g_shown.versus ? WTEXT("Put Versus back to the game's own settings?\n\nMouse sensitivity 10, multiplier 6; the Versus Fix: 60 FPS, mouse 125 Hz, HUD fix on, the game's FOV and turning, the game's resolution list.")
