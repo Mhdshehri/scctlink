@@ -2749,7 +2749,7 @@ static void vfix_(bool install)
         }
     }
     if (!file_exists(ini)) { UiSettings d; memset(&d, 0, sizeof d); vfix_read(&d); vfix_write(&d); }
-    set_say(st == 1 ? "Versus Fix: already installed." : "Versus Fix installed: no 30 FPS limit, smooth mouse, FOV, resolution, HUD. Settings below.");
+    set_say(st == 1 ? "Versus Fix: already installed." : "Versus Fix installed: no 30 FPS limit, smooth mouse, FOV, resolution, flashlight. Settings below.");
 }
 static void vfix(bool install)
 {

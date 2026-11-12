@@ -97,8 +97,9 @@ SCCT Fix (co-op and story):
 
 Versus Fix:
   * The 30 FPS limit, aim zigzag with fast mice, going back to 1600x1200,
-    stretched HUD, the mercenary's flashlight not lighting anything, and
-    one FOV and turn speed for everyone (now per class).
+    the mercenary's flashlight not lighting anything, and one FOV and turn
+    speed for everyone (now per class). Fullscreen off = a borderless window.
+    Not fixed yet: the HUD is still stretched on wide screens.
 
 
 TROUBLESHOOTING
@@ -121,6 +122,8 @@ The resolution or settings didn't change
 Co-op runs at about 34 FPS in a mission
   -> That's the game itself: its co-op moves both PCs forward in fixed
      steps, about 34 a second, so they stay together (on a real LAN too).
+Versus crashes, minimizes or flickers
+  -> Turn Fullscreen off in Settings (Versus) and click "Apply".
 "Different SCCTLink version"
   -> Everyone needs the same SCCTLink zip.
 Windows Firewall asks about Splinter Cell or SCCTLink

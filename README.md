@@ -52,11 +52,14 @@ Versus has its own problems on today's PCs, and the **Versus Fix**
 
 - the game is locked to 30 FPS: the limit is removed
 - aiming zigzags with fast mice: the mouse is sent the way Versus expects
-- the picture is stretched on wide screens, and the game keeps going back
-  to 1600x1200: your resolution is used, and the HUD keeps its shape
+- the game keeps going back to 1600x1200: your resolution is used
+- fullscreen problems (Alt+Tab, the Windows key): turn **Fullscreen** off
+  and Versus runs in a borderless window the size of the screen
 - the mercenary's flashlight doesn't light anything on today's graphics
   cards: it works again
 - FOV and turning speed can be set for spies and mercenaries separately
+
+Not fixed yet: Versus' HUD is still stretched on wide screens.
 
 You don't install anything. Unzip it and open `SCCTLink.exe`. Everyone
 playing needs it.
@@ -161,7 +164,8 @@ change anything here: it saves its own settings when it closes.
 
 **Versus**
 - **Display:** resolution (Versus starts at it), **Max FPS** (0 = no
-  limit) and **Widescreen HUD**.
+  limit) and **Fullscreen** (off = a borderless window the size of the
+  screen).
 - **Mouse:** **Mouse fix (125 Hz)** (for mice faster than 125 Hz),
   sensitivity and multiplier.
 - **Per class:** FOV and turn speed, for spies and mercenaries.
@@ -212,6 +216,9 @@ time a file is changed, the original is kept next to it as
   about 34 a second, so they stay together. It happens on a real LAN too.
   The menus still run at 60.
 
+**Versus crashes, minimizes or flickers**
+- Turn **Fullscreen** off in Settings (Versus) and click **Apply**.
+
 **"Different SCCTLink version"**
 - Everyone needs the same SCCTLink zip.
 
@@ -253,7 +260,9 @@ The widescreen HUD, FOV and raw mouse come from ThirteenAG's
   (125 reports a second).
 - **Keeps going back to 1600x1200:** each time Versus starts and closes,
   your resolution is set again in the game's files and profiles.
-- **Stretched HUD on wide screens:** the HUD keeps its shape.
+- **Fullscreen problems:** with **Fullscreen** off, Versus runs in a
+  borderless window the size of the screen, so Alt+Tab and the Windows key
+  don't drop it.
 - **Mercenary's flashlight doesn't light anything:** Versus is switched to
   its other way of drawing shadows, which works on today's graphics cards.
 - **One FOV and turn speed for everyone:** set them for spies and
