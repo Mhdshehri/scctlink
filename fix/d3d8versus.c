@@ -865,7 +865,7 @@ BOOL WINAPI DllEntry(HINSTANCE dll, DWORD reason, void *reserved)
     { /* testing: [Display] HudTest = bits 1 (A), 2 (B), 4 (C), applied before the game draws anything */
         int m = read_int("Display", "HudTest", 0);
         for (int k = 0; k < 3; k++) if (m & (1 << k)) hud_test(k, 1);
-        m = read_int("Display", "HudScale", 0);
+        m = read_int("Display", "HudGroups", 62);
         if (m) hud_scale_test(m);
     }
     if (t) CloseHandle(t);
