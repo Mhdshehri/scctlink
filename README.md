@@ -17,49 +17,17 @@ network: an extra program and account, your IP visible to the other side,
 and often lag or disconnects.
 
 SCCTLink does it through Steam instead. The host makes a normal LAN game,
-SCCTLink carries it to your friend through Valve's servers, and the game
+SCCTLink carries it to your friends through Valve's servers, and the game
 thinks you're on the same LAN. No VPN, nothing to set up on your router,
 and neither of you sees the other's IP.
 
-## Co-op (2 players)
-
-Chaos Theory's co-op is fragile: it runs the same game on both PCs and
-disconnects as soon as anything differs between them, like the frame
-rate, a game file, a mod or a setting. SCCTLink deals with that:
-
-- **The SCCT Fix**, installed with one click, holds both PCs at 60 FPS
-  only while you're in a co-op game through SCCTLink, so the game doesn't
-  drift apart. Outside co-op you choose in Settings: 60 FPS, your screen's
-  refresh rate, or **FPS unlock** (the game itself stops at 100 FPS). It
-  also fixes a few smaller things: the HUD isn't stretched on wide
-  screens, the game runs at your screen's resolution, the FOV can be
-  changed, and the mouse uses raw input.
-  (These improvements work in the single-player story too.)
-- **The Mods tab checks both PCs match**: the game files, mods and the
-  settings that co-op needs to be the same. If something is different, it
-  tells you what and on whose PC, so you can fix it before you play.
-
-## Versus (up to 4 players)
-
-SCCTLink is made for playing Versus with your friends, in a private game.
-
-If you want to play online with other people (public servers, a server
-list), use [Enhanced SCCT Versus](https://github.com/Joshhhuaaa/EnhancedSCCTVersus),
-which is made for that.
-
-Versus has its own problems on today's PCs, and the **Versus Fix**
-(one click in SCCTLink) fixes them:
-
-- the game is locked to 30 FPS: the limit is removed
-- aiming zigzags with fast mice: the mouse is sent the way Versus expects
-- the game keeps going back to 1600x1200: your resolution is used
-- fullscreen problems (Alt+Tab, the Windows key): turn **Fullscreen** off
-  and Versus runs in a borderless window the size of the screen
-- the mercenary's flashlight doesn't light anything on today's graphics
-  cards: it works again
-- FOV and turning speed can be set for spies and mercenaries separately
-
-Not fixed yet: Versus' HUD is still stretched on wide screens.
+- **Co-op (2 players):** the campaign. The **SCCT Fix** stops co-op
+  disconnecting, and the **Mods** tab checks that both PCs match.
+- **Versus (up to 4 players):** Spies vs. Mercenaries with your friends, in
+  a private game. The **Versus Fix** fixes Versus on today's PCs. To play
+  online with other people (public servers, a server list), use
+  [Enhanced SCCT Versus](https://github.com/Joshhhuaaa/EnhancedSCCTVersus),
+  which is made for that.
 
 You don't install anything. Unzip it and open `SCCTLink.exe`. Everyone
 playing needs it.
@@ -72,6 +40,13 @@ playing needs it.
 - Steam open and online
 - The other players on your Steam friends list
 - The same SCCTLink version as your friends
+- **A clean game:** no other mods, especially no other `d3d9.dll` or
+  `d3d8.dll` in the game folder (they clash with SCCTLink's fixes). Run
+  **Verify integrity of game files** in Steam first (right-click the game →
+  Properties → Installed Files).
+- **The game started once:** for co-op, start Splinter Cell once from Steam
+  and close it, so it makes its settings files. For Versus, start Versus
+  once, **make a profile**, and close it.
 
 ### Open SCCTLink
 
@@ -89,7 +64,7 @@ to switch. Everyone picks the same one.
 ### Co-op
 
 **First time (both players, once):**
-1. Start the game once from Steam and close it, so it makes its settings files.
+1. Start the game once from Steam and close it (see What you need).
 2. In SCCTLink, open the **Settings** tab and click **Install** in the
    SCCT Fix banner at the top.
 3. Start the game once more and close it. From then on it's ready.
@@ -119,6 +94,47 @@ to switch. Everyone picks the same one.
 
 **Friends:** click **Join a friend**, pick the host and click **Join**.
 When you're linked, click **Start Versus** and join the host from the LAN list.
+
+## The fixes
+
+Both are installed with one click in the **Settings** tab (**Install**) and
+taken out the same way (**Remove**).
+
+### SCCT Fix (co-op and story)
+
+- **Co-op disconnects:** Chaos Theory's co-op runs the same game on both
+  PCs and drifts apart when anything differs, like the frame rate. While
+  SCCTLink hosts or joins, the fix keeps both PCs at the same frame rate
+  (capped at 60). In missions the game's own co-op runs at about 34 FPS
+  (see Troubleshooting); the menus run at 60. The rest of the time you
+  choose: 60, your screen's refresh rate, or **FPS unlock** (the game
+  itself stops at 100).
+- **Stretched HUD on wide screens:** the HUD and menus keep their shape.
+- **Wrong resolution:** the game runs at the resolution you choose, or your
+  screen's, even with Windows display scaling.
+- **FOV can't be changed:** the game ignores its own FOV setting, so the
+  fix sets the camera's FOV. Wide screens also see more on the sides.
+- **Mouse acceleration:** raw mouse input, with any polling rate.
+- **Alt+Tab problems:** the game runs in a borderless window.
+
+These work in the single-player story too.
+
+### Versus Fix
+
+- **Locked to 30 FPS:** the limit is removed (Max FPS in Settings).
+- **Aim zigzags with fast mice:** the mouse is sent the way Versus expects
+  (125 reports a second).
+- **Keeps going back to 1600x1200:** each time Versus starts and closes,
+  your resolution is set again in the game's files and profiles.
+- **Fullscreen problems:** with **Fullscreen** off, Versus runs in a
+  borderless window the size of the screen, so Alt+Tab and the Windows key
+  don't drop it.
+- **Mercenary's flashlight doesn't light anything:** Versus is switched to
+  its other way of drawing shadows, which works on today's graphics cards.
+- **One FOV and turn speed for everyone:** set them for spies and
+  mercenaries separately.
+
+Not fixed yet: Versus' HUD is still stretched on wide screens.
 
 ## The tabs
 
@@ -235,40 +251,6 @@ time a file is changed, the original is kept next to it as
   fix. If the fix adds or changes game files, the **Mods** tab shows it as
   a difference.
 
-## What the fixes solve
-
-### SCCT Fix (co-op and story)
-
-- **Co-op disconnects:** the two PCs drifted apart when their frame rates
-  differed. While SCCTLink hosts or joins, the game is held at 60 FPS on
-  both PCs. The rest of the time you choose: 60, your screen's refresh
-  rate, or FPS unlock (the game itself stops at 100).
-- **Stretched HUD on wide screens:** the HUD and menus keep their shape.
-- **Wrong resolution:** the game runs at the resolution you choose, or your
-  screen's, even with Windows display scaling.
-- **FOV can't be changed:** the game ignores its own FOV setting, so the
-  fix sets the camera's FOV. Wide screens also see more on the sides.
-- **Mouse acceleration:** raw mouse input, with any polling rate.
-- **Alt+Tab problems:** the game runs in a borderless window.
-
-The widescreen HUD, FOV and raw mouse come from ThirteenAG's
-[FusionFix](https://github.com/ThirteenAG/WidescreenFixesPack) (MIT).
-
-### Versus Fix
-
-- **Locked to 30 FPS:** the limit is removed (Max FPS in Settings).
-- **Aim zigzags with fast mice:** the mouse is sent the way Versus expects
-  (125 reports a second).
-- **Keeps going back to 1600x1200:** each time Versus starts and closes,
-  your resolution is set again in the game's files and profiles.
-- **Fullscreen problems:** with **Fullscreen** off, Versus runs in a
-  borderless window the size of the screen, so Alt+Tab and the Windows key
-  don't drop it.
-- **Mercenary's flashlight doesn't light anything:** Versus is switched to
-  its other way of drawing shadows, which works on today's graphics cards.
-- **One FOV and turn speed for everyone:** set them for spies and
-  mercenaries separately.
-
 ## How it works
 
 ```
@@ -358,8 +340,9 @@ Mods check and the Settings tab.
 ## Credits
 
 By [Mhdshehri](https://github.com/Mhdshehri).
-- The widescreen HUD, camera FOV and raw mouse in the SCCT Fix are ported
-  from ThirteenAG's [FusionFix](https://github.com/ThirteenAG/WidescreenFixesPack)
+- The widescreen HUD, camera FOV, raw mouse, screen resolution and DPI
+  handling in the SCCT Fix, and the DPI handling in the Versus Fix, are
+  ported from ThirteenAG's [FusionFix](https://github.com/ThirteenAG/WidescreenFixesPack)
   (MIT, see `THIRD-PARTY.txt`).
 - The relay idea comes from the [Co-op Anything](https://github.com/cranebeaker/coop-anything)
   playbook (Steam Spacewar networking).

@@ -89,9 +89,10 @@ each friend. Drag it anywhere; right-click it to close.
 WHAT THE FIXES SOLVE
 --------------------
 SCCT Fix (co-op and story):
-  * Co-op disconnects: while SCCTLink hosts or joins, both PCs are held at
-    60 FPS. The rest of the time you choose: 60, your screen's refresh
-    rate, or FPS unlock (the game itself stops at 100).
+  * Co-op disconnects: while SCCTLink hosts or joins, both PCs are kept at
+    the same frame rate (capped at 60; in missions the game's own co-op
+    runs at about 34). The rest of the time you choose: 60, your screen's
+    refresh rate, or FPS unlock (the game itself stops at 100).
   * Stretched HUD on wide screens, wrong resolution, FOV that can't be
     changed, mouse acceleration, Alt+Tab problems (borderless window).
 
