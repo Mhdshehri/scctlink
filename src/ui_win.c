@@ -322,6 +322,7 @@ static HFONT g_font, g_bold, g_big, g_mid, g_icon, g_icon_big; /* g_mid: 14 px b
 #define IC_CHECK 0xE73E
 #define IC_KICK 0xE8F8  /* block contact */
 #define IC_SEARCH 0xE721
+#define IC_DELETE 0xE74D
 static int g_dpi = 96;
 static HANDLE g_thread;
 static bool g_closing;
@@ -866,7 +867,7 @@ static void draw_button(DrawItem *d)
              : d->id == ID_REFRESH ? IC_REFRESH : d->id == ID_COPYID || d->id == ID_COPYLOG ? IC_COPY
              : d->id == ID_JOINID ? IC_JOIN : d->id == ID_ACTION ? (host ? IC_KICK : IC_JOIN)
              : d->id == ID_JOIN ? (go_stop ? IC_STOP : g_role ? IC_JOIN : IC_PLAY)
-             : d->id == ID_RECHECK ? IC_REFRESH : d->id == ID_REPORT ? IC_INFO : d->id == ID_SET_FIX ? IC_DOWNLOAD : 0;
+             : d->id == ID_RECHECK ? IC_REFRESH : d->id == ID_REPORT ? IC_INFO : d->id == ID_SET_FIX ? (fix_ok() ? IC_DELETE : IC_DOWNLOAD) : 0;
     icon_text(d->dc, tr, ic, w, n, is_primary(d->id) || d->id == ID_JOIN ? g_bold : g_font, text);
 }
 
@@ -1429,7 +1430,7 @@ static void show_settings(const UiSettings *n)
     } else {
         set_text(ID_SET_BANNER, !n->found ? "The game's folder wasn't found" : n->scctfix == 1 ? "\xe2\x9c\x93 SCCT Fix installed"
                                 : n->scctfix == 3 ? "SCCT Fix: an older version is installed" : "SCCT Fix not installed - co-op needs it");
-        set_text(ID_SET_BANSUB, "60 FPS sync, borderless, widescreen HUD and raw mouse built in - no other widescreen mod needed");
+        set_text(ID_SET_BANSUB, "Co-op sync fix, 60 FPS co-op, borderless, widescreen HUD, raw mouse");
         set_text(ID_SET_FIX, n->scctfix == 1 ? "Remove" : n->scctfix == 3 ? "Update" : "Install");
     }
     static int last_fixst = -9;
