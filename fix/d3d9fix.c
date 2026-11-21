@@ -163,6 +163,56 @@ static void patch_import(const char *name, void *hook)
     }
 }
 
+#ifdef SCCT_DEV
+/* ---- Dev build only (DEV=1 sh fix/build_fix.sh): a second game on this PC ----
+   The game makes the mutex "SplinterCell3UnrealIsRunning" and quits if it is
+   already there. When the DLL starts and finds it, this is the second game:
+   its mutex gets another name and its log is SCCTFix-2.log. */
+IMP HANDLE WINAPI CreateMutexW(void *, BOOL, const unsigned short *);
+IMP HANDLE WINAPI OpenMutexW(DWORD, BOOL, const unsigned short *);
+IMP BOOL WINAPI CloseHandle(HANDLE);
+static const unsigned short g_mutex_name[] = { 'S','p','l','i','n','t','e','r','C','e','l','l','3','U','n','r','e','a','l',
+                                               'I','s','R','u','n','n','i','n','g',0 };
+static const unsigned short g_mutex2_name[] = { 'S','p','l','i','n','t','e','r','C','e','l','l','3','U','n','r','e','a','l',
+                                                'I','s','R','u','n','n','i','n','g','-','2',0 };
+static int g_second; /* 1: the second game */
+static int wsame(const unsigned short *a, const unsigned short *b)
+{
+    if (!a) return 0;
+    while (*a && *a == *b) a++, b++;
+    return *a == *b;
+}
+static HANDLE WINAPI hook_CreateMutexW(void *sa, BOOL own, const unsigned short *name)
+{
+    if (g_second && wsame(name, g_mutex_name)) name = g_mutex2_name;
+    return CreateMutexW(sa, own, name);
+}
+static void second_check(void)
+{
+    HANDLE m = OpenMutexW(0x00100000 /* SYNCHRONIZE */, 0, g_mutex_name);
+    if (m) { g_second = 1; CloseHandle(m); }
+}
+/* Like patch_import, for kernel32. */
+static void patch_import_k32(const char *name, void *hook)
+{
+    unsigned char *base = (unsigned char *)GetModuleHandleA(0);
+    DWORD rva = *(DWORD *)(base + *(LONG *)(base + 0x3c) + 0x80);
+    void *target = GetProcAddress(GetModuleHandleA("kernel32.dll"), name);
+    if (!rva || !target) return;
+    for (DWORD *desc = (DWORD *)(base + rva); desc[3]; desc += 5) {
+        void **iat = (void **)(base + desc[4]);
+        for (; *iat; iat++) {
+            if (*iat != target) continue;
+            DWORD old;
+            VirtualProtect(iat, 4, 4, &old);
+            *iat = hook;
+            VirtualProtect(iat, 4, old, &old);
+            log_write("Dev: patched import\r\n", 21);
+        }
+    }
+}
+#endif
+
 /* The game registers Alt+Tab as its own hotkey: say yes, but don't. */
 static BOOL WINAPI hook_RegisterHotKey(HWND w, int id, UINT mods, UINT vk)
 {
@@ -964,6 +1014,18 @@ static HRESULT WINAPI hook_Present(void *dev, const void *src, const void *dst, 
             if (g_fps) wsprintfA(b, "FPS measured: %lu.%lu (limit %d)\r\n", f10 / 10, f10 % 10, g_fps);
             else wsprintfA(b, "FPS measured: %lu.%lu (no limit)\r\n", f10 / 10, f10 % 10);
             if (g_logged < 512 * 1024) log_write(b, slen(b));
+#ifdef SCCT_DEV
+            { /* the lockstep engine's numbers (SyncEngine*, the game's global at 0x111f55a4) */
+                BYTE *se = *(BYTE **)0x111f55a4;
+                char d[200];
+                if (se) {
+                    wsprintfA(d, "  sync: step=%lu status=%lu hz=%lu prevhz=%lu maxhz=%lu p88=%lu lead=%lu adaptive=%u\r\n",
+                              *(DWORD *)(se + 0x5c), *(DWORD *)(se + 0x68), *(DWORD *)(se + 0x80), *(DWORD *)(se + 0x7c),
+                              *(DWORD *)(se + 0x84), *(DWORD *)(se + 0x88), *(DWORD *)(se + 0x94), (unsigned)se[0xa92]);
+                    if (g_logged < 512 * 1024) log_write(d, slen(d));
+                }
+            }
+#endif
             start = now;
             n = 0;
         }
@@ -1027,6 +1089,104 @@ __declspec(dllexport) void *WINAPI Direct3DCreate9(UINT sdk)
     return d3d;
 }
 
+/* ---- Co-op sync fix (SCCTFix.ini [Coop] SyncFix, on unless 0) ----
+   Co-op runs the same simulation on both PCs and compares checksums of it; a
+   mismatch ends the session. Some of the game's drawing code changes that
+   simulation, and what each PC draws depends on its own camera and frame rate,
+   so the two drift apart. Each place is for the Steam splintercell3.exe and is
+   checked byte for byte first; if one doesn't match, nothing is changed.
+     - Flickering lights, eye movement and sensor jitter are drawn with the
+       synced random numbers: they use the unsynced ones instead.
+     - Bones of characters that aren't on screen were left a frame behind:
+       they are always worked out.
+     - Bones were stepped twice in a frame on a PC that drew them.
+     - AI that wasn't drawn lately skipped its tick, ran 1.75x faster, or
+       scored targets differently: all as if not drawn, on both PCs.
+     - The camera moves the player's controller while drawing: it is left
+       out of the checksum (the pawn itself stays in).
+   [Coop] StepHz (test): simulation steps a second, and so frames in a co-op
+   mission. The game starts at 30 and lets each PC go up to what it keeps up
+   with, at most 35; the slower PC's number is used (about 34). StepHz raises
+   both the start and the most to it. Both PCs should use the same value. */
+struct Patch { DWORD at; BYTE len; BYTE was[2]; BYTE now[2]; };
+static const struct Patch sync_patches[] = {
+    { 0x109d243c, 2, { 0x74, 0x26 }, { 0x90, 0x90 } }, /* GetBoneMatrix: work out a stale frame */
+    { 0x109d24e0, 2, { 0x74, 0x26 }, { 0x90, 0x90 } }, /* GetBoneLocation */
+    { 0x109d25a6, 2, { 0x74, 0x26 }, { 0x90, 0x90 } }, /* GetBoneCoords */
+    { 0x109e1ac1, 2, { 0x74, 0x26 }, { 0x90, 0x90 } }, /* GetAttachmentCoords */
+    { 0x109f5309, 2, { 0x74, 0x36 }, { 0xeb, 0x36 } }, /* GetFrame: "drawn this frame" stays 0 (no second step) */
+    { 0x10c1852c, 2, { 0x80, 0x7e }, { 0xeb, 0x65 } }, /* AI pawn: never skip the tick for not being drawn (return 0) */
+    { 0x10b9a66d, 2, { 0x7a, 0x06 }, { 0xeb, 0x06 } }, /* PawnWasRenderedRecently: always 0 */
+    { 0x10bb53d0, 2, { 0x75, 0x1c }, { 0xeb, 0x1c } }, /* no 1.75x speed off screen */
+    { 0x10b8a51f, 2, { 0x74, 0x27 }, { 0xeb, 0x27 } }, /* checksum: leave out the controller (moved by the camera) */
+};
+#define RAND_SYNC 0x10ccac00   /* appRand */
+#define RAND_LOCAL 0x10ccac20  /* appUnsyncedRand */
+#define FRAND_SYNC 0x10ccac40  /* appFrand */
+#define FRAND_LOCAL 0x10ccac70 /* appUnsyncedFrand */
+struct Call { DWORD at, was, now; };
+static const struct Call sync_calls[] = {
+    { 0x10ac04c1, FRAND_SYNC, FRAND_LOCAL }, /* light flicker */
+    { 0x10b86392, FRAND_SYNC, FRAND_LOCAL }, /* eyes */
+    { 0x10b863c7, RAND_SYNC, RAND_LOCAL },
+    { 0x10b863e8, RAND_SYNC, RAND_LOCAL },
+    { 0x10b86409, FRAND_SYNC, FRAND_LOCAL },
+    { 0x10c56f13, FRAND_SYNC, FRAND_LOCAL }, /* sensor look jitter */
+    { 0x10c56f28, FRAND_SYNC, FRAND_LOCAL },
+    { 0x10c56f3d, FRAND_SYNC, FRAND_LOCAL },
+};
+#define STEP_MAX_AT 0x1095f1b4 /* push 35; call (the most steps a second) */
+#define STEP_AT 0x1095f1c1     /* push 30; call (steps a second at the start) */
+
+static int call_to(DWORD at, DWORD to)
+{
+    const BYTE *b = (const BYTE *)at;
+    DWORD rel;
+    memcpy(&rel, b + 1, 4);
+    return b[0] == 0xe8 && at + 5 + rel == to;
+}
+
+static void sync_fix(void)
+{
+    char b[96];
+    unsigned i;
+    if (GetPrivateProfileIntA("Coop", "SyncFix", 1, g_ini)) {
+        for (i = 0; i < sizeof sync_patches / sizeof *sync_patches; i++) {
+            const BYTE *p = (const BYTE *)sync_patches[i].at;
+            if (p[0] != sync_patches[i].was[0] || p[1] != sync_patches[i].was[1]) break;
+        }
+        unsigned j;
+        for (j = 0; j < sizeof sync_calls / sizeof *sync_calls; j++)
+            if (!call_to(sync_calls[j].at, sync_calls[j].was)) break;
+        if (i < sizeof sync_patches / sizeof *sync_patches || j < sizeof sync_calls / sizeof *sync_calls) {
+            wsprintfA(b, "Sync fix: not this game's code (at 0x%08lX), left off\r\n",
+                      i < sizeof sync_patches / sizeof *sync_patches ? sync_patches[i].at : sync_calls[j].at);
+            log_write(b, slen(b));
+        } else {
+            for (i = 0; i < sizeof sync_patches / sizeof *sync_patches; i++)
+                code_write((void *)sync_patches[i].at, sync_patches[i].now, sync_patches[i].len);
+            for (j = 0; j < sizeof sync_calls / sizeof *sync_calls; j++) {
+                DWORD rel = sync_calls[j].now - (sync_calls[j].at + 5);
+                code_write((void *)(sync_calls[j].at + 1), &rel, 4);
+            }
+            log_write("Sync fix: on\r\n", 14);
+        }
+    }
+    int hz = GetPrivateProfileIntA("Coop", "StepHz", 0, g_ini);
+    if (!hz) return;
+    const BYTE *s = (const BYTE *)STEP_AT, *m = (const BYTE *)STEP_MAX_AT;
+    if (hz < 30 || hz > 100 || s[0] != 0x6a || s[1] != 0x1e || m[0] != 0x6a || m[1] != 0x23) {
+        wsprintfA(b, "Co-op steps: %d a second not used (30 to 100, or not this game's code)\r\n", hz);
+        log_write(b, slen(b));
+        return;
+    }
+    BYTE v = (BYTE)hz;
+    code_write((void *)(STEP_AT + 1), &v, 1);
+    code_write((void *)(STEP_MAX_AT + 1), &v, 1);
+    wsprintfA(b, "Co-op steps: %d a second (game's: 30, at most 35)\r\n", hz);
+    log_write(b, slen(b));
+}
+
 static LONG WINAPI on_crash(EXCEPTION_POINTERS *e)
 {
     char b[120];
@@ -1049,9 +1209,17 @@ BOOL WINAPI DllEntry(HINSTANCE dll, DWORD reason, void *reserved)
     memcpy(path + n, "SCCTFix.log", 12);
     memcpy(g_coop_file, path, n);
     memcpy(g_coop_file + n, "SCCTLink.coop", 14);
+#ifdef SCCT_DEV
+    second_check();
+    if (g_second) memcpy(path + n, "SCCTFix-2.log", 14);
+#endif
     g_log = CreateFileA(path, 0x40000000 /* GENERIC_WRITE */, 1 /* FILE_SHARE_READ */, 0, 2 /* CREATE_ALWAYS */,
                         0x80000000 /* FILE_FLAG_WRITE_THROUGH */, 0);
     log_write("SCCT Fix loaded\r\n", 17);
+#ifdef SCCT_DEV
+    log_write(g_second ? "Dev build: second game\r\n" : "Dev build: first game\r\n", g_second ? 24 : 23);
+    patch_import_k32("CreateMutexW", (void *)hook_CreateMutexW);
+#endif
     QueryPerformanceFrequency(&g_freq);
     g_frame = (DWORD)g_freq / 60;
     g_spin = (DWORD)g_freq / 500;
@@ -1059,6 +1227,7 @@ BOOL WINAPI DllEntry(HINSTANCE dll, DWORD reason, void *reserved)
     SetUnhandledExceptionFilter((void *)on_crash);
     patch_import("RegisterHotKey", (void *)hook_RegisterHotKey);
     patch_import("ShowWindow", (void *)hook_ShowWindow);
+    sync_fix();
     dpi_aware();
     screen_res(); /* before the game sets up its screen */
     return 1;
