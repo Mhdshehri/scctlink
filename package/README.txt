@@ -1,4 +1,4 @@
-SCCTLink 1.0 - Splinter Cell: Chaos Theory online with your Steam friends
+SCCTLink 1.5 - Splinter Cell: Chaos Theory online with your Steam friends
 =============================================================================
 
 SCCTLink lets you play Chaos Theory's co-op campaign (2 players) and
@@ -16,7 +16,7 @@ WHAT YOU NEED
   * Splinter Cell: Chaos Theory on Steam
   * Steam open and online
   * The other players on your Steam friends list
-  * The same SCCTLink version as your friends (1.0)
+  * The same SCCTLink version as your friends (1.5)
 
 Keep the files in this folder together. Open SCCTLink.exe. Windows asks for
 administrator rights: SCCTLink changes the game's settings files, which are
@@ -24,26 +24,29 @@ inside Program Files. If Windows says "Windows protected your PC", click
 "More info", then "Run anyway" (SCCTLink is new and not signed with a paid
 certificate).
 
-The button next to "Join a friend" says Co-op or Versus. Click it to
-switch. Everyone picks the same one.
+The pages are on the left: Play, Mods, Settings, Log, How to. On Play,
+pick Co-op or Versus at the top. Everyone picks the same one.
 
 
 CO-OP
 -----
 First time (both players, once):
   1. Start the game once from Steam and close it.
-  2. In SCCTLink, open the Settings tab and click "Install" in the
-     SCCT Fix banner at the top.
+  2. In SCCTLink, click "Install SCCT Fix" on Play (or "Install" on the
+     Settings page).
   3. Start the game once more and close it. From then on it's ready.
 
 Host:
-  1. Click "Host a game".
+  1. On Play, pick "Host a game" and click "Host".
+     For 60 FPS in missions, turn on "60 FPS when you host" in Settings
+     first (your friend's game follows yours).
   2. Click "Start Splinter Cell", then in the game:
      Co-op -> LAN -> Create game.
   3. Leave SCCTLink open while you play.
 
 Friend:
-  1. Click "Join a friend", pick the host and click "Join".
+  1. On Play, pick "Join a friend" and click "Join". Then pick the host in
+     the list and click "Join".
      Not in the list? Click "Refresh", or paste the host's lobby code
      (like 1MCE-2B2) and click "Join this code".
   2. When SCCTLink says you're linked, click "Start Splinter Cell", then
@@ -59,39 +62,52 @@ Versus: github.com/Joshhhuaaa/EnhancedSCCTVersus
 
 First time (everyone, once):
   1. Start Versus once, make a profile, and close the game.
-  2. In SCCTLink, switch the button to Versus, open the Settings tab and
-     click "Install" in the Versus Fix banner.
+  2. In SCCTLink, pick Versus at the top of Play and click
+     "Install Versus Fix" (or "Install" on the Settings page).
 
-Host:    click "Host a game", then "Start Versus" and create a LAN game.
-Friends: click "Join a friend", pick the host and click "Join". When
-         you're linked, click "Start Versus" and join from the LAN list.
+Host:    pick "Host a game", click "Host", then "Start Versus" and create
+         a LAN game.
+Friends: pick "Join a friend", click "Join", pick the host and click
+         "Join". When you're linked, click "Start Versus" and join from the
+         LAN list.
 
 
-THE TABS
---------
-How to    Your steps, ticked off as they happen ([x] done, [>] do this now).
-Log       Everything SCCTLink did. "Copy log" copies it; "Report" opens a
-          problem report on GitHub and the folder with scctlink.log.
-          Reports are public. The log has no IP addresses, but it has your
-          Steam friends' names.
+THE PAGES
+---------
+Play      Co-op or Versus, the status (red while the fix is missing, with
+          an Install button), Host or Join and the button that starts it
+          (Stop while running), friends hosting, the lobby code, and
+          "Start Splinter Cell".
 Mods      Compares your game with your friend's. Green when all party
           members match; every difference in red. "Check again" after you
           change something.
 Settings  The fix for this mode (Install / Update / Remove), then the
-          display and mouse settings. Close the game before you click
-          "Apply". The first time a file is changed, the original is kept
-          next to it as <name>.scctlink-backup.
+          display, co-op and mouse settings. Close the game before you
+          click "Apply". The first time a file is changed, the original is
+          kept next to it as <name>.scctlink-backup.
+Log       Everything SCCTLink did. "Copy log" copies it; "Report" opens a
+          problem report on GitHub and the folder with scctlink.log.
+          Reports are public. The log has no IP addresses, but it has your
+          Steam friends' names.
+How to    Your steps, ticked off as they happen ([x] done, [>] do this now).
 
 Live stats: text on top of the game with the ping and packet loss for
 each friend. Drag it anywhere; right-click it to close.
+Light / Dark theme: at the bottom of the left side.
 
 
 WHAT THE FIXES SOLVE
 --------------------
 SCCT Fix (co-op and story):
-  * Co-op disconnects: while SCCTLink hosts or joins, both PCs are held at
-    60 FPS. The rest of the time you choose: 60, your screen's refresh
-    rate, or FPS unlock (the game itself stops at 100).
+  * Co-op disconnects: the game's drawing changed the co-op simulation
+    (what each PC draws depends on its camera and frame rate), so the two
+    PCs drifted apart. The fix stops that. Different frame rates no longer
+    disconnect: both PCs run at the slower one's pace.
+  * Co-op at 60 FPS: in missions the game's co-op runs at about 34 FPS.
+    With "60 FPS when you host" (Settings, Co-op) it runs at about 60, at
+    normal game speed. The host picks it; the friend's game follows.
+  * Single player: 60, your screen's refresh rate, or FPS unlock (the
+    game itself stops at 100).
   * Stretched HUD on wide screens, wrong resolution, FOV that can't be
     changed, mouse acceleration, Alt+Tab problems (borderless window).
 
@@ -112,7 +128,7 @@ The host's game isn't in the LAN list
   2. The friend restarts the game while SCCTLink stays linked.
   3. Still nothing? Both click "Report" and attach scctlink.log.
 Co-op disconnects
-  -> The SCCT Fix on both PCs, and the Mods tab must say all party
+  -> The SCCT Fix on both PCs, and the Mods page must say all party
      members match. Playing over LAN without SCCTLink? Set the
      single-player frame rate to 60 FPS on both PCs.
 The resolution or settings didn't change
@@ -120,8 +136,9 @@ The resolution or settings didn't change
      closes). Co-op, first install: start the game once more. Versus:
      make a profile first.
 Co-op runs at about 34 FPS in a mission
-  -> That's the game itself: its co-op moves both PCs forward in fixed
-     steps, about 34 a second, so they stay together (on a real LAN too).
+  -> That's the game's own co-op: it moves both PCs forward in fixed steps,
+     about 34 a second. The host can turn on "60 FPS when you host" in
+     Settings (Co-op) before hosting. Both need SCCTLink 1.5.
 Versus crashes, minimizes or flickers
   -> Turn Fullscreen off in Settings (Versus) and click "Apply".
 "Different SCCTLink version"

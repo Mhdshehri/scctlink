@@ -91,6 +91,11 @@ IMP HWND WINAPI GetForegroundWindow(void);
 IMP BOOL WINAPI MessageBeep(UINT type);
 IMP void *WINAPI LoadLibraryExA(const char *path, void *file, DWORD flags);
 IMP void *WINAPI GetProcAddress(void *mod, const char *name);
+typedef struct { long x, y; } POINT;
+IMP BOOL WINAPI GetCursorPos(POINT *p);
+IMP BOOL WINAPI ScreenToClient(HWND w, POINT *p);
+IMP HANDLE WINAPI LoadImageW(HINSTANCE i, const WCHAR *name, UINT type, int cx, int cy, UINT flags);
+IMP BOOL WINAPI DrawIconEx(HDC dc, int x, int y, HICON icon, int cx, int cy, UINT step, HBRUSH flicker, UINT flags);
 
 #define WM_DESTROY 0x2
 #define WM_CLOSE 0x10
@@ -167,7 +172,10 @@ enum {
     ID_SET_VTURNM, ID_SL_VSPY1, ID_SL_VMERC1, ID_SL_VSPY2, ID_SL_VMERC2, ID_SF_VFOV, ID_SET_CHUD, ID_SET_INTRO,
     /* the Settings tab's banner, section titles and notes */
     ID_SET_BANNER, ID_SET_BANSUB, ID_SEC_DISP, ID_SEC_MOUSE, ID_SEC_CLASS, ID_SET_RAWNOTE, ID_SET_SPNOTE, ID_SET_VRATENOTE, ID_SET_SPFPS,
-    ID_SET_APPLY, ID_STATS,
+    ID_SET_COOP60, ID_SET_APPLY, ID_STATS,
+    ID_NAV_PLAY, /* the sidebar's "Play" (the other pages use the ID_TAB_* buttons) */
+    ID_PLAYFIX,  /* Play: the fix's state; a button to install it when it's missing */
+    ID_STATUS2,  /* Play: the status' second line (what to do) */
     ID_GAMEMODE, /* keep last */
 };
 
@@ -291,7 +299,30 @@ bool ui_poll(Cmd *c)
 /* ---------- window ---------- */
 
 static HWND g_wnd, g_c[ID_GAMEMODE + 1];
-static HFONT g_font, g_bold, g_big;
+static HFONT g_font, g_bold, g_big, g_mid, g_icon, g_icon_big; /* g_mid: 14 px bold; g_icon*: Segoe MDL2 Assets (Windows 10 and 11) */
+
+/* Icons: Segoe MDL2 Assets glyphs */
+#define IC_HOME 0xE80F
+#define IC_PUZZLE 0xEA86
+#define IC_SETTINGS 0xE713
+#define IC_LIST 0xE8FD
+#define IC_HELP 0xE897
+#define IC_MOON 0xE708
+#define IC_SUN 0xE706
+#define IC_PLAY 0xE768
+#define IC_COPY 0xE8C8
+#define IC_REFRESH 0xE72C
+#define IC_PERSON 0xE77B
+#define IC_STATS 0xE9D9
+#define IC_HOST 0xE704  /* a broadcast-like mark */
+#define IC_JOIN 0xE8FA  /* add friend */
+#define IC_STOP 0xE71A
+#define IC_INFO 0xE946
+#define IC_DOWNLOAD 0xE896
+#define IC_CHECK 0xE73E
+#define IC_KICK 0xE8F8  /* block contact */
+#define IC_SEARCH 0xE721
+#define IC_DELETE 0xE74D
 static int g_dpi = 96;
 static HANDLE g_thread;
 static bool g_closing;
@@ -299,8 +330,8 @@ static u64 g_close_ms;
 static UiPerson g_view[2][64]; /* what the list box shows (GUI thread copy) */
 static int g_nview[2];
 static int g_list_shown = -1;
-enum { TAB_HOWTO, TAB_LOG, TAB_MODS, TAB_SET };
-static int g_tab;          /* what the box shows: "How to", the log or the mods checklist */
+enum { TAB_HOWTO, TAB_LOG, TAB_MODS, TAB_SET, TAB_PLAY };
+static int g_tab = TAB_PLAY; /* the page shown (picked in the sidebar) */
 static bool g_log_unseen;  /* a warning arrived while "How to" was shown: red dot on Log */
 static bool g_mods_unseen; /* the game files differ: dot on "Mods" */
 static UiSettings g_set;   /* what the Settings tab shows */
@@ -313,18 +344,28 @@ static int S_(int v) { return v * g_dpi / 96; }
 typedef struct {
     bool dark;
     DWORD bg, panel, text, dim, accent, accent_down, btn, btn_down, border, dis_bg, dis_text, status, sel_text;
+    DWORD side, navsel, field; /* the sidebar, its picked page, text boxes and lists */
 } Theme;
 
-/* CoFLink's colors with green in place of red (same as the SCCTLink icon). */
+/* Green like the SCCTLink icon. The page, cards on it (panel), a darker sidebar. */
 static const Theme DARK = { true,
-    RGBC(18, 18, 20), RGBC(28, 29, 33), RGBC(232, 230, 227), RGBC(139, 142, 150),
-    RGBC(22, 138, 52), RGBC(14, 102, 38), RGBC(40, 42, 47), RGBC(30, 31, 35), RGBC(62, 65, 72),
-    RGBC(26, 27, 31), RGBC(85, 88, 96), RGBC(87, 214, 120), RGBC(255, 255, 255) };
-/* light: soft gray page, white boxes and buttons with thin gray outlines */
+    RGBC(22, 23, 26), RGBC(31, 32, 36), RGBC(232, 230, 227), RGBC(139, 142, 150),
+    RGBC(22, 138, 52), RGBC(14, 102, 38), RGBC(42, 44, 49), RGBC(34, 35, 40), RGBC(50, 52, 58),
+    RGBC(36, 37, 41), RGBC(92, 95, 103), RGBC(87, 214, 120), RGBC(255, 255, 255),
+    RGBC(16, 17, 19), RGBC(38, 40, 45), RGBC(24, 25, 28) };
+/* light: soft gray page, white cards with thin gray outlines */
 static const Theme LIGHT = { false,
     RGBC(244, 245, 247), RGBC(255, 255, 255), RGBC(28, 30, 34), RGBC(106, 112, 122),
-    RGBC(30, 128, 56), RGBC(20, 98, 42), RGBC(255, 255, 255), RGBC(234, 236, 240), RGBC(208, 212, 219),
-    RGBC(236, 238, 241), RGBC(166, 171, 180), RGBC(30, 128, 56), RGBC(255, 255, 255) };
+    RGBC(30, 128, 56), RGBC(20, 98, 42), RGBC(255, 255, 255), RGBC(234, 236, 240), RGBC(220, 223, 228),
+    RGBC(238, 240, 243), RGBC(166, 171, 180), RGBC(30, 128, 56), RGBC(255, 255, 255),
+    RGBC(233, 235, 239), RGBC(255, 255, 255), RGBC(248, 249, 251) };
+
+/* The window (96 dpi units): the sidebar on the left, the page on the right. */
+#define SIDE_W 168
+#define CX 188  /* the page's left edge */
+#define CW 552  /* its width */
+#define WIN_W 760
+#define WIN_H 504
 
 static Theme T;
 /* text boxes and the list sit inside rounded frames drawn in the theme's
@@ -332,22 +373,105 @@ static Theme T;
 typedef struct { int id, x, y, w, h, tab; } Frame; /* tab: drawn only on that tab (-1: always) */
 static Frame g_frames[24];
 static int g_nframes;
-static HBRUSH g_br_bg, g_br_panel, g_br_accent, g_br_border;
+static HBRUSH g_br_bg, g_br_panel, g_br_accent, g_br_border, g_br_side, g_br_field;
 
 static void draw_frames(HDC dc)
 {
-    HBRUSH b = CreateSolidBrush(T.panel);
     HANDLE p = CreatePen(0, 1, T.border);
-    HANDLE ob = SelectObject(dc, b), op = SelectObject(dc, p);
+    HANDLE ob = SelectObject(dc, g_br_field), op = SelectObject(dc, p);
     for (int i = 0; i < g_nframes; i++) {
         Frame *f = &g_frames[i];
-        if (f->tab >= 0 && (f->tab != g_tab || !IsWindowVisible(g_c[f->id]))) continue;
+        if (!IsWindowVisible(g_c[f->id])) continue;
         RoundRect(dc, S_(f->x), S_(f->y), S_(f->x + f->w), S_(f->y + f->h), S_(8), S_(8));
     }
     SelectObject(dc, ob);
     SelectObject(dc, op);
+    DeleteObject(p);
+}
+
+/* A rounded box in fill with an edge (96 dpi units). */
+static void rbox(HDC dc, int x, int y, int w, int h, int r, DWORD fill, DWORD edge)
+{
+    HBRUSH b = CreateSolidBrush(fill);
+    HANDLE p = CreatePen(0, 1, edge);
+    HANDLE ob = SelectObject(dc, b), op = SelectObject(dc, p);
+    RoundRect(dc, S_(x), S_(y), S_(x + w), S_(y + h), S_(r), S_(r));
+    SelectObject(dc, ob);
+    SelectObject(dc, op);
     DeleteObject(b);
     DeleteObject(p);
+}
+/* an icon (one glyph) centred in r, device pixels */
+static void glyph(HDC dc, WCHAR g, RECT r, HFONT f, DWORD color)
+{
+    WCHAR t[2] = { g, 0 };
+    HANDLE of = SelectObject(dc, f);
+    SetBkMode(dc, TRANSPARENT_BK);
+    SetTextColor(dc, color);
+    DrawTextW(dc, t, 1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    SelectObject(dc, of);
+}
+/* a button's face: an icon and its text, centred together (icon 0: text only) */
+#define DT_CALCRECT 0x400
+static void icon_text(HDC dc, RECT r, WCHAR ic, const WCHAR *t, int n, HFONT f, DWORD color)
+{
+    HANDLE of = SelectObject(dc, f);
+    SetBkMode(dc, TRANSPARENT_BK);
+    SetTextColor(dc, color);
+    RECT m = { 0, 0, 2000, 100 };
+    DrawTextW(dc, t, n, &m, DT_SINGLELINE | DT_CALCRECT);
+    int iw = ic ? S_(16) + S_(8) : 0, tw = m.right - m.left, room = r.right - r.left - S_(12);
+    if (iw + tw > room) tw = room - iw;
+    int x = (r.left + r.right - iw - tw) / 2;
+    if (ic) { RECT ir = { x, r.top, x + S_(16), r.bottom }; glyph(dc, ic, ir, g_icon, color); }
+    SelectObject(dc, f);
+    SetTextColor(dc, color);
+    RECT tr = { x + iw, r.top, x + iw + tw, r.bottom };
+    DrawTextW(dc, t, n, &tr, DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    SelectObject(dc, of);
+}
+/* a card on the page */
+static void card(HDC dc, int x, int y, int w, int h) { rbox(dc, x, y, w, h, 14, T.panel, T.border); }
+/* a ring (circle outline) of pen width k, centre cx, cy, radius r (device pixels) */
+static void ring(HDC dc, int cx, int cy, int r, int k, DWORD color)
+{
+    HANDLE p = CreatePen(0, k, color);
+    HANDLE ob = SelectObject(dc, GetStockObject(NULL_BRUSH)), op = SelectObject(dc, p);
+    RoundRect(dc, cx - r, cy - r, cx + r, cy + r, 2 * r, 2 * r);
+    SelectObject(dc, ob);
+    SelectObject(dc, op);
+    DeleteObject(p);
+}
+/* text at x, y, w, h (96 dpi units) */
+static void label(HDC dc, const WCHAR *t, int x, int y, int w, int h, HFONT f, DWORD color, UINT fmt)
+{
+    HANDLE of = SelectObject(dc, f);
+    SetBkMode(dc, TRANSPARENT_BK);
+    SetTextColor(dc, color);
+    RECT r = { S_(x), S_(y), S_(x + w), S_(y + h) };
+    DrawTextW(dc, t, -1, &r, fmt | DT_SINGLELINE | DT_END_ELLIPSIS);
+    SelectObject(dc, of);
+}
+/* The SCCTLink mark: the program's own icon (res/scctlink.ico has 16 to 256 px,
+   so Windows picks a sharp one for the screen's scale); drawn by hand only if
+   that fails. */
+static void draw_logo(HDC dc, int x, int y, int size)
+{
+    static HICON ic; /* loaded once: the size never changes while SCCTLink runs */
+    int px = S_(size);
+    if (!ic) ic = (HICON)LoadImageW(GetModuleHandleW(0), (const WCHAR *)(uintptr_t)1, 1 /* IMAGE_ICON */, px, px, 0);
+    if (ic && DrawIconEx(dc, S_(x), S_(y), ic, px, px, 0, 0, 3 /* DI_NORMAL */)) return;
+    HBRUSH b = CreateSolidBrush(RGBC(26, 26, 30));
+    HANDLE p = CreatePen(0, S_(2) > 1 ? S_(2) : 1, RGBC(31, 157, 58));
+    HANDLE ob = SelectObject(dc, b), op = SelectObject(dc, p);
+    RoundRect(dc, S_(x), S_(y), S_(x + size), S_(y + size), S_(size / 3), S_(size / 3));
+    SelectObject(dc, ob);
+    SelectObject(dc, op);
+    DeleteObject(b);
+    DeleteObject(p);
+    int r = S_(size) * 17 / 100, k = S_(size) / 12 > 1 ? S_(size) / 12 : 2, cy = S_(y) + S_(size) / 2;
+    ring(dc, S_(x) + S_(size) * 39 / 100, cy, r, k, RGBC(51, 216, 90));
+    ring(dc, S_(x) + S_(size) * 62 / 100, cy, r, k, RGBC(236, 236, 236));
 }
 
 static bool fix_ok(void);
@@ -419,72 +543,251 @@ static bool saved_light(void)
 static void set_theme(bool dark)
 {
     T = dark ? DARK : LIGHT;
-    if (g_br_bg) { DeleteObject(g_br_bg); DeleteObject(g_br_panel); DeleteObject(g_br_accent); DeleteObject(g_br_border); }
+    if (g_br_bg) {
+        DeleteObject(g_br_bg); DeleteObject(g_br_panel); DeleteObject(g_br_accent); DeleteObject(g_br_border);
+        DeleteObject(g_br_side); DeleteObject(g_br_field);
+    }
+    g_br_side = CreateSolidBrush(T.side);
+    g_br_field = CreateSolidBrush(T.field);
     g_br_border = CreateSolidBrush(T.border);
     g_br_bg = CreateSolidBrush(T.bg);
     g_br_panel = CreateSolidBrush(T.panel);
     g_br_accent = CreateSolidBrush(T.accent);
     if (g_wnd) {
-        SetWindowTextW(g_c[ID_THEME], T.dark ? WTEXT("Light mode") : WTEXT("Dark mode"));
+        SetWindowTextW(g_c[ID_THEME], T.dark ? WTEXT("Light theme") : WTEXT("Dark theme"));
         apply_system_parts();
         RedrawWindow(g_wnd, 0, 0, 0x1 | 0x4 | 0x80 | 0x400); /* invalidate, erase, children, frame */
     }
 }
 
-static bool is_primary(UINT id) { return id == ID_HOST || id == ID_JOIN || id == ID_ACTION || id == ID_SET_APPLY; }
-static bool is_tab(UINT id) { return id == ID_TAB_HOWTO || id == ID_TAB_LOG || id == ID_TAB_MODS || id == ID_TAB_SET; }
-static int tab_of(UINT id) { return id == ID_TAB_LOG ? TAB_LOG : id == ID_TAB_MODS ? TAB_MODS : id == ID_TAB_SET ? TAB_SET : TAB_HOWTO; }
+static bool is_primary(UINT id) { return id == ID_ACTION || id == ID_LAUNCH || id == ID_SET_APPLY; }
+static bool is_tab(UINT id)
+{
+    return id == ID_NAV_PLAY || id == ID_TAB_HOWTO || id == ID_TAB_LOG || id == ID_TAB_MODS || id == ID_TAB_SET || id == ID_THEME;
+}
+static int tab_of(UINT id)
+{
+    return id == ID_NAV_PLAY ? TAB_PLAY : id == ID_TAB_LOG ? TAB_LOG : id == ID_TAB_MODS ? TAB_MODS : id == ID_TAB_SET ? TAB_SET
+         : id == ID_TAB_HOWTO ? TAB_HOWTO : -1;
+}
+static DWORD red_text(void) { return T.dark ? RGBC(240, 98, 98) : RGBC(196, 40, 40); }
 
-/* "How to" / "Log": the chosen one looks like a raised tab with a green line under it */
+/* The sidebar's pages: the picked one on a lighter pill with a green bar on its left. */
 static void draw_tab(DrawItem *d)
 {
     bool on = tab_of(d->id) == g_tab;
-    FillRect(d->dc, &d->rc, g_br_bg);
+    FillRect(d->dc, &d->rc, g_br_side);
     if (on) {
-        HBRUSH b = CreateSolidBrush(T.btn);
-        HANDLE p = CreatePen(0, 1, T.border);
+        HBRUSH b = CreateSolidBrush(T.navsel);
+        HANDLE p = CreatePen(0, 1, T.dark ? T.navsel : T.border);
         HANDLE ob = SelectObject(d->dc, b), op = SelectObject(d->dc, p);
-        RoundRect(d->dc, d->rc.left, d->rc.top, d->rc.right, d->rc.bottom, S_(8), S_(8));
+        RoundRect(d->dc, d->rc.left, d->rc.top, d->rc.right, d->rc.bottom, S_(10), S_(10));
         SelectObject(d->dc, ob);
         SelectObject(d->dc, op);
         DeleteObject(b);
         DeleteObject(p);
-        RECT u = { d->rc.left + S_(10), d->rc.bottom - S_(3), d->rc.right - S_(10), d->rc.bottom - S_(1) };
+        RECT u = { d->rc.left + S_(6), d->rc.top + S_(9), d->rc.left + S_(9), d->rc.bottom - S_(9) };
         FillRect(d->dc, &u, g_br_accent);
     }
     WCHAR w[32];
     int n = GetWindowTextW(d->hwnd, w, 32);
+    WCHAR ic = d->id == ID_NAV_PLAY ? IC_HOME : d->id == ID_TAB_MODS ? IC_PUZZLE : d->id == ID_TAB_SET ? IC_SETTINGS
+             : d->id == ID_TAB_LOG ? IC_LIST : d->id == ID_TAB_HOWTO ? IC_HELP : T.dark ? IC_SUN : IC_MOON;
+    RECT ir = { d->rc.left + S_(16), d->rc.top, d->rc.left + S_(34), d->rc.bottom };
+    glyph(d->dc, ic, ir, g_icon, on ? T.text : T.dim);
     HANDLE of = SelectObject(d->dc, on ? g_bold : g_font);
     SetBkMode(d->dc, TRANSPARENT_BK);
     SetTextColor(d->dc, on ? T.text : T.dim);
     RECT tr = d->rc;
-    DrawTextW(d->dc, w, n, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    tr.left += S_(44);
+    DrawTextW(d->dc, w, n, &tr, DT_VCENTER | DT_SINGLELINE);
     SelectObject(d->dc, of);
     if ((d->id == ID_TAB_LOG && g_log_unseen) || (d->id == ID_TAB_MODS && g_mods_unseen)) { /* dot: something needs a look */
-        HANDLE p = CreatePen(0, 1, T.accent);
-        HANDLE ob = SelectObject(d->dc, g_br_accent), op = SelectObject(d->dc, p);
-        int r = S_(7), x = d->rc.right - S_(12), y = d->rc.top + S_(6);
+        DWORD c = d->id == ID_TAB_LOG ? red_text() : T.status;
+        HBRUSH b = CreateSolidBrush(c);
+        HANDLE p = CreatePen(0, 1, c);
+        HANDLE ob = SelectObject(d->dc, b), op = SelectObject(d->dc, p);
+        int r = S_(8), x = d->rc.right - S_(20), y = (d->rc.top + d->rc.bottom - r) / 2;
         RoundRect(d->dc, x, y, x + r, y + r, r, r);
         SelectObject(d->dc, ob);
         SelectObject(d->dc, op);
+        DeleteObject(b);
         DeleteObject(p);
     }
 }
 
+/* Play's Host | Join: what the start button next to it does (while stopped). */
+static int g_role; /* 0 host, 1 join */
+static bool fix_ok(void);
+
+/* Two halves, the picked one filled green; grey while hosting or joining
+   (it can't change then). Co-op | Versus, and Host | Join. */
+static void draw_segment(DrawItem *d)
+{
+    if (d->id == ID_HOST) { /* Host | Join: the picked one, or what is running */
+        const UiState *s = &g_shown;
+        bool off = d->state & ODS_DISABLED, right = s->mode == MODE_JOIN || (s->mode == MODE_IDLE && g_role == 1);
+        FillRect(d->dc, &d->rc, g_br_bg);
+        HBRUSH b = CreateSolidBrush(T.dark ? T.side : T.btn_down);
+        HANDLE p = CreatePen(0, 1, T.border);
+        HANDLE ob = SelectObject(d->dc, b), op = SelectObject(d->dc, p);
+        RoundRect(d->dc, d->rc.left, d->rc.top, d->rc.right, d->rc.bottom, S_(14), S_(14));
+        SelectObject(d->dc, ob);
+        SelectObject(d->dc, op);
+        DeleteObject(b);
+        DeleteObject(p);
+        int mid = (d->rc.left + d->rc.right) / 2, k = S_(4);
+        RECT half = { right ? mid + k / 2 : d->rc.left + k, d->rc.top + k, right ? d->rc.right - k : mid - k / 2, d->rc.bottom - k };
+        DWORD fill = T.panel, edge = off ? T.border : right ? T.dim : T.accent;
+        b = CreateSolidBrush(fill);
+        p = CreatePen(0, S_(1) + (off ? 0 : 1), edge);
+        ob = SelectObject(d->dc, b);
+        op = SelectObject(d->dc, p);
+        RoundRect(d->dc, half.left, half.top, half.right, half.bottom, S_(12), S_(12));
+        SelectObject(d->dc, ob);
+        SelectObject(d->dc, op);
+        DeleteObject(b);
+        DeleteObject(p);
+        /* each half: an icon, the name and a line under it; the picked one bright */
+        SetBkMode(d->dc, TRANSPARENT_BK);
+        for (int i = 0; i < 2; i++) {
+            bool on = (i == 1) == right;
+            int l = i ? mid : d->rc.left, r = i ? d->rc.right : mid;
+            DWORD ic = !on ? T.dim : i ? T.text : T.status;
+            RECT ir = { l + S_(14), d->rc.top, l + S_(40), d->rc.bottom };
+            glyph(d->dc, i ? IC_JOIN : IC_HOST, ir, g_icon_big, ic);
+            HANDLE of = SelectObject(d->dc, g_bold);
+            SetTextColor(d->dc, on ? T.text : T.dim);
+            RECT tr = { l + S_(48), d->rc.top + S_(13), r - S_(8), d->rc.top + S_(32) };
+            DrawTextW(d->dc, i ? WTEXT("Join a friend") : WTEXT("Host a game"), -1, &tr, DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+            SelectObject(d->dc, g_font);
+            SetTextColor(d->dc, T.dim);
+            RECT sr = { l + S_(48), d->rc.top + S_(32), r - S_(8), d->rc.bottom - S_(10) };
+            DrawTextW(d->dc, i ? WTEXT("From the list or a code") : WTEXT("Friends-only lobby"), -1, &sr, DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+            SelectObject(d->dc, of);
+        }
+        return;
+    }
+    bool off = d->state & ODS_DISABLED;
+    FillRect(d->dc, &d->rc, g_br_bg);
+    HBRUSH b = CreateSolidBrush(T.dark ? T.side : T.btn_down);
+    HANDLE p = CreatePen(0, 1, T.border);
+    HANDLE ob = SelectObject(d->dc, b), op = SelectObject(d->dc, p);
+    RoundRect(d->dc, d->rc.left, d->rc.top, d->rc.right, d->rc.bottom, S_(12), S_(12));
+    SelectObject(d->dc, ob);
+    SelectObject(d->dc, op);
+    DeleteObject(b);
+    DeleteObject(p);
+    int mid = (d->rc.left + d->rc.right) / 2, k = S_(3);
+    bool vs = g_shown.versus;
+    RECT half = { vs ? mid : d->rc.left + k, d->rc.top + k, vs ? d->rc.right - k : mid, d->rc.bottom - k };
+    b = CreateSolidBrush(T.navsel);
+    p = CreatePen(0, 1, T.dark ? T.navsel : T.border);
+    ob = SelectObject(d->dc, b);
+    op = SelectObject(d->dc, p);
+    RoundRect(d->dc, half.left, half.top, half.right, half.bottom, S_(9), S_(9));
+    SelectObject(d->dc, ob);
+    SelectObject(d->dc, op);
+    DeleteObject(b);
+    DeleteObject(p);
+    SetBkMode(d->dc, TRANSPARENT_BK);
+    RECT l = { d->rc.left, d->rc.top, mid, d->rc.bottom }, r = { mid, d->rc.top, d->rc.right, d->rc.bottom };
+    HANDLE of = SelectObject(d->dc, !vs ? g_bold : g_font);
+    SetTextColor(d->dc, !vs ? (off ? T.dim : T.text) : T.dim);
+    DrawTextW(d->dc, WTEXT("Co-op"), -1, &l, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    SelectObject(d->dc, vs ? g_bold : g_font);
+    SetTextColor(d->dc, vs ? (off ? T.dim : T.text) : T.dim);
+    DrawTextW(d->dc, WTEXT("Versus"), -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    SelectObject(d->dc, of);
+}
+
+/* Play's fix state, at the status card's right: a green "SCCT Fix on" label,
+   or a red "Install SCCT Fix" button (same as Settings' Install). */
+static void draw_playfix(DrawItem *d)
+{
+    bool down = d->state & ODS_SELECTED, focus = d->state & ODS_FOCUS, ok = fix_ok(), vs = g_shown.versus;
+    FillRect(d->dc, &d->rc, g_br_panel);
+    DWORD fill = ok ? (T.dark ? RGBC(22, 48, 31) : RGBC(232, 246, 236)) : down ? (T.dark ? RGBC(70, 30, 32) : RGBC(246, 218, 218))
+                                                                            : (T.dark ? RGBC(52, 26, 28) : RGBC(252, 236, 236));
+    DWORD edge = ok ? fill : focus ? red_text() : (T.dark ? RGBC(110, 50, 52) : RGBC(230, 180, 180));
+    HBRUSH b = CreateSolidBrush(fill);
+    HANDLE p = CreatePen(0, 1, edge);
+    HANDLE ob = SelectObject(d->dc, b), op = SelectObject(d->dc, p);
+    RoundRect(d->dc, d->rc.left, d->rc.top, d->rc.right, d->rc.bottom, S_(12), S_(12));
+    SelectObject(d->dc, ob);
+    SelectObject(d->dc, op);
+    DeleteObject(b);
+    DeleteObject(p);
+    const WCHAR *t = ok ? (vs ? WTEXT("Versus Fix on") : WTEXT("SCCT Fix on"))
+                        : (vs ? (g_set.vfix == 3 ? WTEXT("Update Versus Fix") : WTEXT("Install Versus Fix"))
+                              : (g_set.scctfix == 3 ? WTEXT("Update SCCT Fix") : WTEXT("Install SCCT Fix")));
+    RECT tr = d->rc;
+    if (down) { tr.top += 1; tr.bottom += 1; }
+    icon_text(d->dc, tr, ok ? IC_CHECK : IC_DOWNLOAD, t, -1, ok ? g_font : g_bold, ok ? T.status : red_text());
+}
+
 /* An I / O switch: a pill (green with I when on, grey with O when off) and its name. */
 static bool g_vf_hud, g_vf_rate, g_vf_full = true;
-static bool is_switch(UINT id) { return id == ID_SET_CHUD || id == ID_SET_INTRO || id == ID_SET_MOUSE || id == ID_SET_VHUD || id == ID_SET_VRATE; }
+static bool is_switch(UINT id)
+{
+    return id == ID_SET_CHUD || id == ID_SET_INTRO || id == ID_SET_MOUSE || id == ID_SET_VHUD || id == ID_SET_VRATE || id == ID_SET_COOP60;
+}
 static bool switch_on(UINT id)
 {
     return id == ID_SET_CHUD ? g_set.chud == 1 : id == ID_SET_INTRO ? g_set.skipintro == 1 : id == ID_SET_MOUSE ? g_set.rawmouse == 1
+         : id == ID_SET_COOP60 ? g_set.coop60 == 1
          : id == ID_SET_VHUD ? g_vf_full : g_vf_rate;
 }
+/* Single player's FPS: the name, then 60 | Screen | Unlock (click one) */
+#define SPFPS_SEG 146 /* the three parts' width, at the right */
+static void draw_spfps(DrawItem *d)
+{
+    bool off = d->state & ODS_DISABLED;
+    FillRect(d->dc, &d->rc, g_br_panel);
+    int x = d->rc.right - S_(SPFPS_SEG), sel = g_set.spfps == 60 ? 0 : g_set.spfps == -1 ? 1 : g_set.spfps == 0 ? 2 : -1;
+    SetBkMode(d->dc, TRANSPARENT_BK);
+    HANDLE of = SelectObject(d->dc, g_font);
+    SetTextColor(d->dc, off ? T.dis_text : T.text);
+    RECT tr = { d->rc.left, d->rc.top, x - S_(8), d->rc.bottom };
+    DrawTextW(d->dc, WTEXT("Single player"), -1, &tr, DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    HBRUSH b = CreateSolidBrush(T.dark ? T.side : T.btn_down);
+    HANDLE p = CreatePen(0, 1, T.border);
+    HANDLE ob = SelectObject(d->dc, b), op = SelectObject(d->dc, p);
+    RoundRect(d->dc, x, d->rc.top, d->rc.right, d->rc.bottom, S_(10), S_(10));
+    SelectObject(d->dc, ob);
+    SelectObject(d->dc, op);
+    DeleteObject(b);
+    DeleteObject(p);
+    static const WCHAR *const names[3] = { L"60", L"Screen", L"Unlock" };
+    int pw = (d->rc.right - x) / 3, k = S_(3);
+    for (int i = 0; i < 3; i++) {
+        RECT r = { x + i * pw, d->rc.top, i == 2 ? d->rc.right : x + (i + 1) * pw, d->rc.bottom };
+        if (i == sel) {
+            b = CreateSolidBrush(T.navsel);
+            p = CreatePen(0, 1, T.dark ? T.navsel : T.border);
+            ob = SelectObject(d->dc, b);
+            op = SelectObject(d->dc, p);
+            RoundRect(d->dc, r.left + k, r.top + k, r.right - k, r.bottom - k, S_(8), S_(8));
+            SelectObject(d->dc, ob);
+            SelectObject(d->dc, op);
+            DeleteObject(b);
+            DeleteObject(p);
+        }
+        SelectObject(d->dc, i == sel ? g_bold : g_font);
+        SetTextColor(d->dc, off ? T.dis_text : i == sel ? T.text : T.dim);
+        DrawTextW(d->dc, names[i], -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    }
+    SelectObject(d->dc, of);
+}
+
 static void draw_switch(DrawItem *d)
 {
-    bool off = d->state & ODS_DISABLED, on = switch_on(d->id) && !off, focus = d->state & ODS_FOCUS;
+    /* a settings row: the name on the left, a small switch on the right (greyed: its state, faded) */
+    bool off = d->state & ODS_DISABLED, on = switch_on(d->id), focus = d->state & ODS_FOCUS;
     FillRect(d->dc, &d->rc, g_br_panel);
-    int h = S_(22), w = S_(44), x = d->rc.left, y = (d->rc.top + d->rc.bottom - h) / 2;
-    DWORD fill = off ? T.dis_bg : on ? T.accent : T.btn, edge = off ? T.dis_bg : on ? T.accent : T.border;
+    int h = S_(18), w = S_(34), x = d->rc.right - w, y = (d->rc.top + d->rc.bottom - h) / 2;
+    DWORD fill = on ? (off ? (T.dark ? RGBC(30, 70, 42) : RGBC(160, 205, 172)) : T.accent) : (off ? T.dis_bg : T.btn);
+    DWORD edge = on ? fill : off ? T.dis_bg : T.border;
     HBRUSH b = CreateSolidBrush(fill);
     HANDLE p = CreatePen(0, 1, focus && !off ? T.text : edge);
     HANDLE ob = SelectObject(d->dc, b), op = SelectObject(d->dc, p);
@@ -493,8 +796,8 @@ static void draw_switch(DrawItem *d)
     SelectObject(d->dc, op);
     DeleteObject(b);
     DeleteObject(p);
-    int k = S_(18), kx = on ? x + w - k - S_(2) : x + S_(2), ky = y + S_(2); /* the knob */
-    DWORD kc = off ? T.dis_text : on ? RGBC(255, 255, 255) : T.dim;
+    int k = h - S_(4), kx = on ? x + w - k - S_(2) : x + S_(2), ky = y + S_(2); /* the knob */
+    DWORD kc = on ? (off ? T.dis_text : RGBC(255, 255, 255)) : off ? T.dis_text : T.dim;
     b = CreateSolidBrush(kc);
     p = CreatePen(0, 1, kc);
     ob = SelectObject(d->dc, b);
@@ -505,33 +808,38 @@ static void draw_switch(DrawItem *d)
     DeleteObject(b);
     DeleteObject(p);
     SetBkMode(d->dc, TRANSPARENT_BK);
-    HANDLE of = SelectObject(d->dc, g_bold);
-    SetTextColor(d->dc, on ? RGBC(255, 255, 255) : off ? T.dis_text : T.dim);
-    RECT ir = { on ? x + S_(8) : x + w - S_(18), y, on ? x + S_(18) : x + w - S_(6), y + h };
-    DrawTextW(d->dc, on ? WTEXT("I") : WTEXT("O"), 1, &ir, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-    SelectObject(d->dc, g_font);
+    HANDLE of = SelectObject(d->dc, g_font);
     WCHAR t[64];
     int n = GetWindowTextW(d->hwnd, t, 64);
     SetTextColor(d->dc, off ? T.dis_text : T.text);
-    RECT tr = { x + w + S_(10), d->rc.top, d->rc.right, d->rc.bottom };
+    RECT tr = { d->rc.left, d->rc.top, x - S_(10), d->rc.bottom };
     DrawTextW(d->dc, t, n, &tr, DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
     SelectObject(d->dc, of);
 }
 
-static DWORD red_text(void) { return T.dark ? RGBC(240, 98, 98) : RGBC(196, 40, 40); }
+/* What a button sits on: a card (panel), the banner, or the page. */
+static bool on_card(UINT id)
+{
+    return id == ID_ACTION || id == ID_REFRESH || id == ID_COPYID || id == ID_JOINID ||
+           (id >= ID_SET_NOTE && id <= ID_SET_APPLY && id != ID_SET_NOTE && id != ID_SET_RESET && id != ID_SET_FRIEND && id != ID_SET_APPLY);
+}
 
 static void draw_button(DrawItem *d)
 {
     if (is_tab(d->id)) { draw_tab(d); return; }
     if (is_switch(d->id)) { draw_switch(d); return; }
+    if (d->id == ID_GAMEMODE) { draw_segment(d); return; }
+    if (d->id == ID_HOST) { draw_segment(d); return; }
+    if (d->id == ID_PLAYFIX) { draw_playfix(d); return; }
+    if (d->id == ID_SET_SPFPS) { draw_spfps(d); return; }
     bool down = d->state & ODS_SELECTED, off = d->state & ODS_DISABLED, focus = d->state & ODS_FOCUS;
+    bool go_stop = d->id == ID_JOIN && g_shown.mode != MODE_IDLE; /* Play's start button: "Stop" while running */
     DWORD fill, text, edge;
     if (off) { fill = T.dis_bg; text = T.dis_text; edge = T.dis_bg; }
-    else if (is_primary(d->id)) { fill = down ? T.accent_down : T.accent; text = T.sel_text; edge = fill; }
-    else if (d->id == ID_SET_RESET) { fill = down ? T.btn_down : T.btn; text = red_text(); edge = T.dark ? RGBC(90, 46, 48) : RGBC(230, 180, 180); }
+    else if (is_primary(d->id) || (d->id == ID_JOIN && !go_stop)) { fill = down ? T.accent_down : T.accent; text = T.sel_text; edge = fill; }
+    else if (d->id == ID_SET_RESET || d->id == ID_STOP || go_stop) { fill = down ? T.btn_down : T.btn; text = red_text(); edge = T.dark ? RGBC(90, 46, 48) : RGBC(230, 180, 180); }
     else { fill = down ? T.btn_down : T.btn; text = T.text; edge = T.border; }
-    bool in_box = d->id >= ID_SET_NOTE && d->id <= ID_SET_APPLY; /* on the Settings tab's panel */
-    FillRect(d->dc, &d->rc, d->id == ID_SET_FIX ? banner_brush() : in_box ? g_br_panel : g_br_bg);
+    FillRect(d->dc, &d->rc, d->id == ID_SET_FIX ? banner_brush() : on_card(d->id) ? g_br_panel : g_br_bg);
     HBRUSH b = CreateSolidBrush(fill);
     HANDLE p = CreatePen(0, 1, edge);
     HANDLE ob = SelectObject(d->dc, b), op = SelectObject(d->dc, p);
@@ -552,28 +860,32 @@ static void draw_button(DrawItem *d)
     DeleteObject(p);
     WCHAR w[64];
     int n = GetWindowTextW(d->hwnd, w, 64);
-    HANDLE of = SelectObject(d->dc, is_primary(d->id) ? g_bold : g_font);
-    SetBkMode(d->dc, TRANSPARENT_BK);
-    SetTextColor(d->dc, text);
     RECT tr = d->rc;
     if (down) { tr.top += 1; tr.bottom += 1; }
-    DrawTextW(d->dc, w, n, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-    SelectObject(d->dc, of);
+    bool host = g_shown.mode == MODE_HOST;
+    WCHAR ic = d->id == ID_LAUNCH ? IC_PLAY : d->id == ID_STATS ? IC_STATS : d->id == ID_COPYCONN ? IC_INFO
+             : d->id == ID_REFRESH ? IC_REFRESH : d->id == ID_COPYID || d->id == ID_COPYLOG ? IC_COPY
+             : d->id == ID_JOINID ? IC_JOIN : d->id == ID_ACTION ? (host ? IC_KICK : IC_JOIN)
+             : d->id == ID_JOIN ? (go_stop ? IC_STOP : g_role ? IC_JOIN : IC_PLAY)
+             : d->id == ID_RECHECK ? IC_REFRESH : d->id == ID_REPORT ? IC_INFO : d->id == ID_SET_FIX ? (fix_ok() ? IC_DELETE : IC_DOWNLOAD) : 0;
+    icon_text(d->dc, tr, ic, w, n, is_primary(d->id) || d->id == ID_JOIN ? g_bold : g_font, text);
 }
 
 static void draw_list_item(DrawItem *d)
 {
     bool sel = d->state & ODS_SELECTED;
-    FillRect(d->dc, &d->rc, sel ? g_br_accent : g_br_panel);
+    FillRect(d->dc, &d->rc, sel ? g_br_accent : g_br_field);
     if (d->item == (UINT)-1) return;
     WCHAR w[UI_NAME + 8];
     int n = (int)SendMessageW(d->hwnd, LB_GETTEXT, d->item, (LPARAM)w);
     if (n <= 0) return;
+    RECT ir = { d->rc.left + S_(8), d->rc.top, d->rc.left + S_(26), d->rc.bottom };
+    glyph(d->dc, IC_PERSON, ir, g_icon, sel ? T.sel_text : T.dim);
     HANDLE of = SelectObject(d->dc, g_font);
     SetBkMode(d->dc, TRANSPARENT_BK);
     SetTextColor(d->dc, sel ? T.sel_text : T.text);
     RECT tr = d->rc;
-    tr.left += S_(8);
+    tr.left += S_(34);
     DrawTextW(d->dc, w, n, &tr, DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
     SelectObject(d->dc, of);
 }
@@ -621,22 +933,26 @@ static void draw_mods_item(DrawItem *d)
 /* colors for labels and text boxes; returns the background brush */
 static LRESULT control_colors(UINT msg, HDC dc, HWND ctl_)
 {
-    if (ctl_ == g_c[ID_ACCENT]) return (LRESULT)g_br_accent;
     if (ctl_ == g_c[ID_MODSDIV]) return (LRESULT)g_br_border; /* the line between you and your friends */
-    int sid = 0; /* a label on the Settings tab? */
+    int sid = 0; /* a label on the Settings page? */
     for (int i = ID_SET_NOTE; i <= ID_SET_APPLY && !sid; i++) if (ctl_ == g_c[i]) sid = i;
-    bool box = msg != WM_CTLCOLORSTATIC || ctl_ == g_c[ID_LOG] || ctl_ == g_c[ID_LOBBY] || ctl_ == g_c[ID_HOWTO] || ctl_ == g_c[ID_MODS] || ctl_ == g_c[ID_MODS2] || ctl_ == g_c[ID_MODSTOP] || sid;
-    bool dim = ctl_ == g_c[ID_LISTLABEL] || ctl_ == g_c[ID_LOBBYLABEL] || (sid >= ID_SF_RES && sid <= ID_SF_FOV) || sid == ID_SF_MOUSE || sid == ID_SF_VFOV ||
+    /* text boxes and the friends list: the field color; everything else here is on a card,
+       except the Settings note under the cards */
+    bool field = msg == WM_CTLCOLOREDIT && ctl_ != g_c[ID_LOG] && ctl_ != g_c[ID_HOWTO];
+    for (int i = 0; i < g_nframes && !field; i++) field = ctl_ == g_c[g_frames[i].id]; /* framed boxes, also when greyed */
+    bool page = sid == ID_SET_NOTE;
+    bool dim = ctl_ == g_c[ID_LOBBYLABEL] || ctl_ == g_c[ID_STATUS2] || ctl_ == g_c[ID_LISTLABEL] || (sid >= ID_SF_RES && sid <= ID_SF_FOV) || sid == ID_SF_MOUSE || sid == ID_SF_VFOV ||
                (sid == ID_SET_NOTE && !g_set_warn) || (sid >= ID_SET_BANSUB && sid <= ID_SET_VRATENOTE);
     DWORD tc = sid == ID_SET_NOTE && g_set_warn ? T.status : dim ? T.dim : T.text;
     if (sid == ID_SET_BANNER) tc = fix_ok() ? T.status : red_text();
+    if (ctl_ == g_c[ID_STATUS] && g_set.found && !fix_ok()) tc = red_text(); /* not ready: the fix is missing */
     SetTextColor(dc, tc);
     if (sid == ID_SET_BANNER || sid == ID_SET_BANSUB) {
         SetBkColor(dc, banner_fill());
         return (LRESULT)banner_brush();
     }
-    SetBkColor(dc, box ? T.panel : T.bg);
-    return (LRESULT)(box ? g_br_panel : g_br_bg);
+    SetBkColor(dc, field ? T.field : page ? T.bg : T.panel);
+    return (LRESULT)(field ? g_br_field : page ? g_br_bg : g_br_panel);
 }
 
 static WCHAR *wide(const char *s, WCHAR *buf, int n)
@@ -675,9 +991,16 @@ static HWND ctl(int id, const WCHAR *cls, const WCHAR *text, DWORD style, DWORD 
 
 /* a box (text box or list) inside a drawn frame; ix/iy = space inside the frame */
 static int g_frame_tab = -1; /* the tab the next framed() boxes belong to */
-#define BOX_Y 384  /* the box under the tabs: How to, Log, Mods, Settings */
-#define BOX_H 324
-#define BANNER_Y 394 /* the Settings tab's banner (x 24..576, 42 high) */
+/* The Play page's list card, the Settings page's cards (96 dpi units) */
+#define LIST_Y 216
+#define LIST_H 210
+#define SET_L CX            /* Settings: left column */
+#define SET_R (CX + 282)    /* right column */
+#define SET_CW 270          /* a column's width */
+#define SET_Y1 88           /* first row of cards */
+#define SET_H1 150
+#define SET_Y2 250          /* second row */
+#define SET_H2 136
 static void framed(int id, const WCHAR *cls, DWORD style, int x, int y, int w, int h, int ix, int iy)
 {
     if (g_nframes < 24) g_frames[g_nframes++] = (Frame){ id, x, y, w, h, g_frame_tab };
@@ -688,142 +1011,168 @@ static void build(void)
 {
     const WCHAR *B = WTEXT("BUTTON"), *T_ = WTEXT("STATIC"), *E = WTEXT("EDIT"), *L = WTEXT("LISTBOX");
     const DWORD OD = WS_TABSTOP | BS_OWNERDRAW;
-    ctl(ID_TITLE, T_, WTEXT("Splinter Cell: Chaos Theory over Steam: no VPN, no port forwarding"), 0, 0, 14, 12, 460, 20, g_bold);
-    ctl(ID_THEME, B, WTEXT(""), OD, 0, 486, 9, 100, 24, g_font);
-    ctl(ID_ACCENT, T_, WTEXT(""), 0, 0, 14, 36, 572, 2, g_font);
-    ctl(ID_HOST, B, WTEXT("Host a game"), OD, 0, 14, 48, 180, 38, g_bold);
-    ctl(ID_JOIN, B, WTEXT("Join a friend"), OD, 0, 204, 48, 180, 38, g_bold);
-    ctl(ID_GAMEMODE, B, WTEXT("Co-op"), OD, 0, 392, 48, 86, 38, g_font);
-    ctl(ID_STOP, B, WTEXT("Stop"), OD, 0, 486, 48, 100, 38, g_font);
-    ctl(ID_STATUS, T_, WTEXT(""), 0, 0, 14, 96, 572, 26, g_big);
-    ctl(ID_LOBBYLABEL, T_, WTEXT("Lobby code:"), 0, 0, 14, 134, 74, 22, g_font);
-    framed(ID_LOBBY, E, WS_TABSTOP | ES_AUTOHSCROLL, 88, 130, 246, 26, 7, 5);
-    ctl(ID_COPYID, B, WTEXT("Copy code"), OD, 0, 342, 130, 100, 26, g_font);
-    ctl(ID_JOINID, B, WTEXT("Join this code"), OD, 0, 450, 130, 136, 26, g_font);
-    ctl(ID_LISTLABEL, T_, WTEXT(""), 0, 0, 14, 168, 572, 20, g_font);
+    /* the sidebar: the logo and name are drawn (draw_page), the pages are buttons */
+    ctl(ID_NAV_PLAY, B, WTEXT("Play"), OD, 0, 10, 70, 148, 36, g_font);
+    ctl(ID_TAB_MODS, B, WTEXT("Mods"), OD, 0, 10, 110, 148, 36, g_font);
+    ctl(ID_TAB_SET, B, WTEXT("Settings"), OD, 0, 10, 150, 148, 36, g_font);
+    ctl(ID_TAB_LOG, B, WTEXT("Log"), OD, 0, 10, 190, 148, 36, g_font);
+    ctl(ID_TAB_HOWTO, B, WTEXT("How to"), OD, 0, 10, WIN_H - 92, 148, 36, g_font);
+    ctl(ID_THEME, B, WTEXT(""), OD, 0, 10, WIN_H - 52, 148, 36, g_font);
+
+    /* Play: Co-op | Versus and Stop, the status card, Host and Join, the list card, Start */
+    ctl(ID_GAMEMODE, B, WTEXT("Co-op"), OD, 0, CX, 20, 160, 32, g_font);
+    ctl(ID_STOP, B, WTEXT("Stop"), OD, 0, CX + CW - 100, 20, 100, 34, g_font);
+    ctl(ID_STATUS, T_, WTEXT(""), 0x4000 /* SS_ENDELLIPSIS */, 0, CX + 38, 74, CW - 38 - 186, 22, g_mid);
+    ctl(ID_STATUS2, T_, WTEXT(""), 0x4000, 0, CX + 38, 98, CW - 38 - 186, 18, g_font);
+    ctl(ID_PLAYFIX, B, WTEXT(""), OD, 0, CX + CW - 16 - 150, 66 + 16, 150, 28, g_bold);
+    /* Host | Join (pick one), and the button that starts it (Stop while running) */
+    ctl(ID_HOST, B, WTEXT("Host or join"), OD, 0, CX, 138, 400, 64, g_bold);
+    ctl(ID_JOIN, B, WTEXT("Host"), OD, 0, CX + 412, 138, 140, 64, g_bold);
+    ctl(ID_LISTLABEL, T_, WTEXT(""), 0x4000, 0, CX + 16, LIST_Y + 14, 300, 20, g_font);
+    ctl(ID_ACTION, B, WTEXT("Join"), OD, 0, CX + CW - 16 - 196, LIST_Y + 10, 92, 28, g_bold);
+    ctl(ID_REFRESH, B, WTEXT("Refresh"), OD, 0, CX + CW - 16 - 96, LIST_Y + 10, 96, 28, g_font);
     framed(ID_LIST, L, WS_TABSTOP | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | LBS_OWNERDRAWFIXED |
-           LBS_HASSTRINGS, 14, 190, 430, 112, 4, 4);
-    ctl(ID_ACTION, B, WTEXT("Join"), OD, 0, 452, 190, 134, 34, g_bold);
-    ctl(ID_REFRESH, B, WTEXT("Refresh"), OD, 0, 452, 230, 134, 30, g_font);
-    ctl(ID_LAUNCH, B, WTEXT("Start Splinter Cell"), OD, 0, 14, 312, 180, 30, g_font);
-    ctl(ID_COPYCONN, B, WTEXT("Details"), OD, 0, 204, 312, 200, 30, g_font);
-    ctl(ID_STATS, B, WTEXT("Live stats"), OD, 0, 412, 312, 174, 30, g_font);
-    ctl(ID_TAB_HOWTO, B, WTEXT("How to"), OD, 0, 14, 350, 96, 28, g_font);
-    ctl(ID_TAB_LOG, B, WTEXT("Log"), OD, 0, 114, 350, 80, 28, g_font);
-    ctl(ID_TAB_MODS, B, WTEXT("Mods"), OD, 0, 198, 350, 84, 28, g_font);
-    ctl(ID_REPORT, B, WTEXT("Report"), OD, 0, 392, 350, 88, 26, g_font);
-    ctl(ID_COPYLOG, B, WTEXT("Copy log"), OD, 0, 486, 350, 100, 26, g_font);
-    ctl(ID_TAB_SET, B, WTEXT("Settings"), OD, 0, 286, 350, 96, 28, g_font);
-    ctl(ID_RECHECK, B, WTEXT("Check again"), OD, 0, 466, 350, 120, 26, g_font);
-    /* one box: "How to" and the log take turns in it */
-    framed(ID_LOG, E, WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY, 14, BOX_Y, 572, BOX_H, 7, 5);
-    ctl(ID_HOWTO, E, WTEXT(""), WS_VSCROLL | ES_MULTILINE | ES_READONLY, 0, 14 + 7, BOX_Y + 5, 572 - 14, BOX_H - 10, g_font);
-    /* the Mods tab: you on the left, your friends on the right, a line between;
-       one line per row, drawn in colors (see draw_mods_item) */
-    const DWORD MODS = WS_VSCROLL | LBS_NOINTEGRALHEIGHT | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | 0x4000 /* LBS_NOSEL */;
-    /* the top line, across both: "All party members match" (green) or who doesn't (red) */
-    ctl(ID_MODSTOP, L, WTEXT(""), LBS_NOINTEGRALHEIGHT | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | 0x4000 /* LBS_NOSEL */,
-        0, 14 + 7, 384 + 5, 572 - 14, 21, g_font);
-    ctl(ID_MODS, L, WTEXT(""), MODS, 0, 14 + 7, BOX_Y + 28, 274, BOX_H - 33, g_font);
-    ctl(ID_MODSDIV, T_, WTEXT(""), 0, 0, 14 + 7 + 278, BOX_Y + 31, 1, BOX_H - 39, g_font);
-    ctl(ID_MODS2, L, WTEXT(""), MODS, 0, 14 + 7 + 283, BOX_Y + 28, 572 - 14 - 283, BOX_H - 33, g_font);
-    SendMessageW(g_c[ID_MODS], LB_ADDSTRING, 0, (LPARAM)WTEXT(".Checking the game files..."));
+           LBS_HASSTRINGS, CX + 12, LIST_Y + 44, CW - 24, 108, 4, 4);
+    ctl(ID_LOBBYLABEL, T_, WTEXT("Lobby code"), 0, 0, CX + 16, LIST_Y + 170, 80, 20, g_font);
+    framed(ID_LOBBY, E, WS_TABSTOP | ES_AUTOHSCROLL, CX + 100, LIST_Y + 164, 180, 30, 8, 7);
+    ctl(ID_COPYID, B, WTEXT("Copy code"), OD, 0, CX + 290, LIST_Y + 164, 110, 30, g_font);
+    ctl(ID_JOINID, B, WTEXT("Join this code"), OD, 0, CX + 408, LIST_Y + 164, 128, 30, g_font);
+    ctl(ID_LAUNCH, B, WTEXT("Start Splinter Cell"), OD, 0, CX, 442, 300, 42, g_bold);
+    ctl(ID_STATS, B, WTEXT("Live stats"), OD, 0, CX + 312, 442, 116, 42, g_font);
+    ctl(ID_COPYCONN, B, WTEXT("Details"), OD, 0, CX + 436, 442, 116, 42, g_font);
+
+    /* Log and How to: a title (drawn), the box in a card; Log's buttons on the title's line */
+    ctl(ID_REPORT, B, WTEXT("Report"), OD, 0, CX + CW - 216, 20, 100, 30, g_font);
+    ctl(ID_COPYLOG, B, WTEXT("Copy log"), OD, 0, CX + CW - 108, 20, 108, 30, g_font);
+    ctl(ID_LOG, E, WTEXT(""), WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY, 0, CX + 14, 72, CW - 28, 402, g_font);
+    ctl(ID_HOWTO, E, WTEXT(""), WS_VSCROLL | ES_MULTILINE | ES_READONLY, 0, CX + 14, 72, CW - 28, 402, g_font);
     SendMessageW(g_c[ID_LOG], EM_SETLIMITTEXT, 0x7FFFFFFE, 0);
-    /* "Settings": a banner (the fix: installed or not), then sections; the
-       controls are put in place for co-op or Versus by place_settings() */
+
+    /* Mods: you on the left, your friends on the right, a line between; one line
+       per row, drawn in colors (see draw_mods_item). The top line, across both:
+       "All party members match" (green) or who doesn't (red). */
+    ctl(ID_RECHECK, B, WTEXT("Check again"), OD, 0, CX + CW - 130, 20, 130, 30, g_font);
+    const DWORD MODS = WS_VSCROLL | LBS_NOINTEGRALHEIGHT | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | 0x4000 /* LBS_NOSEL */;
+    ctl(ID_MODSTOP, L, WTEXT(""), LBS_NOINTEGRALHEIGHT | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | 0x4000 /* LBS_NOSEL */,
+        0, CX + 14, 74, CW - 28, 21, g_font);
+    ctl(ID_MODS, L, WTEXT(""), MODS, 0, CX + 14, 102, 262, 372, g_font);
+    ctl(ID_MODSDIV, T_, WTEXT(""), 0, 0, CX + 14 + 268, 106, 1, 364, g_font);
+    ctl(ID_MODS2, L, WTEXT(""), MODS, 0, CX + 14 + 274, 102, CW - 28 - 274, 372, g_font);
+    SendMessageW(g_c[ID_MODS], LB_ADDSTRING, 0, (LPARAM)WTEXT(".Checking the game files..."));
+
+    /* Settings: the fix's banner, then cards (their titles are drawn, see
+       draw_set_deco); co-op and Versus each show their own controls */
     const DWORD NUM = WS_TABSTOP | ES_AUTOHSCROLL | 0x2000 /* ES_NUMBER */, ELL = 0x4000 /* SS_ENDELLIPSIS */;
     const DWORD TXT = WS_TABSTOP | ES_AUTOHSCROLL;
     g_vf_hud = g_vf_rate = true;
     g_frame_tab = TAB_SET;
-    ctl(ID_SET_BANNER, T_, WTEXT(""), ELL, 0, 36, BANNER_Y + 5, 424, 18, g_bold);
-    ctl(ID_SET_BANSUB, T_, WTEXT(""), ELL, 0, 36, BANNER_Y + 23, 424, 16, g_font);
-    ctl(ID_SET_FIX, B, WTEXT("Install"), OD, 0, 470, BANNER_Y + 9, 96, 24, g_font);
-    ctl(ID_SEC_DISP, T_, WTEXT("DISPLAY"), 0, 0, 28, 444, 300, 16, g_font);
-    ctl(ID_SEC_MOUSE, T_, WTEXT("MOUSE"), 0, 0, 28, 554, 300, 16, g_font);
-    ctl(ID_SEC_CLASS, T_, WTEXT("PER CLASS"), 0, 0, 28, 608, 400, 16, g_font);
-    ctl(ID_SL_RES, T_, WTEXT("Resolution"), ELL, 0, 28, 470, 150, 18, g_font);
-    framed(ID_SET_W, E, NUM, 180, 466, 64, 24, 6, 4);
-    ctl(ID_SL_X, T_, WTEXT("x"), 0, 0, 250, 470, 12, 18, g_font);
-    framed(ID_SET_H, E, NUM, 264, 466, 64, 24, 6, 4);
-    ctl(ID_SF_RES, T_, WTEXT(""), ELL, 0, 340, 470, 236, 18, g_font);
-    /* co-op */
-    ctl(ID_SL_FOV, T_, WTEXT("FOV"), ELL, 0, 28, 498, 150, 18, g_font);
-    framed(ID_SET_FOV, E, NUM, 180, 494, 64, 24, 6, 4);
-    /* FOV for the screen's shape (the game's default 75 is for 4:3). Co-op
-       needs the same number on both PCs, so it's a choice, never automatic. */
-    ctl(ID_SF_FOV, T_, WTEXT(""), ELL, 0, 250, 498, 326, 18, g_font);
-    ctl(ID_SET_CHUD, B, WTEXT("Widescreen HUD"), OD, 0, 28, 522, 172, 24, g_font);
-    ctl(ID_SET_INTRO, B, WTEXT("Skip intro videos"), OD, 0, 206, 522, 180, 24, g_font);
-    /* single player's frame rate (co-op is always 60): click for 60 / the screen's / no limit */
-    ctl(ID_SET_SPFPS, B, WTEXT("Single player: 60 FPS"), OD, 0, 392, 522, 180, 24, g_font);
+    ctl(ID_SET_BANNER, T_, WTEXT(""), ELL, 0, CX + 16, 28, 410, 18, g_bold);
+    ctl(ID_SET_BANSUB, T_, WTEXT(""), ELL, 0, CX + 16, 48, 410, 16, g_font);
+    ctl(ID_SET_FIX, B, WTEXT("Install"), OD, 0, CX + CW - 16 - 100, 34, 100, 28, g_font);
+    ctl(ID_SEC_DISP, T_, WTEXT(""), 0, 0, 0, 0, 1, 1, g_font);  /* section titles: drawn now */
+    ctl(ID_SEC_MOUSE, T_, WTEXT(""), 0, 0, 0, 0, 1, 1, g_font);
+    ctl(ID_SEC_CLASS, T_, WTEXT(""), 0, 0, 0, 0, 1, 1, g_font);
+    /* Display (both): the resolution */
+    ctl(ID_SL_RES, T_, WTEXT("Resolution"), ELL, 0, SET_L + 16, SET_Y1 + 40, 80, 18, g_font);
+    framed(ID_SET_W, E, NUM, SET_L + 100, SET_Y1 + 34, 64, 28, 6, 6);
+    ctl(ID_SL_X, T_, WTEXT("x"), 0x1 /* SS_CENTER */, 0, SET_L + 166, SET_Y1 + 40, 16, 18, g_font);
+    framed(ID_SET_H, E, NUM, SET_L + 184, SET_Y1 + 34, 64, 28, 6, 6);
+    ctl(ID_SF_RES, T_, WTEXT(""), ELL, 0, SET_L + 16, SET_Y1 + 66, SET_CW - 32, 16, g_font);
+    /* co-op: FOV (needs the same number on both PCs, so it's a choice, never automatic) */
+    ctl(ID_SL_FOV, T_, WTEXT("FOV"), ELL, 0, SET_L + 16, SET_Y1 + 98, 80, 18, g_font);
+    framed(ID_SET_FOV, E, NUM, SET_L + 100, SET_Y1 + 92, 64, 28, 6, 6);
+    ctl(ID_SF_FOV, T_, WTEXT(""), ELL, 0, SET_L + 16, SET_Y1 + 124, SET_CW - 32, 16, g_font);
+    /* co-op: Game */
+    ctl(ID_SET_CHUD, B, WTEXT("Widescreen HUD"), OD, 0, SET_R + 16, SET_Y1 + 32, SET_CW - 32, 26, g_font);
+    ctl(ID_SET_INTRO, B, WTEXT("Skip intro videos"), OD, 0, SET_R + 16, SET_Y1 + 64, SET_CW - 32, 26, g_font);
+    /* single player's frame rate: click for 60 / the screen's / no limit */
+    ctl(ID_SET_SPFPS, B, WTEXT("Single player: 60 FPS"), OD, 0, SET_R + 16, SET_Y1 + 98, SET_CW - 32, 28, g_font);
     /* shown with "FPS unlock": the game itself stops at 100 FPS in play (measured, SCCTFix.log) */
-    ctl(ID_SET_SPNOTE, T_, WTEXT(""), 0x2 /* SS_RIGHT */ | ELL, 0, 276, 446, 300, 16, g_font);
-    ctl(ID_SET_MOUSE, B, WTEXT("Raw mouse"), OD, 0, 28, 576, 150, 24, g_font);
-    ctl(ID_SET_RAWNOTE, T_, WTEXT("no acceleration, any polling rate (in the SCCT Fix)"), ELL, 0, 186, 580, 390, 18, g_font);
+    ctl(ID_SET_SPNOTE, T_, WTEXT(""), ELL, 0, SET_R + 16, SET_Y1 + 130, SET_CW - 32, 16, g_font);
+    /* co-op: Co-op (60 FPS when this PC hosts; the joining friend's game follows the host) */
+    ctl(ID_SET_COOP60, B, WTEXT("60 FPS when you host"), OD, 0, SET_L + 16, SET_Y2 + 32, SET_CW - 32, 26, g_font);
+    /* co-op: Mouse */
+    ctl(ID_SET_MOUSE, B, WTEXT("Raw mouse"), OD, 0, SET_R + 16, SET_Y2 + 32, SET_CW - 32, 26, g_font);
+    ctl(ID_SET_RAWNOTE, T_, WTEXT("No acceleration, any polling rate"), ELL, 0, SET_R + 16, SET_Y2 + 60, SET_CW - 32, 16, g_font);
+    ctl(ID_SL_MOUSE, T_, WTEXT("Sensitivity"), ELL, 0, SET_R + 16, SET_Y2 + 90, 68, 18, g_font);
+    framed(ID_SET_SENS, E, TXT, SET_R + 86, SET_Y2 + 84, 54, 28, 6, 6);
+    ctl(ID_SL_TURN, T_, WTEXT("Aim turn"), ELL, 0, SET_R + 148, SET_Y2 + 90, 56, 18, g_font);
+    framed(ID_SET_TURN, E, TXT, SET_R + 204, SET_Y2 + 84, 50, 28, 6, 6);
+    ctl(ID_SF_MOUSE, T_, WTEXT(""), ELL, 0, SET_R + 16, SET_Y2 + 116, SET_CW - 32, 16, g_font);
     /* not shown any more (the SCCT Fix keeps 60 FPS; no other widescreen fix is needed), still read for the check */
     ctl(ID_SF_VFOV, T_, WTEXT(""), 0, 0, 0, 0, 1, 1, g_font);
-    /* the mouse: co-op "sensitivity / aim turn", Versus "sensitivity / multiplier" (moved by place_settings) */
-    ctl(ID_SL_MOUSE, T_, WTEXT("Sensitivity"), ELL, 0, 28, 608, 150, 18, g_font);
-    framed(ID_SET_SENS, E, TXT, 180, 604, 64, 24, 6, 4);
-    ctl(ID_SL_TURN, T_, WTEXT("Aim turn"), ELL, 0, 300, 608, 96, 18, g_font);
-    framed(ID_SET_TURN, E, TXT, 400, 604, 56, 24, 6, 4);
-    ctl(ID_SF_MOUSE, T_, WTEXT(""), ELL, 0, 180, 632, 396, 16, g_font);
-    /* Versus: the Versus Fix */
-    ctl(ID_SL_VFPS, T_, WTEXT("Max FPS (0 = no limit)"), ELL, 0, 28, 498, 150, 18, g_font);
-    framed(ID_SET_VFPS, E, NUM, 180, 494, 64, 24, 6, 4);
-    ctl(ID_SET_VHUD, B, WTEXT("Fullscreen"), OD, 0, 300, 494, 220, 24, g_font); /* off: a borderless window */
-    ctl(ID_SET_VRATE, B, WTEXT("Mouse fix (125 Hz)"), OD, 0, 28, 548, 200, 24, g_font);
-    ctl(ID_SET_VRATENOTE, T_, WTEXT("for mice faster than 125 Hz (and Steam Link)"), ELL, 0, 236, 552, 340, 18, g_font);
-    /* Versus: turn speed with the mouse, FOV per class; each box named Spy / Merc */
-    ctl(ID_SL_VTURN, T_, WTEXT("Turn speed (%)"), ELL, 0, 28, 584, 150, 18, g_font);
-    ctl(ID_SL_VSPY1, T_, WTEXT("Spy"), 0, 0, 180, 584, 34, 18, g_font);
-    framed(ID_SET_VTURNS, E, NUM, 214, 580, 56, 24, 6, 4);
-    ctl(ID_SL_VMERC1, T_, WTEXT("Merc"), 0, 0, 300, 584, 44, 18, g_font);
-    framed(ID_SET_VTURNM, E, NUM, 344, 580, 56, 24, 6, 4);
-    ctl(ID_SL_VFOV, T_, WTEXT("FOV"), ELL, 0, 28, 634, 140, 18, g_font);
-    ctl(ID_SL_VSPY2, T_, WTEXT("Spy"), 0, 0, 180, 634, 34, 18, g_font);
-    framed(ID_SET_VFOVS, E, NUM, 214, 630, 56, 24, 6, 4);
-    ctl(ID_SL_VMERC2, T_, WTEXT("Merc"), 0, 0, 300, 634, 44, 18, g_font);
-    framed(ID_SET_VFOVM, E, NUM, 344, 630, 56, 24, 6, 4);
+    /* Versus: Display (the Versus Fix's frame limit) */
+    ctl(ID_SL_VFPS, T_, WTEXT("Max FPS (0 = none)"), ELL, 0, SET_L + 16, SET_Y1 + 98, 120, 18, g_font);
+    framed(ID_SET_VFPS, E, NUM, SET_L + 140, SET_Y1 + 92, 64, 28, 6, 6);
+    /* Versus: Window and mouse */
+    ctl(ID_SET_VHUD, B, WTEXT("Fullscreen"), OD, 0, SET_R + 16, SET_Y1 + 32, SET_CW - 32, 26, g_font); /* off: a borderless window */
+    ctl(ID_SET_VRATE, B, WTEXT("Mouse fix (125 Hz)"), OD, 0, SET_R + 16, SET_Y1 + 64, SET_CW - 32, 26, g_font);
+    ctl(ID_SET_VRATENOTE, T_, WTEXT("For mice faster than 125 Hz (and Steam Link)"), ELL, 0, SET_R + 16, SET_Y1 + 94, SET_CW - 32, 16, g_font);
+    /* Versus: Per class (one card across): turn speed and FOV, each box named Spy / Merc */
+    ctl(ID_SL_VTURN, T_, WTEXT("Turn speed (%)"), ELL, 0, CX + 16, SET_Y2 + 42, 140, 18, g_font);
+    ctl(ID_SL_VSPY1, T_, WTEXT("Spy"), 0, 0, CX + 170, SET_Y2 + 42, 34, 18, g_font);
+    framed(ID_SET_VTURNS, E, NUM, CX + 206, SET_Y2 + 36, 64, 28, 6, 6);
+    ctl(ID_SL_VMERC1, T_, WTEXT("Merc"), 0, 0, CX + 290, SET_Y2 + 42, 44, 18, g_font);
+    framed(ID_SET_VTURNM, E, NUM, CX + 336, SET_Y2 + 36, 64, 28, 6, 6);
+    ctl(ID_SL_VFOV, T_, WTEXT("FOV"), ELL, 0, CX + 16, SET_Y2 + 86, 140, 18, g_font);
+    ctl(ID_SL_VSPY2, T_, WTEXT("Spy"), 0, 0, CX + 170, SET_Y2 + 86, 34, 18, g_font);
+    framed(ID_SET_VFOVS, E, NUM, CX + 206, SET_Y2 + 80, 64, 28, 6, 6);
+    ctl(ID_SL_VMERC2, T_, WTEXT("Merc"), 0, 0, CX + 290, SET_Y2 + 86, 44, 18, g_font);
+    framed(ID_SET_VFOVM, E, NUM, CX + 336, SET_Y2 + 80, 64, 28, 6, 6);
     g_frame_tab = -1;
-    ctl(ID_SET_NOTE, T_, WTEXT(""), ELL, 0, 28, 654, 548, 16, g_font);
-    ctl(ID_SET_RESET, B, WTEXT("Reset to defaults"), OD, 0, 28, 676, 140, 24, g_font);
-    ctl(ID_SET_FRIEND, B, WTEXT("Use friend's"), OD, 0, 384, 676, 100, 24, g_font);
-    ctl(ID_SET_APPLY, B, WTEXT("Apply"), OD, 0, 490, 676, 84, 24, g_bold);
+    /* under the cards: the note, Reset, Use friend's, Apply */
+    ctl(ID_SET_NOTE, T_, WTEXT(""), ELL, 0, CX + 2, SET_Y2 + SET_H2 + 12, CW - 4, 16, g_font);
+    ctl(ID_SET_RESET, B, WTEXT("Reset to defaults"), OD, 0, CX, SET_Y2 + SET_H2 + 38, 140, 32, g_font);
+    ctl(ID_SET_FRIEND, B, WTEXT("Use friend's"), OD, 0, CX + CW - 236, SET_Y2 + SET_H2 + 38, 120, 32, g_font);
+    ctl(ID_SET_APPLY, B, WTEXT("Apply"), OD, 0, CX + CW - 108, SET_Y2 + SET_H2 + 38, 108, 32, g_bold);
 }
 
 /* The Settings tab in co-op and in Versus: what each shows. */
 static bool set_never(int id)
 {
-    return id == ID_SF_VFOV;
+    return id == ID_SF_VFOV || id == ID_SEC_DISP || id == ID_SEC_MOUSE || id == ID_SEC_CLASS; /* titles are drawn now */
 }
 static bool set_versus_only(int id) { return (id >= ID_SL_VFPS && id <= ID_SF_VFOV) || id == ID_SEC_CLASS || id == ID_SET_VRATENOTE; }
 static bool set_coop_only(int id)
 {
     return id == ID_SL_FOV || id == ID_SET_FOV || id == ID_SF_FOV || id == ID_SET_FRIEND || id == ID_SET_MOUSE ||
            (id >= ID_SL_MOUSE && id <= ID_SF_MOUSE) || /* Versus: sensitivity is set in the game itself */
-           id == ID_SET_CHUD || id == ID_SET_INTRO || id == ID_SET_RAWNOTE || id == ID_SET_SPFPS || id == ID_SET_SPNOTE;
+           id == ID_SET_CHUD || id == ID_SET_INTRO || id == ID_SET_RAWNOTE || id == ID_SET_SPFPS || id == ID_SET_SPNOTE ||
+           id == ID_SET_COOP60;
 }
 static void move_ctl(int id, int x, int y) { SetWindowPos(g_c[id], 0, S_(x), S_(y), 0, 0, 0x1 | 0x4 | 0x10 /* no size, z-order, activate */); }
-/* a framed text box: the frame at x, y, the box inside it */
-static void move_framed(int id, int x, int y)
+
+/* The page each control is on (-1: the sidebar, always shown). */
+static int page_of(int id)
 {
-    move_ctl(id, x + 6, y + 4);
-    for (int i = 0; i < g_nframes; i++)
-        if (g_frames[i].id == id) { g_frames[i].x = x; g_frames[i].y = y; }
+    if (id == ID_NAV_PLAY || id == ID_TAB_HOWTO || id == ID_TAB_LOG || id == ID_TAB_MODS || id == ID_TAB_SET || id == ID_THEME) return -1;
+    if (id == ID_LOG || id == ID_REPORT || id == ID_COPYLOG) return TAB_LOG;
+    if (id == ID_HOWTO) return TAB_HOWTO;
+    if (id == ID_MODS || id == ID_MODS2 || id == ID_MODSDIV || id == ID_MODSTOP || id == ID_RECHECK) return TAB_MODS;
+    if (id >= ID_SET_NOTE && id <= ID_SET_APPLY) return TAB_SET;
+    return TAB_PLAY;
 }
-/* The rows both modes share sit where that mode's layout has them. */
-static void place_settings(bool versus)
+/* Shown now: on the page in view, and wanted in this mode / state. */
+static bool ctl_wanted(int id)
 {
-    move_ctl(ID_SEC_MOUSE, 28, versus ? 526 : 554);
-    /* co-op's sensitivity / aim turn row (Versus has none: its sensitivity is set in the game) */
-    move_ctl(ID_SL_MOUSE, 28, 608);
-    move_framed(ID_SET_SENS, 180, 604);
-    move_ctl(ID_SL_TURN, 300, 608);
-    move_framed(ID_SET_TURN, 400, 604);
-    move_ctl(ID_SF_MOUSE, 180, 632);
-    set_text(ID_SL_TURN, "Aim turn");
-    move_ctl(ID_SET_NOTE, 28, versus ? 658 : 654);
+    int pg = page_of(id);
+    if (pg >= 0 && pg != g_tab) return false;
+    const UiState *s = &g_shown;
+    bool idle = s->mode == MODE_IDLE;
+    if (pg == TAB_SET) return !set_never(id) && !(s->versus ? set_coop_only(id) : set_versus_only(id));
+    if (id == ID_STOP) return false; /* the start button next to Host | Join is Stop while running */
+    if (id == ID_ACTION) return !idle;
+    if (id == ID_REFRESH) return s->mode != MODE_HOST;
+    if (id == ID_PLAYFIX) return g_set.found;
+    return true;
+}
+static void apply_visibility(void)
+{
+    for (int i = ID_HOST; i <= ID_GAMEMODE; i++) {
+        if (!g_c[i]) continue;
+        bool want = ctl_wanted(i);
+        if (want != (IsWindowVisible(g_c[i]) != 0)) ShowWindow(g_c[i], want ? 5 : 0);
+    }
 }
 
 static void append_log(const char *utf8)
@@ -921,29 +1270,64 @@ static void build_howto(const UiState *s, char *o, int n)
 
 /* The fix of this mode is installed (the banner is green). */
 static bool fix_ok(void) { return g_shown.versus ? g_set.vfix == 1 : g_set.scctfix == 1; }
-/* The Settings tab: the banner's outline and a line under each section's title. */
+/* The Settings page: the banner (green: the fix is installed, red: not) and the cards with their titles. */
 static void draw_set_deco(HDC dc)
 {
-    if (g_tab != TAB_SET) return;
-    bool ok = fix_ok();
+    bool ok = fix_ok(), vs = g_shown.versus;
     DWORD edge = ok ? (T.dark ? RGBC(36, 86, 58) : RGBC(150, 205, 165)) : (T.dark ? RGBC(90, 46, 48) : RGBC(230, 180, 180));
-    DWORD fill = banner_fill();
-    HBRUSH b = CreateSolidBrush(fill);
-    HANDLE p = CreatePen(0, 1, edge);
-    HANDLE ob = SelectObject(dc, b), op = SelectObject(dc, p);
-    RoundRect(dc, S_(24), S_(BANNER_Y), S_(576), S_(BANNER_Y + 42), S_(8), S_(8));
-    SelectObject(dc, ob);
-    SelectObject(dc, op);
-    DeleteObject(b);
-    DeleteObject(p);
-    HBRUSH lb = CreateSolidBrush(T.border);
-    int ys[3] = { 444, g_shown.versus ? 526 : 554, g_shown.versus ? 608 : 0 };
-    for (int i = 0; i < 3; i++) {
-        if (!ys[i]) continue;
-        RECT l = { S_(28), S_(ys[i] + 17), S_(572), S_(ys[i] + 17) + 1 };
-        FillRect(dc, &l, lb);
+    rbox(dc, CX, 20, CW, 56, 14, banner_fill(), edge);
+    card(dc, SET_L, SET_Y1, SET_CW, SET_H1);
+    card(dc, SET_R, SET_Y1, SET_CW, SET_H1);
+    label(dc, WTEXT("Display"), SET_L + 16, SET_Y1 + 10, 200, 18, g_bold, T.text, 0);
+    label(dc, vs ? WTEXT("Window and mouse") : WTEXT("Game"), SET_R + 16, SET_Y1 + 10, 200, 18, g_bold, T.text, 0);
+    if (vs) {
+        card(dc, CX, SET_Y2, CW, SET_H2);
+        label(dc, WTEXT("Per class"), CX + 16, SET_Y2 + 10, 200, 18, g_bold, T.text, 0);
+    } else {
+        card(dc, SET_L, SET_Y2, SET_CW, SET_H2);
+        card(dc, SET_R, SET_Y2, SET_CW, SET_H2);
+        label(dc, WTEXT("Co-op"), SET_L + 16, SET_Y2 + 10, 200, 18, g_bold, T.text, 0);
+        label(dc, WTEXT("Mouse"), SET_R + 16, SET_Y2 + 10, 200, 18, g_bold, T.text, 0);
+        label(dc, WTEXT("Your friend's game follows the host."), SET_L + 16, SET_Y2 + 62, SET_CW - 32, 16, g_font, T.dim, 0);
+        label(dc, WTEXT("The game's own: about 34 FPS."), SET_L + 16, SET_Y2 + 80, SET_CW - 32, 16, g_font, T.dim, 0);
     }
-    DeleteObject(lb);
+}
+
+/* The Play page: a dot and the status in a card, with the fix's state on the
+   right; the list card. */
+static void draw_play(HDC dc)
+{
+    card(dc, CX, 66, CW, 60);
+    /* the dot: red while the fix is missing (co-op disconnects without it), green while hosting or joining */
+    DWORD dot = g_set.found && !fix_ok() ? red_text() : g_shown.mode == MODE_IDLE ? T.dim : T.status;
+    rbox(dc, CX + 18, 66 + 14, 10, 10, 10, dot, dot);
+    card(dc, CX, LIST_Y, CW, LIST_H);
+    label(dc, WTEXT("v" SCCTLINK_VERSION), CX + CW - 80, 20, 80, 32, g_font, T.dim, DT_VCENTER | 0x2 /* DT_RIGHT */);
+}
+
+/* The whole window's background: the sidebar with the logo, then the page. */
+static void draw_page(HDC dc)
+{
+    RECT r;
+    GetClientRect(g_wnd, &r);
+    FillRect(dc, &r, g_br_bg);
+    RECT side = { 0, 0, S_(SIDE_W), r.bottom };
+    FillRect(dc, &side, g_br_side);
+    RECT line = { S_(SIDE_W) - 1, 0, S_(SIDE_W), r.bottom };
+    FillRect(dc, &line, g_br_border);
+    draw_logo(dc, 18, 20, 32);
+    label(dc, WTEXT("SCCTLink"), 58, 20, 104, 30, g_mid, T.text, DT_VCENTER);
+    switch (g_tab) {
+    case TAB_PLAY: draw_play(dc); break;
+    case TAB_SET: draw_set_deco(dc); break;
+    default: { /* Mods, Log, How to: a title and one card */
+        const WCHAR *t = g_tab == TAB_MODS ? WTEXT("Game files and mods") : g_tab == TAB_LOG ? WTEXT("Log") : WTEXT("How to play");
+        label(dc, t, CX + 2, 20, 300, 30, g_big, T.text, DT_VCENTER);
+        card(dc, CX, 62, CW, WIN_H - 62 - 20);
+        break;
+    }
+    }
+    draw_frames(dc);
 }
 
 static void show_tab(int tab)
@@ -951,24 +1335,8 @@ static void show_tab(int tab)
     g_tab = tab;
     if (tab == TAB_LOG) g_log_unseen = false;
     if (tab == TAB_MODS) g_mods_unseen = false;
-    ShowWindow(g_c[ID_LOG], tab == TAB_LOG ? 5 : 0);
-    ShowWindow(g_c[ID_HOWTO], tab == TAB_HOWTO ? 5 : 0);
-    ShowWindow(g_c[ID_MODS], tab == TAB_MODS ? 5 : 0);
-    ShowWindow(g_c[ID_MODS2], tab == TAB_MODS ? 5 : 0);
-    ShowWindow(g_c[ID_MODSDIV], tab == TAB_MODS ? 5 : 0);
-    ShowWindow(g_c[ID_MODSTOP], tab == TAB_MODS ? 5 : 0);
-    ShowWindow(g_c[ID_COPYLOG], tab == TAB_LOG ? 5 : 0);
-    ShowWindow(g_c[ID_REPORT], tab == TAB_LOG ? 5 : 0);
-    ShowWindow(g_c[ID_RECHECK], tab == TAB_MODS ? 5 : 0);
-    place_settings(g_shown.versus);
-    for (int i = ID_SET_NOTE; i <= ID_SET_APPLY; i++) /* each mode: its own rows */
-        ShowWindow(g_c[i], tab == TAB_SET && !set_never(i) && !(g_shown.versus ? set_coop_only(i) : set_versus_only(i)) ? 5 : 0);
-    RedrawWindow(g_c[ID_TAB_SET], 0, 0, 0x1 | 0x4);
-    RECT box = { S_(14), S_(BOX_Y), S_(586), S_(BOX_Y + BOX_H) }; /* the box's frames */
-    RedrawWindow(g_wnd, &box, 0, 0x1 | 0x4 | 0x80);
-    RedrawWindow(g_c[ID_TAB_HOWTO], 0, 0, 0x1 | 0x4);
-    RedrawWindow(g_c[ID_TAB_LOG], 0, 0, 0x1 | 0x4);
-    RedrawWindow(g_c[ID_TAB_MODS], 0, 0, 0x1 | 0x4);
+    apply_visibility();
+    RedrawWindow(g_wnd, 0, 0, 0x1 | 0x4 | 0x80 /* invalidate, erase, children */);
 }
 
 static void update_howto(void)
@@ -1045,7 +1413,7 @@ static void show_settings(const UiSettings *n)
                                else sfmt(b, sizeof b, "%s: not set", who); set_text(id, b); } while (0)
     if (!vs) FR(ID_SF_RES, n->fw && n->fh, "%s: %dx%d", who, n->fw, n->fh);
     if (!vs && n->scctfix == 1 && !n->friend_) set_text(ID_SF_RES, "the SCCT Fix draws at it");
-    if (!vs && n->scctfix == 1 && !n->friend_) set_text(ID_SF_FOV, "75 = the game's; wide screens see more by themselves");
+    if (!vs && n->scctfix == 1 && !n->friend_) set_text(ID_SF_FOV, "75 = the game's");
     FR(ID_SF_FOV, n->ffov, "%s: %d", who, n->ffov);
     if (!vs) FR(ID_SF_MOUSE, n->fturn, "%s: aim turn %d.%02d%s", who, n->fturn / 100, n->fturn % 100, n->fturn != n->turn ? "  <- must match" : "");
     if (vs) set_text(ID_SF_MOUSE, n->have_vprofile ? "" : "(no profile yet)");
@@ -1062,19 +1430,20 @@ static void show_settings(const UiSettings *n)
     } else {
         set_text(ID_SET_BANNER, !n->found ? "The game's folder wasn't found" : n->scctfix == 1 ? "\xe2\x9c\x93 SCCT Fix installed"
                                 : n->scctfix == 3 ? "SCCT Fix: an older version is installed" : "SCCT Fix not installed - co-op needs it");
-        set_text(ID_SET_BANSUB, "60 FPS sync, borderless, widescreen HUD and raw mouse built in - no other widescreen mod needed");
+        set_text(ID_SET_BANSUB, "Co-op sync fix, 60 FPS co-op, borderless, widescreen HUD, raw mouse");
         set_text(ID_SET_FIX, n->scctfix == 1 ? "Remove" : n->scctfix == 3 ? "Update" : "Install");
     }
     static int last_fixst = -9;
-    if (fixst != last_fixst) { /* the banner's color */
+    if (fixst != last_fixst) { /* the banner's color, and the fix's state on Play */
         last_fixst = fixst;
-        RECT br = { S_(20), S_(BANNER_Y - 4), S_(580), S_(BANNER_Y + 46) };
-        RedrawWindow(g_wnd, &br, 0, 0x1 | 0x4 | 0x80);
+        RedrawWindow(g_wnd, 0, 0, 0x1 | 0x4 | 0x80);
     }
     RedrawWindow(g_c[ID_SET_BANNER], 0, 0, 0x1 | 0x4);
     bool fixed = !vs && n->scctfix == 1;
     EnableWindow(g_c[ID_SET_CHUD], n->chud >= 0 && fixed);
     EnableWindow(g_c[ID_SET_INTRO], n->skipintro >= 0);
+    EnableWindow(g_c[ID_SET_COOP60], fixed && n->coop60 >= 0);
+    RedrawWindow(g_c[ID_SET_COOP60], 0, 0, 0x1 | 0x4);
     set_text(ID_SET_SPFPS, n->spfps == -1 ? "Single player: screen's Hz" : n->spfps == 0 ? "Single player: FPS unlock"
                          : n->spfps > 0 && n->spfps != 60 ? "Single player: custom FPS" : "Single player: 60 FPS");
     EnableWindow(g_c[ID_SET_SPFPS], fixed && n->spfps > -2);
@@ -1235,16 +1604,29 @@ static void copy_log(void)
 static void refresh_controls(void)
 {
     const UiState *s = &g_shown;
-    static int last_versus = -1;
-    if (last_versus != (int)s->versus) { /* Co-op <-> Versus: the Settings tab changes */
+    static int last_versus = -1, last_mode = -1;
+    if (last_versus != (int)s->versus || last_mode != s->mode) { /* the page changes: Co-op <-> Versus, hosting, joining */
+        bool vs_changed = last_versus != (int)s->versus;
         last_versus = s->versus;
-        if (g_tab == TAB_SET) show_tab(TAB_SET);
-        show_settings(&g_set);
+        last_mode = s->mode;
+        if (vs_changed) show_settings(&g_set);
+        show_tab(g_tab);
     }
     bool idle = s->mode == MODE_IDLE, host = s->mode == MODE_HOST, join = s->mode == MODE_JOIN;
     EnableWindow(g_c[ID_HOST], idle && !g_closing);
-    EnableWindow(g_c[ID_JOIN], idle && !g_closing);
+    EnableWindow(g_c[ID_JOIN], !g_closing);
     EnableWindow(g_c[ID_STOP], !idle && !g_closing);
+    { /* the start button: what Host | Join picks, or Stop while running */
+        static int last = -1;
+        int want = idle ? g_role : 2 + (host ? 0 : 1);
+        if (want != last) {
+            last = want;
+            set_text(ID_JOIN, !idle ? "Stop" : g_role ? "Join" : "Host");
+            RedrawWindow(g_c[ID_HOST], 0, 0, 0x1 | 0x4);
+            RedrawWindow(g_c[ID_JOIN], 0, 0, 0x1 | 0x4);
+        }
+    }
+    EnableWindow(g_c[ID_PLAYFIX], g_set.found && !fix_ok() && !g_closing && (!s->versus || g_set.vfix >= 0));
     EnableWindow(g_c[ID_SET_APPLY], g_set.found && !g_closing);
     EnableWindow(g_c[ID_SET_FRIEND], g_set.friend_ && !g_closing);
     EnableWindow(g_c[ID_SET_FIX], g_set.found && !g_closing && (!s->versus || g_set.vfix >= 0));
@@ -1257,23 +1639,23 @@ static void refresh_controls(void)
     EnableWindow(g_c[ID_JOINID], (idle || join) && !s->lobby);
     int which = host ? LIST_FRIENDS_ONLINE : LIST_HOSTING;
     if (which != g_list_shown) show_list(which);
-    set_text_once(ID_LISTLABEL, idle ? "" :
-                  host ? "Friends linked to your game right now:" :
-                         "Friends hosting - pick one and click Join:");
+    set_text_once(ID_LISTLABEL, host ? "Linked to your game" : "Friends hosting");
     /* the same button is "Join" for the friend and "Kick" for the host */
     set_text_once(ID_ACTION, host ? "Kick" : "Join");
-    ShowWindow(g_c[ID_ACTION], idle ? 0 : 5);
     EnableWindow(g_c[ID_ACTION], !g_closing && ((join && !s->lobby) || (host && g_nview[LIST_FRIENDS_ONLINE] > 0)));
-    ShowWindow(g_c[ID_REFRESH], host ? 0 : 5);
-    { /* level with the top of the list, or under Join when Join shows */
-        static int ry = -1;
-        int y = idle ? 190 : 230;
-        if (y != ry) { move_ctl(ID_REFRESH, 452, y); ry = y; }
+    { /* Join / Kick at the card's right edge when Refresh isn't there (hosting) */
+        static int ax = -1;
+        int x = host ? CX + CW - 16 - 92 : CX + CW - 16 - 196;
+        if (x != ax) { move_ctl(ID_ACTION, x, LIST_Y + 10); ax = x; }
     }
+    apply_visibility();
     EnableWindow(g_c[ID_REFRESH], !g_closing && (idle || (join && !s->lobby)));
     EnableWindow(g_c[ID_LAUNCH], !g_closing);
-    EnableWindow(g_c[ID_GAMEMODE], idle && !g_closing);
-    set_text_once(ID_GAMEMODE, s->versus ? "Versus" : "Co-op");
+    { /* Co-op | Versus: drawn from g_shown; redraw when it can or can't change */
+        static int gm = -1;
+        int want = (idle && !g_closing) | (s->versus ? 2 : 0);
+        if (want != gm) { gm = want; EnableWindow(g_c[ID_GAMEMODE], idle && !g_closing); RedrawWindow(g_c[ID_GAMEMODE], 0, 0, 0x1 | 0x4); }
+    }
     set_text_once(ID_LAUNCH, s->versus ? "Start Versus" : "Start Splinter Cell");
     EnableWindow(g_c[ID_COPYCONN], !idle);
 }
@@ -1473,7 +1855,13 @@ static void on_timer(void)
     if (st_dirty) {
         bool lobby_changed = st.lobby != g_shown.lobby || st.mode != g_shown.mode;
         g_shown = st;
-        set_text(ID_STATUS, st.status);
+        { /* "Ready (Co-op). Host a game, or join a friend." -> the state, and what to do under it */
+            char a[sizeof st.status], *dot = 0;
+            sfmt(a, sizeof a, "%s", st.status);
+            for (char *c = a; *c && !dot; c++) if (c[0] == '.' && c[1] == ' ') dot = c;
+            if (dot) { *dot = 0; set_text(ID_STATUS, a); set_text(ID_STATUS2, dot + 2); }
+            else { set_text(ID_STATUS, a); set_text(ID_STATUS2, ""); }
+        }
         stats_update(st.stats);
         if (lobby_changed) {
             char id[24] = "";
@@ -1495,8 +1883,20 @@ static void copy_text(const char *t) { clipboard_set(t); }
 static void on_command(int id, int code)
 {
     switch (id) {
-    case ID_HOST: push_cmd(CMD_HOST, 0); break;
-    case ID_JOIN: push_cmd(CMD_JOIN, 0); break;
+    case ID_HOST: /* Host | Join: pick (only while stopped) */
+        if (g_shown.mode == MODE_IDLE) { g_role = !g_role; RedrawWindow(g_c[ID_HOST], 0, 0, 0x1 | 0x4); }
+        break;
+    case ID_JOIN: /* the start button */
+        if (g_shown.mode != MODE_IDLE) push_cmd(CMD_STOP, 0);
+        else push_cmd(g_role ? CMD_JOIN : CMD_HOST, 0);
+        break;
+    case ID_PLAYFIX: /* Install (or Update) the fix, like Settings' button */
+        if (fix_ok()) break;
+        g_set_warn = false;
+        set_text(ID_SET_NOTE, "Working...");
+        if (g_shown.versus) push_cmd(CMD_VFIX, 1);
+        else push_cmd(CMD_SCCTFIX, 1);
+        break;
     case ID_STOP: push_cmd(CMD_STOP, 0); break;
     case ID_COPYID:
         if (g_shown.lobby) {
@@ -1557,6 +1957,7 @@ static void on_command(int id, int code)
         break;
     case ID_LAUNCH: push_cmd(CMD_LAUNCH, 0); break;
     case ID_REFRESH: push_cmd(CMD_REFRESH, 0); break;
+    case ID_NAV_PLAY: show_tab(TAB_PLAY); break;
     case ID_TAB_HOWTO: show_tab(TAB_HOWTO); break;
     case ID_TAB_LOG: show_tab(TAB_LOG); break;
     case ID_TAB_MODS: show_tab(TAB_MODS); break;
@@ -1575,11 +1976,28 @@ static void on_command(int id, int code)
         set_text(ID_SET_NOTE, "Working...");
         push_cmd(CMD_SKIPINTRO, g_set.skipintro == 1 ? 0 : 1);
         break;
-    case ID_SET_SPFPS: /* 60 -> the screen's -> no limit -> 60 */
+    case ID_SET_COOP60:
         g_set_warn = false;
         set_text(ID_SET_NOTE, "Working...");
-        push_cmd(CMD_SPFPS, g_set.spfps == 60 ? 0xffff : g_set.spfps == -1 ? 0 : 60);
+        push_cmd(CMD_COOP60, g_set.coop60 == 1 ? 0 : 1);
         break;
+    case ID_SET_SPFPS: { /* 60 | Screen | Unlock: the part under the mouse (keyboard: the next one) */
+        POINT pt;
+        RECT r;
+        int part = -1;
+        GetClientRect(g_c[ID_SET_SPFPS], &r);
+        if (GetCursorPos(&pt) && ScreenToClient(g_c[ID_SET_SPFPS], &pt) && pt.y >= 0 && pt.y < r.bottom) {
+            int x = r.right - S_(SPFPS_SEG);
+            if (pt.x >= x && pt.x < r.right) part = (int)((pt.x - x) * 3 / (r.right - x));
+        }
+        if (part < 0) part = g_set.spfps == 60 ? 1 : g_set.spfps == -1 ? 2 : 0;
+        int want = part == 0 ? 60 : part == 1 ? -1 : 0;
+        if (want == g_set.spfps) break;
+        g_set_warn = false;
+        set_text(ID_SET_NOTE, "Working...");
+        push_cmd(CMD_SPFPS, want == 60 ? 60 : want == -1 ? 0xffff : 0);
+        break;
+    }
     case ID_SET_CHUD:
         g_set_warn = false;
         set_text(ID_SET_NOTE, "Working...");
@@ -1623,14 +2041,9 @@ static void on_command(int id, int code)
 static LRESULT WINAPI wndproc(HWND w, UINT m, WPARAM wp, LPARAM lp)
 {
     switch (m) {
-    case WM_ERASEBKGND: {
-        RECT r;
-        GetClientRect(w, &r);
-        FillRect((HDC)wp, &r, g_br_bg);
-        draw_frames((HDC)wp);
-        draw_set_deco((HDC)wp);
+    case WM_ERASEBKGND:
+        draw_page((HDC)wp);
         return 1;
-    }
     case WM_CTLCOLORSTATIC:
     case WM_CTLCOLOREDIT:
     case WM_CTLCOLORLISTBOX:
@@ -1693,14 +2106,17 @@ int main(int argc, char **argv)
     if (g_dpi < 96) g_dpi = 96;
     { /* a small screen (a laptop at 150 %, 1366x768): draw a little smaller so the whole window fits */
         int fit = GetSystemMetrics(62 /* SM_CYMAXIMIZED: the screen's height for a window */) - 16;
-        int need = BOX_Y + BOX_H + 14 + 32; /* the window at 96 dpi, with its title bar */
+        int need = WIN_H + 32; /* the window at 96 dpi, with its title bar */
         if (fit > 300 && need * g_dpi / 96 > fit) g_dpi = fit * 96 / need;
         if (g_dpi < 72) g_dpi = 72;
     }
     const WCHAR *face = WTEXT("Segoe UI");
-    g_font = CreateFontW(-S_(12), 0, 0, 0, FW_NORMAL, 0, 0, 0, 1, 0, 0, CLEARTYPE_QUALITY, 0, face);
-    g_bold = CreateFontW(-S_(12), 0, 0, 0, FW_BOLD, 0, 0, 0, 1, 0, 0, CLEARTYPE_QUALITY, 0, face);
-    g_big = CreateFontW(-S_(16), 0, 0, 0, FW_BOLD, 0, 0, 0, 1, 0, 0, CLEARTYPE_QUALITY, 0, face);
+    g_font = CreateFontW(-S_(13), 0, 0, 0, FW_NORMAL, 0, 0, 0, 1, 0, 0, CLEARTYPE_QUALITY, 0, face);
+    g_bold = CreateFontW(-S_(13), 0, 0, 0, 600 /* semibold */, 0, 0, 0, 1, 0, 0, CLEARTYPE_QUALITY, 0, face);
+    g_mid = CreateFontW(-S_(15), 0, 0, 0, 600, 0, 0, 0, 1, 0, 0, CLEARTYPE_QUALITY, 0, face);
+    g_big = CreateFontW(-S_(17), 0, 0, 0, 600, 0, 0, 0, 1, 0, 0, CLEARTYPE_QUALITY, 0, face);
+    g_icon = CreateFontW(-S_(15), 0, 0, 0, FW_NORMAL, 0, 0, 0, 1, 0, 0, CLEARTYPE_QUALITY, 0, WTEXT("Segoe MDL2 Assets"));
+    g_icon_big = CreateFontW(-S_(20), 0, 0, 0, FW_NORMAL, 0, 0, 0, 1, 0, 0, CLEARTYPE_QUALITY, 0, WTEXT("Segoe MDL2 Assets"));
 
     HINSTANCE inst = GetModuleHandleW(0);
     WNDCLASSEXW wc;
@@ -1722,7 +2138,7 @@ int main(int argc, char **argv)
     wc.className = WTEXT("SCCTLinkWindow");
 
     DWORD style = WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
-    RECT r = { 0, 0, S_(600), S_(BOX_Y + BOX_H + 14) };
+    RECT r = { 0, 0, S_(WIN_W), S_(WIN_H) };
     AdjustWindowRectEx(&r, style, 0, 0);
     int ww = r.right - r.left, wh = r.bottom - r.top;
     int x = (GetSystemMetrics(0) - ww) / 2, y = (GetSystemMetrics(1) - wh) / 2;
@@ -1731,7 +2147,7 @@ int main(int argc, char **argv)
     if (!g_wnd) return 1;
     build();
     set_theme(T.dark); /* button label, title bar, scrollbars */
-    show_tab(TAB_HOWTO); /* start on "How to" */
+    show_tab(TAB_PLAY); /* start on "Play" */
     on_timer();
     ShowWindow(g_wnd, 1);
     UpdateWindow(g_wnd);

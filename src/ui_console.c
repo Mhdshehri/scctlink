@@ -37,7 +37,7 @@ void ui_settings(const UiSettings *s)
     printf("[settings] rawmouse %d friend %d\n", s->rawmouse, s->friend_ ? s->frawmouse : -2);
     printf("[settings] mouse sens %d turn %d friend %d %d\n", s->sens, s->turn, s->friend_ ? s->fsens : -2, s->friend_ ? s->fturn : -2);
     printf("[settings] versus %dx%d sens %d mult %d profile %d\n", s->vw, s->vh, s->vsens, s->vmult, s->have_vprofile);
-    printf("[settings] chud %d skipintro %d spfps %d\n", s->chud, s->skipintro, s->spfps);
+    printf("[settings] chud %d skipintro %d spfps %d coop60 %d\n", s->chud, s->skipintro, s->spfps, s->coop60);
     printf("[settings] vfix %d fps %d res %dx%d hud %d rate125 %d fov %d %d turn %d %d full %d\n", s->vfix, s->vf_fps, s->vf_w, s->vf_h,
            s->vf_hud, s->vf_rate125, s->vf_spyfov, s->vf_mercfov, s->vf_spyturn, s->vf_mercturn, s->vf_full);
     printf("[settings] scctfix %d mine %dx%d fov %d fps %d ws %d", s->scctfix, s->w, s->h, s->fov, s->fps, s->wsfov);
@@ -144,6 +144,10 @@ bool ui_poll(Cmd *c)
     case 'e': case 'E': /* single-player FPS: then "60", "-1" (the screen's) or "0" (no limit) */
         c->kind = CMD_SPFPS;
         c->arg = read_line(line, sizeof line) ? (atoi(line) == -1 ? 0xffff : (u64)(atoi(line) & 0xffff)) : 60;
+        break;
+    case '6': /* co-op at 60 FPS when hosting: then "1" or "0" */
+        c->kind = CMD_COOP60;
+        c->arg = read_line(line, sizeof line) && line[0] == '1';
         break;
     case 'i': case 'I': /* skip the intro videos: then "1" or "0" */
         c->kind = CMD_SKIPINTRO;

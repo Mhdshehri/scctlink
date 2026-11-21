@@ -19,6 +19,8 @@ cp build/fix/d3d9.dll "$D/SCCTFix-d3d9.dll"
 cp build/fix/d3d8.dll "$D/SCCTVersusFix-d3d8.dll"
 sed "s/\r*$/\r/" package/README.txt > "$D/README.txt"; sed "s/\r*$/\r/" LICENSE > "$D/LICENSE.txt"; sed "s/\r*$/\r/" THIRD-PARTY.txt > "$D/THIRD-PARTY.txt"  # Windows line endings
 (cd "$D" && sha256sum SCCTLink.exe steam_api.dll SCCTFix-d3d9.dll SCCTVersusFix-d3d8.dll README.txt LICENSE.txt THIRD-PARTY.txt > SHA256SUMS.txt)
+# fixed modes, dates and file order, so the zip is the same on any machine
+chmod 755 "$D" "$D"/*.exe "$D"/*.dll; chmod 644 "$D"/*.txt
 find "$D" -exec touch -d 2026-10-27T00:00:00Z {} +
-(cd dist && TZ=UTC zip -X -q -r "SCCTLink-$VER.zip" "SCCTLink-$VER")
+(cd dist && TZ=UTC zip -X -q "SCCTLink-$VER.zip" "SCCTLink-$VER/" $(cd "SCCTLink-$VER" && ls | LC_ALL=C sort | sed "s|^|SCCTLink-$VER/|"))
 sha256sum "dist/SCCTLink-$VER.zip"

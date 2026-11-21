@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.5
+
+- **Co-op sync fix (SCCT Fix):** some of the game's drawing code changed the co-op simulation, and what each PC draws depends on its own camera and frame rate, so the two PCs drifted apart and co-op disconnected. Now drawing can't change it: flickering lights, eye movement and sensor jitter use their own random numbers, characters' bones are worked out whether they're on screen or not, AI acts the same whether it was drawn or not, and the camera is left out of the check. Different frame rates on the two PCs no longer disconnect: both run at the slower PC's pace.
+- **Co-op at 60 FPS (new):** in missions the game's co-op runs at about 34 FPS. With **60 FPS when you host** (Settings, Co-op) it runs at about 60, at normal game speed. The host picks it and the friend's game follows (both need SCCTLink 1.5; 1.0 can't join a 1.5 lobby).
+- **New window:** a sidebar with the pages (Play, Mods, Settings, Log, How to), cards and icons. Play: Co-op | Versus, the status (red with an Install button while the fix is missing), Host | Join and one button that starts it (Stop while running). Settings: switches on the right of each row, single player FPS as 60 | Screen | Unlock.
+- The zip is the same on any machine that builds it (fixed file order and modes).
+
 ## 1.0
 
 First release. Since 0.9.9.9: Versus' Fullscreen can be turned off (a borderless window the size of the screen, for crashes, Alt+Tab and the Windows key); Versus' Settings are simpler (sensitivity is set in the game; turn speed per side as a percent); co-op's hidden FPS and FOV-factor fields are gone, and SCCTLink no longer writes settings the game ignores (DesiredFOV, MAXFPS) - the FOV goes through the SCCT Fix. Known: Versus' HUD is still stretched on wide screens.
