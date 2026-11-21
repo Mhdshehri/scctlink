@@ -944,6 +944,10 @@ IMP BOOL WINAPI CloseHandle(HANDLE);
 IMP DWORD WINAPI GetLastError(void);
 IMP BOOL WINAPI EnumDisplaySettingsA(const char *, DWORD, void *);
 static int g_fps = 60;        /* the limit now (0: none) */
+static int g_step_ok;         /* the co-op steps' two places are the game's code */
+static int g_step_hz;         /* what they are set to now (0: the game's) */
+static int g_step_dev;        /* dev build: SCCTFix.ini [Coop] StepHz, used outside a session */
+static void step_set(int hz);
 static LONGLONG g_fps_check;  /* when to look again */
 IMP DWORD WINAPI GetFileAttributesA(const char *);
 static char g_coop_file[300]; /* System\SCCTLink.coop: SCCTLink keeps it there during a co-op session */
@@ -974,16 +978,22 @@ static void fps_update(LONGLONG now)
     g_fps_check = now + g_freq;
     fov_read(); /* the FOV can change while the game runs */
     int want = 60, coop = coop_session();
+    /* the session's co-op steps a second (SCCTLink writes the host's choice into SCCTLink.coop) */
+    int hz = coop && g_coop_file[0] ? GetPrivateProfileIntA("Coop", "StepHz", 0, g_coop_file) : g_step_dev;
+    step_set(hz);
     if (!coop) {
         int v = GetPrivateProfileIntA("Display", "SingleFPS", 60, g_ini);
         want = v == -1 ? screen_hz() : v == 0 ? 0 : v < 30 ? 30 : v > 1000 ? 1000 : v;
-    }
+    } else if (g_step_hz > 60)
+        want = g_step_hz + 5;
+    else if (g_step_hz)
+        want = 65; /* 60 steps a second come out as 62.5 (the game's whole milliseconds): not slowed down */
     if (want == g_fps) return;
     g_fps = want;
     if (want) g_frame = (DWORD)g_freq / (DWORD)want;
     g_next = 0;
     char b[80];
-    if (coop) wsprintfA(b, "FPS: 60 (co-op session)\r\n");
+    if (coop) wsprintfA(b, "FPS: %d (co-op session)\r\n", want);
     else if (want) wsprintfA(b, "FPS: %d (single player)\r\n", want);
     else wsprintfA(b, "FPS: no limit (single player)\r\n");
     log_write(b, slen(b));
@@ -1104,10 +1114,11 @@ __declspec(dllexport) void *WINAPI Direct3DCreate9(UINT sdk)
        scored targets differently: all as if not drawn, on both PCs.
      - The camera moves the player's controller while drawing: it is left
        out of the checksum (the pawn itself stays in).
-   [Coop] StepHz (test): simulation steps a second, and so frames in a co-op
-   mission. The game starts at 30 and lets each PC go up to what it keeps up
-   with, at most 35; the slower PC's number is used (about 34). StepHz raises
-   both the start and the most to it. Both PCs should use the same value. */
+   Co-op steps a second (and so frames in a co-op mission): the game starts at
+   30 and lets each PC go up to what it keeps up with, at most 35; the slower
+   PC's number is used (about 34). SCCTLink can raise the start and the most
+   (System\SCCTLink.coop [Coop] StepHz, the host's choice, the same on every PC
+   in the session: with different numbers the mission stops at its start). */
 struct Patch { DWORD at; BYTE len; BYTE was[2]; BYTE now[2]; };
 static const struct Patch sync_patches[] = {
     { 0x109d243c, 2, { 0x74, 0x26 }, { 0x90, 0x90 } }, /* GetBoneMatrix: work out a stale frame */
@@ -1172,18 +1183,35 @@ static void sync_fix(void)
             log_write("Sync fix: on\r\n", 14);
         }
     }
-    int hz = GetPrivateProfileIntA("Coop", "StepHz", 0, g_ini);
-    if (!hz) return;
     const BYTE *s = (const BYTE *)STEP_AT, *m = (const BYTE *)STEP_MAX_AT;
-    if (hz < 30 || hz > 100 || s[0] != 0x6a || s[1] != 0x1e || m[0] != 0x6a || m[1] != 0x23) {
+    g_step_ok = s[0] == 0x6a && s[1] == 0x1e && m[0] == 0x6a && m[1] == 0x23;
+#ifdef SCCT_DEV
+    g_step_dev = GetPrivateProfileIntA("Coop", "StepHz", 0, g_ini); /* dev: from SCCTFix.ini, for tests */
+    step_set(g_step_dev);
+#endif
+}
+
+/* The co-op steps a second (0: the game's own). Used when the game sets up a
+   co-op session, so SCCTLink gives it before that (System\SCCTLink.coop,
+   [Coop] StepHz, the host's choice for everyone in the session). */
+static void step_set(int hz)
+{
+    char b[96];
+    static int bad = -1;
+    if (hz == g_step_hz || hz == bad) return;
+    if (!g_step_ok || (hz && (hz < 30 || hz > 100))) {
+        bad = hz; /* said once */
         wsprintfA(b, "Co-op steps: %d a second not used (30 to 100, or not this game's code)\r\n", hz);
         log_write(b, slen(b));
         return;
     }
-    BYTE v = (BYTE)hz;
-    code_write((void *)(STEP_AT + 1), &v, 1);
-    code_write((void *)(STEP_MAX_AT + 1), &v, 1);
-    wsprintfA(b, "Co-op steps: %d a second (game's: 30, at most 35)\r\n", hz);
+    bad = -1;
+    g_step_hz = hz;
+    BYTE start = hz ? (BYTE)hz : 30, most = hz ? (BYTE)hz : 35;
+    code_write((void *)(STEP_AT + 1), &start, 1);
+    code_write((void *)(STEP_MAX_AT + 1), &most, 1);
+    if (hz) wsprintfA(b, "Co-op steps: %d a second (game's: 30, at most 35)\r\n", hz);
+    else wsprintfA(b, "Co-op steps: the game's own\r\n");
     log_write(b, slen(b));
 }
 
@@ -1211,13 +1239,22 @@ BOOL WINAPI DllEntry(HINSTANCE dll, DWORD reason, void *reserved)
     memcpy(g_coop_file + n, "SCCTLink.coop", 14);
 #ifdef SCCT_DEV
     second_check();
-    if (g_second) memcpy(path + n, "SCCTFix-2.log", 14);
+    if (g_second) {
+        memcpy(path + n, "SCCTFix-2.log", 14);
+        char ini2[300];
+        memcpy(ini2, path, n);
+        memcpy(ini2 + n, "SCCTFix-2.ini", 14);
+        if (GetFileAttributesA(ini2) != (DWORD)-1) memcpy(g_ini, ini2, n + 14); /* its own settings, if there */
+    }
 #endif
     g_log = CreateFileA(path, 0x40000000 /* GENERIC_WRITE */, 1 /* FILE_SHARE_READ */, 0, 2 /* CREATE_ALWAYS */,
                         0x80000000 /* FILE_FLAG_WRITE_THROUGH */, 0);
     log_write("SCCT Fix loaded\r\n", 17);
 #ifdef SCCT_DEV
     log_write(g_second ? "Dev build: second game\r\n" : "Dev build: first game\r\n", g_second ? 24 : 23);
+    log_write("Dev: settings from ", 19);
+    log_write(g_ini, slen(g_ini));
+    log_write("\r\n", 2);
     patch_import_k32("CreateMutexW", (void *)hook_CreateMutexW);
 #endif
     QueryPerformanceFrequency(&g_freq);

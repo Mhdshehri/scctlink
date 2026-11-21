@@ -35,7 +35,7 @@
 #define CH_GAME 0
 #define CH_CTL 1
 #define CH_TCP 2
-#define PROTO '3' /* relay protocol; both players need the same */
+#define PROTO '4' /* relay protocol; both players need the same (4: the co-op steps a second in the lobby) */
 #define KEEPALIVE_MS 1000
 #define PEER_TIMEOUT_MS 30000
 #define HOST_QUIET_MS 15000
@@ -59,6 +59,12 @@ static bool g_no_launch, g_verbose;
 static const char *g_exe = "splintercell3";
 static const char *g_exe_opt;
 static bool g_versus; /* Spies vs. Mercenaries (SCCT_Versus.exe), up to 4 players */
+/* Co-op steps a second for this session (0 = the game's own, about 34): the
+   host's choice, sent to the others in the lobby data. Both PCs must use the
+   same number, or the mission stops at its start. */
+static int g_coop_hz;
+#define COOP_HZ_60 60
+static int coop60_state(void);
 /* What the player does in the game menus, per mode. */
 #define HOST_MENU (g_versus ? "In Versus: create a LAN game" : "Co-op -> LAN -> Create game")
 #define JOIN_MENU (g_versus ? "In Versus: open the LAN game list and join the host" : "Co-op -> LAN -> Join game")
@@ -1523,6 +1529,11 @@ static void on_lobby_entered(u64 lobby, uint32_t response)
     Peer *p = add_peer(g_host);
     if (!p) return;
     say("Joined %s's Splinter Cell lobby. Connecting to them through Steam...", who(g_host));
+    if (!g_versus) {
+        const char *hz = S.MM_GetLobbyData(MM, lobby, "scctlink_hz");
+        g_coop_hz = hz && !strcmp(hz, "60") ? COOP_HZ_60 : 0;
+        if (g_coop_hz) say("%s picked co-op at 60 FPS: your game uses it too.", who(g_host));
+    }
     S.Friends_SetRichPresence(F, "status", g_versus ? "Playing Splinter Cell Versus (SCCTLink)"
                                                     : "Playing Splinter Cell co-op (SCCTLink)");
     send_hello();
@@ -1544,6 +1555,8 @@ static void on_lobby_created(int32_t result, u64 lobby)
     S.MM_SetLobbyData(MM, lobby, "scctlink_ver", VERSION);
     S.MM_SetLobbyData(MM, lobby, "scctlink_mode", g_versus ? "versus" : "coop");
     { char pr[2] = { PROTO, 0 }; S.MM_SetLobbyData(MM, lobby, "scctlink_proto", pr); }
+    g_coop_hz = !g_versus && coop60_state() == 1 ? COOP_HZ_60 : 0;
+    S.MM_SetLobbyData(MM, lobby, "scctlink_hz", g_coop_hz ? "60" : "0");
     S.MM_SetLobbyJoinable(MM, lobby, true);
     S.Friends_SetRichPresence(F, "status", g_versus ? "Hosting Splinter Cell Versus (SCCTLink)"
                                                     : "Hosting Splinter Cell co-op (SCCTLink)");
@@ -1553,6 +1566,7 @@ static void on_lobby_created(int32_t result, u64 lobby)
     clipboard_set(codestr(lobby));
     say("");
     say("=== Lobby is ready (code %s, copied to clipboard) ===", codestr(lobby));
+    if (g_coop_hz) say("Co-op at 60 FPS (Settings): your friend's game uses it too.");
     say("1. Click \"Start %s\", then %s.", g_versus ? "Versus" : "Splinter Cell", HOST_MENU);
     if (g_versus)
         say("   Up to %d players. Keep \"listed\" off so the game isn't on a public list.", g_max_players);
@@ -2345,7 +2359,7 @@ static int ini_set(const char *path, const char *section, const char *key, const
    SHA-256 is exactly this one (checked: no network functions, starts no
    programs, only writes System\SCCTFix.log). */
 #define SCCTFIX_FILE "SCCTFix-d3d9.dll"
-#define SCCTFIX_SHA "512607331f52c5ae89fab9674cfdf7526bd68b06016a265fef8132a3202979dd" /* ours: fix/d3d9fix.c (fix/build_fix.sh) */
+#define SCCTFIX_SHA "0e6749f513f634ac33e26cdcd6f65e22197cd02fca98a75e136056e807c82d43" /* ours: fix/d3d9fix.c (fix/build_fix.sh) */
 #define SCCTFIX_OLD_SHA "2f05d8e9e7aaf750eb2889c7ba57dd453820e3a794b9ba74c43730446a84cae9" /* the original; ours replaces it */
 bool sha256_file(const char *path, char hex[65]);
 static void scctfix_paths(char *src, char *dst, char *bak, char *ini, size_t n)
@@ -2363,7 +2377,8 @@ static int scctfix_state(void)
     scctfix_paths(src, dst, bak, ini, sizeof src);
     if (!sha256_file(dst, hex)) return 0;
     /* earlier builds of ours (testing versions) are replaced like the original */
-    static const char *const ours[] = { "162255f10db01e864f79beb1005cccfedb6e7de0f1e377ccf28ce6b68454ac23",
+    static const char *const ours[] = { "512607331f52c5ae89fab9674cfdf7526bd68b06016a265fef8132a3202979dd", /* 1.0 */
+                                        "162255f10db01e864f79beb1005cccfedb6e7de0f1e377ccf28ce6b68454ac23",
                                         "2c5fa6a505c3867db282523c5c00a7f66a6bfa5bc598078ee654a2445a9fd2f5",
                                         "2228214d27cb77ad2b13e63510bad49bab834eba7ce8665e8a55371419994ea4",
                                         "b5624f3f18d4c775f1aca05c8e0fffabcc2aaf523321073f558f2a9d815985da",
@@ -2468,20 +2483,24 @@ static int chud_state(void)
 /* the resolution and FOV the SCCT Fix uses (kept when the other settings change);
    set by scfini_display() */
 static const char *g_scf_res, *g_scf_fov;
+static int g_scf_coop60 = -1; /* set by coop60(); -1 = keep */
 static bool scfini_write(int hud, int raw, int spfps)
 {
-    char p[900], t[1400], res[32] = "", fov[16] = "75";
+    char p[900], t[1700], res[32] = "", fov[16] = "75";
     chud_path(p, sizeof p);
     if (g_scf_res) sfmt(res, sizeof res, "%s", g_scf_res); else ini_get(p, "Display", "Resolution", res, sizeof res);
     if (g_scf_fov) sfmt(fov, sizeof fov, "%s", g_scf_fov); else ini_get(p, "Display", "FOV", fov, sizeof fov);
+    int c60 = g_scf_coop60 >= 0 ? g_scf_coop60 : coop60_state() == 1;
     sfmt(t, sizeof t, "; SCCT Fix settings - written by SCCTLink.\r\n"
                       "[HUD]\r\n; 1 = the HUD, menus and text keep their shape on wide screens (4:3 in the middle).\r\nFix=%d\r\n"
                       "[Mouse]\r\n; 1 = the mouse is read as Windows Raw Input: no acceleration, any polling rate.\r\nRaw=%d\r\n"
                       "[Display]\r\n; single player only: 60, -1 = the screen's refresh rate, 0 = FPS unlock (the game itself stops at 100).\r\n"
                       "; In an SCCTLink co-op session the SCCT Fix keeps 60 by itself.\r\nSingleFPS=%d\r\n"
                       "; WxH the game draws at; empty = the screen's own.\r\nResolution=%s\r\n"
-                      "; 75 = the game's own view (wider on wide screens by itself); 40 to 150.\r\nFOV=%s\r\n",
-         hud, raw, spfps, res, fov);
+                      "; 75 = the game's own view (wider on wide screens by itself); 40 to 150.\r\nFOV=%s\r\n"
+                      "[Coop]\r\n; 1 = when you host, co-op runs at 60 FPS (the game's: about 34). Your friend's game follows the host.\r\n"
+                      "Fps60=%d\r\n",
+         hud, raw, spfps, res, fov, c60);
     FILE *f = fopen(p, "wb");
     bool ok = f && fwrite(t, 1, strlen(t), f) == strlen(t);
     if (f && fclose(f) != 0) ok = false;
@@ -2530,6 +2549,31 @@ static void spfps(int v)
     else if (v == 60) set_say("Single player: 60 FPS (as in co-op).");
     else set_say(v == -1 ? "Single player: your screen's refresh rate. In an SCCTLink co-op session the SCCT Fix keeps 60 by itself."
                          : "Single player: no FPS limit. In an SCCTLink co-op session the SCCT Fix keeps 60 by itself.");
+    settings_publish();
+}
+/* Co-op at 60 FPS when hosting: 1 on, 0 off, -1 no game folder. */
+static int coop60_state(void)
+{
+    if (chud_state() < 0) return -1;
+    char p[900], v[8];
+    chud_path(p, sizeof p);
+    return ini_get(p, "Coop", "Fps60", v, sizeof v) && v[0] == '1';
+}
+static void coop60(bool on)
+{
+    g_uiset.note[0] = 0;
+    g_uiset.note_warn = false;
+    if (chud_state() < 0) set_say("! Co-op FPS: the game's folder wasn't found (only Steam copies).");
+    else if (scctfix_state() != 1) set_say("! Co-op at 60 FPS is part of the SCCT Fix: install it first.");
+    else if (g_mode != MODE_IDLE) set_say("! Co-op FPS: click Stop first (it is picked when you host).");
+    else {
+        g_scf_coop60 = on;
+        bool ok = scfini_write(chud_state() == 1, raw_state() == 1, spfps_state());
+        g_scf_coop60 = -1;
+        if (!ok) set_say("! Co-op FPS: couldn't write System\\SCCTFix.ini.");
+        else set_say(on ? "Co-op at 60 FPS when you host. Your friend's game follows the host (both need SCCTLink " VERSION ")."
+                        : "Co-op at the game's own frame rate (about 34 FPS in missions).");
+    }
     settings_publish();
 }
 static void chud(bool on)
@@ -3245,6 +3289,7 @@ static void settings_publish(void)
     u->vfix = u->found ? vfix_state() : -1;
     u->chud = u->found ? chud_state() : -1;
     u->spfps = u->found && u->chud >= 0 ? spfps_state() : -2;
+    u->coop60 = u->found ? coop60_state() : -1;
     u->skipintro = u->found ? skipintro_state() : -1;
     vfix_read(u);
     const char *rm = u->found ? set_value(g_mfs, g_nmfs, "rawmouse") : 0;
@@ -3766,6 +3811,7 @@ static void stop_mode(bool quiet)
     reset_all();
     g_mode = MODE_IDLE;
     g_is_host = false;
+    g_coop_hz = 0;
     ui_list(LIST_FRIENDS_ONLINE, 0, 0);
     ui_list(LIST_HOSTING, 0, 0);
     if (!quiet) say("Stopped.");
@@ -3793,20 +3839,25 @@ static void start_mode(int mode)
 static bool g_stats_on;
 
 /* While in a co-op session: System\SCCTLink.coop (and a named event) tell the
-   SCCT Fix to keep 60 FPS, whatever single player's setting. Removed when the
-   session ends and when SCCTLink starts idle (a left-over after a crash). */
+   SCCT Fix to keep 60 FPS, whatever single player's setting. The file also
+   holds the session's co-op steps a second (StepHz, the host's choice; 0 = the
+   game's own). Removed when the session ends and when SCCTLink starts idle (a
+   left-over after a crash). */
 static void coop_flag(bool on)
 {
-    static int last = -1, last_file = -1;
+    static int last = -1, last_file = -1, last_hz = -1;
     if (last != (int)on) { last = on; plat_coop_flag(on); }
-    if (last_file == (int)on || !g_mf_dir[0]) return; /* no game folder yet: try again next time */
+    if ((last_file == (int)on && (!on || last_hz == g_coop_hz)) || !g_mf_dir[0]) return; /* no game folder yet: try again next time */
     last_file = on;
+    last_hz = g_coop_hz;
     char p[900];
     sfmt(p, sizeof p, "%s" PATHSEP "System" PATHSEP "SCCTLink.coop", g_mf_dir);
     if (on) {
         FILE *f = fopen(p, "wb");
-        static const char t[] = "SCCTLink co-op session: the SCCT Fix keeps 60 FPS while this file is here.\r\n";
-        if (f) { fwrite(t, 1, sizeof t - 1, f); fclose(f); }
+        char t[200];
+        sfmt(t, sizeof t, "; SCCTLink co-op session: the SCCT Fix keeps 60 FPS while this file is here.\r\n"
+                          "[Coop]\r\n; co-op steps (and frames) a second, the host's choice; 0 = the game's own\r\nStepHz=%d\r\n", g_coop_hz);
+        if (f) { fwrite(t, 1, strlen(t), f); fclose(f); }
     } else
         remove(p);
 }
@@ -3908,6 +3959,7 @@ static void handle_cmd(const Cmd *c)
     case CMD_VFIX: vfix(c->arg != 0); break;
     case CMD_CHUD: chud(c->arg != 0); break;
     case CMD_SPFPS: spfps(c->arg == 0xffff ? -1 : c->arg == 0 ? 0 : (int)c->arg); break;
+    case CMD_COOP60: coop60(c->arg != 0); break;
     case CMD_SKIPINTRO: skipintro(c->arg != 0); break;
     case CMD_APPLY_VFIX: apply_vfix(c->arg, false); break;
     case CMD_APPLY_VFIX2: apply_vfix(c->arg, true); break;

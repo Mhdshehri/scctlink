@@ -167,7 +167,7 @@ enum {
     ID_SET_VTURNM, ID_SL_VSPY1, ID_SL_VMERC1, ID_SL_VSPY2, ID_SL_VMERC2, ID_SF_VFOV, ID_SET_CHUD, ID_SET_INTRO,
     /* the Settings tab's banner, section titles and notes */
     ID_SET_BANNER, ID_SET_BANSUB, ID_SEC_DISP, ID_SEC_MOUSE, ID_SEC_CLASS, ID_SET_RAWNOTE, ID_SET_SPNOTE, ID_SET_VRATENOTE, ID_SET_SPFPS,
-    ID_SET_APPLY, ID_STATS,
+    ID_SET_COOP60, ID_SET_APPLY, ID_STATS,
     ID_GAMEMODE, /* keep last */
 };
 
@@ -473,10 +473,14 @@ static void draw_tab(DrawItem *d)
 
 /* An I / O switch: a pill (green with I when on, grey with O when off) and its name. */
 static bool g_vf_hud, g_vf_rate, g_vf_full = true;
-static bool is_switch(UINT id) { return id == ID_SET_CHUD || id == ID_SET_INTRO || id == ID_SET_MOUSE || id == ID_SET_VHUD || id == ID_SET_VRATE; }
+static bool is_switch(UINT id)
+{
+    return id == ID_SET_CHUD || id == ID_SET_INTRO || id == ID_SET_MOUSE || id == ID_SET_VHUD || id == ID_SET_VRATE || id == ID_SET_COOP60;
+}
 static bool switch_on(UINT id)
 {
     return id == ID_SET_CHUD ? g_set.chud == 1 : id == ID_SET_INTRO ? g_set.skipintro == 1 : id == ID_SET_MOUSE ? g_set.rawmouse == 1
+         : id == ID_SET_COOP60 ? g_set.coop60 == 1
          : id == ID_SET_VHUD ? g_vf_full : g_vf_rate;
 }
 static void draw_switch(DrawItem *d)
@@ -751,7 +755,9 @@ static void build(void)
     framed(ID_SET_FOV, E, NUM, 180, 494, 64, 24, 6, 4);
     /* FOV for the screen's shape (the game's default 75 is for 4:3). Co-op
        needs the same number on both PCs, so it's a choice, never automatic. */
-    ctl(ID_SF_FOV, T_, WTEXT(""), ELL, 0, 250, 498, 326, 18, g_font);
+    ctl(ID_SF_FOV, T_, WTEXT(""), ELL, 0, 250, 498, 136, 18, g_font);
+    /* co-op at 60 FPS when this PC hosts (the joining friend's game follows the host) */
+    ctl(ID_SET_COOP60, B, WTEXT("Co-op 60 FPS (host)"), OD, 0, 392, 494, 180, 24, g_font);
     ctl(ID_SET_CHUD, B, WTEXT("Widescreen HUD"), OD, 0, 28, 522, 172, 24, g_font);
     ctl(ID_SET_INTRO, B, WTEXT("Skip intro videos"), OD, 0, 206, 522, 180, 24, g_font);
     /* single player's frame rate (co-op is always 60): click for 60 / the screen's / no limit */
@@ -802,7 +808,8 @@ static bool set_coop_only(int id)
 {
     return id == ID_SL_FOV || id == ID_SET_FOV || id == ID_SF_FOV || id == ID_SET_FRIEND || id == ID_SET_MOUSE ||
            (id >= ID_SL_MOUSE && id <= ID_SF_MOUSE) || /* Versus: sensitivity is set in the game itself */
-           id == ID_SET_CHUD || id == ID_SET_INTRO || id == ID_SET_RAWNOTE || id == ID_SET_SPFPS || id == ID_SET_SPNOTE;
+           id == ID_SET_CHUD || id == ID_SET_INTRO || id == ID_SET_RAWNOTE || id == ID_SET_SPFPS || id == ID_SET_SPNOTE ||
+           id == ID_SET_COOP60;
 }
 static void move_ctl(int id, int x, int y) { SetWindowPos(g_c[id], 0, S_(x), S_(y), 0, 0, 0x1 | 0x4 | 0x10 /* no size, z-order, activate */); }
 /* a framed text box: the frame at x, y, the box inside it */
@@ -1045,7 +1052,7 @@ static void show_settings(const UiSettings *n)
                                else sfmt(b, sizeof b, "%s: not set", who); set_text(id, b); } while (0)
     if (!vs) FR(ID_SF_RES, n->fw && n->fh, "%s: %dx%d", who, n->fw, n->fh);
     if (!vs && n->scctfix == 1 && !n->friend_) set_text(ID_SF_RES, "the SCCT Fix draws at it");
-    if (!vs && n->scctfix == 1 && !n->friend_) set_text(ID_SF_FOV, "75 = the game's; wide screens see more by themselves");
+    if (!vs && n->scctfix == 1 && !n->friend_) set_text(ID_SF_FOV, "75 = the game's");
     FR(ID_SF_FOV, n->ffov, "%s: %d", who, n->ffov);
     if (!vs) FR(ID_SF_MOUSE, n->fturn, "%s: aim turn %d.%02d%s", who, n->fturn / 100, n->fturn % 100, n->fturn != n->turn ? "  <- must match" : "");
     if (vs) set_text(ID_SF_MOUSE, n->have_vprofile ? "" : "(no profile yet)");
@@ -1075,6 +1082,8 @@ static void show_settings(const UiSettings *n)
     bool fixed = !vs && n->scctfix == 1;
     EnableWindow(g_c[ID_SET_CHUD], n->chud >= 0 && fixed);
     EnableWindow(g_c[ID_SET_INTRO], n->skipintro >= 0);
+    EnableWindow(g_c[ID_SET_COOP60], fixed && n->coop60 >= 0);
+    RedrawWindow(g_c[ID_SET_COOP60], 0, 0, 0x1 | 0x4);
     set_text(ID_SET_SPFPS, n->spfps == -1 ? "Single player: screen's Hz" : n->spfps == 0 ? "Single player: FPS unlock"
                          : n->spfps > 0 && n->spfps != 60 ? "Single player: custom FPS" : "Single player: 60 FPS");
     EnableWindow(g_c[ID_SET_SPFPS], fixed && n->spfps > -2);
@@ -1574,6 +1583,11 @@ static void on_command(int id, int code)
         g_set_warn = false;
         set_text(ID_SET_NOTE, "Working...");
         push_cmd(CMD_SKIPINTRO, g_set.skipintro == 1 ? 0 : 1);
+        break;
+    case ID_SET_COOP60:
+        g_set_warn = false;
+        set_text(ID_SET_NOTE, "Working...");
+        push_cmd(CMD_COOP60, g_set.coop60 == 1 ? 0 : 1);
         break;
     case ID_SET_SPFPS: /* 60 -> the screen's -> no limit -> 60 */
         g_set_warn = false;

@@ -711,6 +711,11 @@ def main():
         hm.p.stdin.write("F\n0\n"); hm.p.stdin.flush()
         check(hm.wait_for(r"SCCT Fix removed", timeout=10, since=at) is not None, "removed again")
         check(os.path.exists(os.path.join(ga, "System", "SCCTLink.coop")), "co-op session: System\\SCCTLink.coop is there (the SCCT Fix keeps 60 FPS)")
+        check(b"StepHz=0\r\n" in rd(ga, "System", "SCCTLink.coop"), "...with the host's co-op steps a second (the game's own: StepHz=0)")
+        at = hm.mark()
+        hm.p.stdin.write("6\n1\n"); hm.p.stdin.flush()
+        check(hm.wait_for(r"Co-op FPS: click Stop first", timeout=10, since=at) is not None,
+              "co-op 60 FPS can't be changed during a session (it is the host's pick when the lobby is made)")
         # the live stats window's numbers
         check(jm.wait_for(r"\[stats\] user1191   ping \d+ ms   loss [\d.-]+%?   \d+/\d+ pkt/s", timeout=10) is not None,
               "live stats: ping, loss and packets per second for the linked friend")
