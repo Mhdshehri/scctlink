@@ -1,389 +1,156 @@
 # SCCTLink
 
-SCCTLink lets you play Splinter Cell: Chaos Theory online with your Steam
-friends: the co-op campaign and Versus (Spies vs. Mercenaries).
+**Splinter Cell: Chaos Theory co-op and Versus with your Steam friends, after the official servers went dark.**
+No VPN, no port forwarding, no strangers: only your Steam friends can join, and nobody sees anyone's IP address.
 
-It only works between Steam friends. Nobody else can see your game or
-join it.
+By Mhdshehri. **[Download the latest release](../../releases/latest)** (Windows, one zip, nothing to install).
 
-[**Download the latest release**](../../releases/latest) (Windows)
+![SCCTLink: the Play page](docs/images/play-coop.png)
 
-## Why it's needed
+| Settings: co-op | Settings: Versus |
+|---|---|
+| ![Settings, co-op](docs/images/settings-coop.png) | ![Settings, Versus](docs/images/settings-versus.png) |
+| **Mods: co-op** | **Mods: Versus** |
+| ![Mods, co-op](docs/images/mods-coop.png) | ![Mods, Versus](docs/images/mods-versus.png) |
 
-Ubisoft shut down the game's online servers, so the only multiplayer left
-is LAN: both PCs have to be on the same network. To play with a friend in
-another house, people install a VPN like Hamachi or Radmin to fake that
-network: an extra program and account, your IP visible to the other side,
-and often lag or disconnects.
+## What you get
 
-SCCTLink does it through Steam instead. The host makes a normal LAN game,
-SCCTLink carries it to your friends through Valve's servers, and the game
-thinks you're on the same LAN. No VPN, nothing to set up on your router,
-and neither of you sees the other's IP.
+- **Co-op (2 players):** the campaign, with the **SCCT Fix**: co-op no longer drifts apart and disconnects, and it can run at **60 FPS** in missions (the game's own is about 34).
+- **Versus (up to 4 players):** Spies vs. Mercenaries in a private game, with the **Versus Fix** for today's PCs. For public servers and strangers, use [Enhanced SCCT Versus](https://github.com/Joshhhuaaa/EnhancedSCCTVersus).
+- **Private:** everything goes through Valve's relay; only the host's Steam friends get in.
+- **Checked:** the **Mods** page compares your game files with your friend's, so a difference shows up before it breaks co-op.
 
-- **Co-op (2 players):** the campaign. The **SCCT Fix** stops co-op
-  disconnecting and can run it at 60 FPS, and the **Mods** page checks that
-  both PCs match.
-- **Versus (up to 4 players):** Spies vs. Mercenaries with your friends, in
-  a private game. The **Versus Fix** fixes Versus on today's PCs. To play
-  online with other people (public servers, a server list), use
-  [Enhanced SCCT Versus](https://github.com/Joshhhuaaa/EnhancedSCCTVersus),
-  which is made for that.
+## Use it
 
-You don't install anything. Unzip it and open `SCCTLink.exe`. Everyone
-playing needs it.
+**You need:** the game on Steam, Steam open, your friends on your Steam friends list, the same SCCTLink version, and a clean game (no other `d3d9.dll` / `d3d8.dll`; Steam's **Verify integrity of game files** if unsure).
 
-## Getting started
+1. Unzip the release anywhere and run `SCCTLink.exe`. It asks for administrator rights (the game's files are in Program Files). If Windows says "Windows protected your PC": **More info**, **Run anyway** (SCCTLink isn't code-signed).
+2. **First time, everyone, once:**
+   - **Co-op:** start the game once from Steam and close it. In SCCTLink click **Install SCCT Fix** on **Play**. Start the game once more and close it.
+   - **Versus:** start Versus once, **make a profile** and close it. In SCCTLink pick **Versus** at the top and click **Install Versus Fix**.
+3. Play:
+   - **Host:** on **Play** pick **Host a game** and click **Host**. Then **Start Splinter Cell** and in the game **Co-op → LAN → Create game** (Versus: **Start Versus**, create a LAN game).
+   - **Friends:** pick **Join a friend** and click **Join**, pick the host and click **Join** (or paste the host's lobby code, like `1MCE-2B2`, and click **Join this code**). When SCCTLink says you're linked: **Start Splinter Cell**, **Co-op → LAN → Join game**.
+   - Keep SCCTLink open while you play.
+4. **60 FPS co-op:** the host turns on **60 FPS when you host** (**Settings → Co-op**) before hosting. The friend's game follows the host by itself.
 
-### What you need
-
-- Splinter Cell: Chaos Theory on Steam
-- Steam open and online
-- The other players on your Steam friends list
-- The same SCCTLink version as your friends
-- **A clean game:** no other mods, especially no other `d3d9.dll` or
-  `d3d8.dll` in the game folder (they clash with SCCTLink's fixes). Run
-  **Verify integrity of game files** in Steam first (right-click the game →
-  Properties → Installed Files).
-- **The game started once:** for co-op, start Splinter Cell once from Steam
-  and close it, so it makes its settings files. For Versus, start Versus
-  once, **make a profile**, and close it.
-
-### Open SCCTLink
-
-1. Download `SCCTLink-<version>.zip` from [Releases](../../releases/latest)
-   and unzip it anywhere (the Desktop is fine). Keep the files together.
-2. Open `SCCTLink.exe`. Windows asks for administrator rights: SCCTLink
-   changes the game's settings files, which are inside Program Files.
-3. If Windows says "Windows protected your PC", click **More info**, then
-   **Run anyway**. It shows up because SCCTLink is new and not signed with a
-   paid certificate.
-
-The pages are on the left: **Play**, **Mods**, **Settings**, **Log** and
-**How to**. On **Play**, pick **Co-op** or **Versus** at the top. Everyone
-picks the same one.
-
-<p align="center">
-  <img src="docs/images/play-coop.png" width="560" alt="SCCTLink's Play page">
-</p>
-
-### Co-op
-
-**First time (both players, once):**
-1. Start the game once from Steam and close it (see What you need).
-2. In SCCTLink, click **Install SCCT Fix** on **Play** (or **Install** on
-   the **Settings** page).
-3. Start the game once more and close it. From then on it's ready.
-
-**Host:**
-1. On **Play**, pick **Host a game** and click **Host**. For 60 FPS in
-   missions, turn on **60 FPS when you host** in **Settings** first: your
-   friend's game follows yours.
-2. Click **Start Splinter Cell**, then in the game: **Co-op → LAN → Create game**.
-3. Leave SCCTLink open while you play.
-
-**Friend:**
-1. On **Play**, pick **Join a friend** and click **Join**, then pick the
-   host in the list and click **Join**.
-   Not in the list? Click **Refresh**, or paste the host's lobby code
-   (like `1MCE-2B2`) and click **Join this code**.
-2. When SCCTLink says you're linked, click **Start Splinter Cell**, then
-   in the game: **Co-op → LAN → Join game** and pick the host.
-3. Leave SCCTLink open while you play.
-
-### Versus
-
-**First time (everyone, once):**
-1. Start Versus once, make a profile, and close the game. SCCTLink can't
-   set things up before the profile exists.
-2. In SCCTLink, pick **Versus** at the top of **Play** and click
-   **Install Versus Fix** (or **Install** on the **Settings** page).
-
-**Host:** pick **Host a game**, click **Host**, then **Start Versus** and
-create a LAN game.
-
-**Friends:** pick **Join a friend**, click **Join**, pick the host and click
-**Join**. When you're linked, click **Start Versus** and join the host from
-the LAN list.
-
-## The fixes
-
-Both are installed with one click (**Install** on **Play** or in
-**Settings**) and taken out with **Remove** in **Settings**.
-
-### SCCT Fix (co-op and story)
-
-- **Co-op disconnects:** Chaos Theory's co-op runs the same game on both
-  PCs and checks that they match. Some of the game's drawing code changed
-  that game (flickering lights, eye movement, characters off screen, the
-  camera), and what each PC draws depends on its own camera and frame
-  rate, so the two drifted apart and the game cut the connection. The fix
-  stops drawing from changing it. Different frame rates no longer
-  disconnect: both PCs run at the slower one's pace.
-- **Co-op at 60 FPS:** in missions the game's co-op runs at about 34 FPS
-  (it moves both PCs forward in fixed steps). With **60 FPS when you host**
-  (Settings, Co-op) it runs at about 60, at normal game speed. The host
-  picks it and the friend's game follows, so both always match.
-- **Single player:** 60 FPS, your screen's refresh rate, or **FPS unlock**
-  (the game itself stops at 100).
-- **Stretched HUD on wide screens:** the HUD and menus keep their shape.
-- **Wrong resolution:** the game runs at the resolution you choose, or your
-  screen's, even with Windows display scaling.
-- **FOV can't be changed:** the game ignores its own FOV setting, so the
-  fix sets the camera's FOV. Wide screens also see more on the sides.
-- **Mouse acceleration:** raw mouse input, with any polling rate.
-- **Alt+Tab problems:** the game runs in a borderless window.
-
-These work in the single-player story too.
-
-### Versus Fix
-
-- **Locked to 30 FPS:** the limit is removed (Max FPS in Settings).
-- **Aim zigzags with fast mice:** the mouse is sent the way Versus expects
-  (125 reports a second).
-- **Keeps going back to 1600x1200:** each time Versus starts and closes,
-  your resolution is set again in the game's files and profiles.
-- **Fullscreen problems:** with **Fullscreen** off, Versus runs in a
-  borderless window the size of the screen, so Alt+Tab and the Windows key
-  don't drop it.
-- **Mercenary's flashlight doesn't light anything:** Versus is switched to
-  its other way of drawing shadows, which works on today's graphics cards.
-- **One FOV and turn speed for everyone:** set them for spies and
-  mercenaries separately.
-
-Not fixed yet: Versus' HUD is still stretched on wide screens.
+Everyone picks the same mode (Co-op or Versus) and needs the same SCCTLink version.
 
 ## The pages
 
-### Play
-- **Co-op | Versus** at the top.
-- **The status:** what SCCTLink is doing. It's red, with an **Install**
-  button, while this mode's fix is missing.
-- **Host a game | Join a friend:** pick one, then click the button next to
-  it. While hosting or joining that button is **Stop**.
-- **Friends hosting** (or, for the host, who is linked), with **Join** /
-  **Kick** and **Refresh**, and the **Lobby code**: **Copy code** to send
-  yours, or paste a friend's and click **Join this code**.
-- **Start Splinter Cell** (or **Start Versus**), **Live stats** (text on
-  top of the game with the ping and packet loss for each friend; drag it
-  anywhere, right-click it to close) and **Details** (ports, ping and
-  packet loss, in the Log).
+| | |
+|---|---|
+| **Play** | Co-op or Versus, the status (red with an **Install** button while the fix is missing), Host or Join and its button (**Stop** while running), friends hosting, the lobby code, **Start**, **Live stats** (ping and packet loss over the game), **Details**. |
+| **Mods** | Your game files and mods next to your friend's. Green when **all party members match**; every difference in red. |
+| **Settings** | The fix (Install / Update / Remove), then display, game, co-op and mouse settings. Close the game before **Apply**: it saves its own settings when it closes. Originals are kept as `<name>.scctlink-backup`. |
+| **Log** | Everything SCCTLink did. **Copy log**, and **Report** (opens a GitHub issue and the folder with `scctlink.log`; the log has no IP addresses). |
+| **How to** | Your steps, ticked off as they happen. |
 
-### Mods
-Compares your game with your friend's. The line on top is green when
-**all party members match**, or says who doesn't. Under it: your mods on
-the left, your friend's on the right, then every difference in red.
-Click **Check again** after you change something.
-Co-op compares only the co-op files; Versus compares only the Versus folder.
+## The fixes
 
-<p align="center">
-  <img src="docs/images/mods-coop.png" width="380" alt="Mods page in co-op">
-  <img src="docs/images/mods-versus.png" width="380" alt="Mods page in Versus">
-</p>
+**SCCT Fix** (`d3d9.dll`, co-op and story)
+- **Co-op sync:** some of the game's drawing code changed the co-op simulation, and what each PC draws depends on its camera and frame rate, so the two PCs drifted apart. Now they don't, even at different frame rates (both run at the slower PC's pace).
+- **60 FPS co-op** when the host picks it; single player at 60, your screen's refresh rate, or unlocked (the game stops at 100).
+- Widescreen HUD, your resolution (also with Windows scaling), a working FOV, raw mouse, a borderless window.
 
-### Settings
-On top, the fix for this mode: installed (green) or not (red), with its
-**Install**, **Update** or **Remove** button. Close the game before you
-change anything here: it saves its own settings when it closes.
-
-<p align="center">
-  <img src="docs/images/settings-coop.png" width="380" alt="Settings page in co-op">
-  <img src="docs/images/settings-versus.png" width="380" alt="Settings page in Versus">
-</p>
-
-**Co-op**
-- **Display:** resolution and FOV (75 is the game's own).
-- **Game:** **Widescreen HUD**, **Skip intro videos**, and the
-  single-player frame rate: **60**, your **Screen**'s refresh rate, or
-  **Unlock**.
-- **Co-op:** **60 FPS when you host**. Your friend's game follows the host.
-- **Mouse:** **Raw mouse**, sensitivity, and **Aim turn** (how fast you
-  turn while aiming; both players need the same).
-- **Use friend's** copies your friend's values into the fields.
-
-**Versus**
-- **Display:** resolution (Versus starts at it) and **Max FPS** (0 = no
-  limit).
-- **Window and mouse:** **Fullscreen** (off = a borderless window the size
-  of the screen) and **Mouse fix (125 Hz)** (for mice faster than 125 Hz).
-  Sensitivity is set in the game itself.
-- **Per class:** turn speed (100% = the game's own) and FOV for spies and
-  mercenaries.
-
-**Reset to defaults** is on the left, **Apply** on the right. The first
-time a file is changed, the original is kept next to it as
-`<name>.scctlink-backup`.
-
-### Log
-Everything SCCTLink did. A dot on **Log** means something needs a look.
-- **Copy log** copies it, so you can send it to a friend.
-- **Report** opens a problem report on GitHub, filled in, and the folder
-  with `scctlink.log` so you can drag it in. Reports are public. The log
-  has no IP addresses, but it does have your Steam friends' names.
-
-### How to
-Your steps for hosting or joining, ticked off as they happen:
-`[x]` done, `[>]` do this now.
-
-**Light theme / Dark theme** is at the bottom of the left side.
+**Versus Fix** (`d3d8.dll`)
+- No 30 FPS limit, smooth aim with fast mice (125 Hz), your resolution kept, the mercenary's flashlight working again, a borderless window if you want it, FOV and turn speed per side.
+- Not fixed yet: Versus' HUD is still stretched on wide screens.
 
 ## Troubleshooting
 
-**Your friend can't find the host**
-- The host must be in the game first: **Co-op → LAN → Create game**.
-- The friend clicks **Refresh**, or pastes the host's lobby code and
-  clicks **Join this code**.
+<details>
+<summary><b>My friend can't find the host</b></summary>
 
-**The host's game isn't in the game's LAN list**
-1. Both players click **Details**. In the Log, "Your game: running" must
-   show on both PCs.
-2. The friend restarts the game while SCCTLink stays linked.
-3. Still nothing? Both click **Report** on the Log page and attach
-   `scctlink.log`. It has no IP addresses.
+The host must be in the game first (**Co-op → LAN → Create game**). The friend clicks **Refresh**, or uses the lobby code with **Join this code**.
+</details>
 
-**Co-op disconnects**
-- The SCCT Fix (1.5) must be installed on both PCs.
-- The **Mods** page must say **All party members match**. Fix anything in red.
-- Playing co-op over LAN without SCCTLink? Set the single-player frame
-  rate to 60 FPS on both PCs. SCCTLink only holds 60 FPS by itself while it
-  hosts or joins.
+<details>
+<summary><b>The host's game isn't in the game's LAN list</b></summary>
 
-**The resolution or settings didn't change**
-- Close the game before you click **Apply**. The game saves its own
-  settings when it closes and would overwrite yours.
-- Co-op, first install: start the game once more after installing the SCCT Fix.
-- Versus: make a profile in Versus first, then close it and apply.
+Both click **Details**: the Log must say "Your game: running" on both PCs. The friend restarts the game while SCCTLink stays linked. Still nothing? Both click **Report** and attach `scctlink.log`.
+</details>
 
-**Co-op runs at about 34 FPS in a mission**
-- That's the game's own co-op: it moves both PCs forward in fixed steps,
-  about 34 a second, so they stay together (on a real LAN too). The host
-  can turn on **60 FPS when you host** in Settings (Co-op) before hosting.
-  Both players need SCCTLink 1.5.
-- If one PC can't keep up, both run at that PC's pace (no disconnect).
+<details>
+<summary><b>Co-op disconnects</b></summary>
 
-**Versus crashes, minimizes or flickers**
-- Turn **Fullscreen** off in Settings (Versus) and click **Apply**.
+The SCCT Fix 1.5 on both PCs, and the **Mods** page must say **All party members match**. Playing over a real LAN without SCCTLink? Set single player FPS to 60 on both PCs.
+</details>
 
-**"Different SCCTLink version"**
-- Everyone needs the same SCCTLink zip.
+<details>
+<summary><b>Co-op runs at about 34 FPS in missions</b></summary>
 
-**Windows Firewall asks about Splinter Cell or SCCTLink**
-- You can click **Cancel**. The game's traffic only goes through your own
-  PC (127.x.x.x addresses), so nothing needs to be opened.
+That's the game's own co-op pace. The host turns on **60 FPS when you host** (Settings → Co-op) before hosting; both need SCCTLink 1.5. If one PC can't keep up, both run at its pace.
+</details>
 
-**Thermal vision doesn't show heat on AMD graphics cards**
-- A known problem of the game itself: with AMD cards, thermal vision may
-  show no heat, or only cold surfaces. There is a fix for it made by the
-  community, but it isn't part of SCCTLink.
-- Not tested yet: whether co-op still works when only one player has that
-  fix. If the fix adds or changes game files, the **Mods** page shows it as
-  a difference.
+<details>
+<summary><b>The resolution or settings didn't change</b></summary>
+
+Close the game before **Apply**. Co-op, first install: start the game once more. Versus: make a profile first.
+</details>
+
+<details>
+<summary><b>Versus crashes, minimizes or flickers</b></summary>
+
+Turn **Fullscreen** off in Settings (Versus) and click **Apply**.
+</details>
+
+<details>
+<summary><b>Windows Firewall asks about the game or SCCTLink</b></summary>
+
+You can click **Cancel**: the game's traffic only goes through your own PC (127.x.x.x addresses).
+</details>
+
+<details>
+<summary><b>Thermal vision shows no heat on AMD cards</b></summary>
+
+A problem of the game itself. There is a community fix for it, but it isn't part of SCCTLink.
+</details>
 
 ## How it works
 
 ```
- Friend's PC                                              Host's PC
-┌─────────────────┐  UDP/TCP  ┌──────────┐            ┌──────────┐  UDP/TCP  ┌─────────────────┐
-│ Splinter Cell   │ ────────▶ │ SCCTLink │ ═ Steam ══▶│ SCCTLink │ ────────▶ │ Splinter Cell   │
-│ (joins the LAN  │ ◀──────── │ 127.x    │ ◀═ relay ═ │ 127.y    │ ◀──────── │ (hosts the LAN  │
-│  game)          │           └──────────┘            └──────────┘           │  game)          │
-└─────────────────┘                                                         └─────────────────┘
+ Friend's PC                                         Host's PC
+ Splinter Cell ⇄ SCCTLink (127.x) ══ Steam relay ══ SCCTLink (127.y) ⇄ Splinter Cell
 ```
 
-- **A LAN on your own PC.** SCCTLink reads which ports the game has open and gives each other player a private loopback address (`127.x.y.z`) with the same ports. To your game, your friend's game looks like another PC on your LAN.
-- **LAN discovery** (the game's "Join game" list) is caught and passed on, so the host's game shows up in the list.
-- **Addresses swapped, never sent.** Chaos Theory's network library (Quazal Net-Z) writes the PC's LAN address into its packets, including an RC4-encrypted discovery reply and LZO-compressed game messages. SCCTLink decrypts or decompresses them, swaps the address for the loopback stand-in, and redoes the checksums and the MD5, so your friend's game connects through Steam and never learns your real address.
-- **Lobbies and the relay** come from Valve's free *Spacewar* test app (AppID 480), which every Steam account can use. While SCCTLink is open, Steam shows you as "playing Spacewar". Nobody has to install or buy anything extra.
-- **Packets arrive unchanged and in order**, adding about 1–2 ms.
+- **A LAN on your own PC:** SCCTLink reads the game's ports and gives every other player a loopback address (`127.x.y.z`) with the same ports. To the game, your friend looks like another PC on the LAN; the LAN game list is passed on too.
+- **Through Steam:** packets go over Steam (Spacewar, app 480, free for every account), **always through Valve's relay**: direct connections are turned off, so no player learns another's IP. About 1–2 ms extra.
+- **Addresses swapped:** the game's network library writes your LAN address into its packets (some RC4-encrypted, some LZO-compressed). SCCTLink unpacks them, puts the loopback stand-in there, and redoes the checksums.
+- **The fixes** are DLLs the game loads by itself. The SCCT Fix also changes a few places in the game's code in memory (HUD, FOV, co-op sync and co-op steps a second), each checked byte for byte first. Nothing on disk is changed.
 
-## Safety and privacy
+## Safety
 
-| | |
-|---|---|
-| 🔒 **Your IP stays private** | Traffic always goes through Valve's relay. SCCTLink turns off Steam's direct connections, so neither player sees the other's IP, whatever Steam's "IP sharing" setting is. If the game writes your LAN address into a packet, it is replaced before it leaves your PC. |
-| 👥 **Friends only** | The host only lets in people who are in its friends-only lobby **and** on its Steam friends list. Everyone else is blocked and logged. |
-| 🎯 **You choose who to link to** | The friend links only to the host they picked, and only accepts data from that host. |
-| 🚪 **Kick** | The host can kick a friend. A kicked friend can't link again until the host clicks Stop. |
-| 🧱 **Nothing opened** | No ports are opened on your PC or router. SCCTLink only listens on loopback addresses (your own PC). |
-| 🎮 **Only the game** | Packets from other programs, or from other PCs on your network, are dropped. |
-| 📦 **Packets checked** | Oversized packets and floods are dropped; compressed and encrypted data is bounds-checked before it is read. |
-| ✅ **Checked files** | `steam_api.dll` is Valve's signed file from [Steamworks.NET 2025.164.1](https://github.com/rlabrecque/Steamworks.NET/releases/tag/2025.164.1); SCCTLink checks its SHA-256 (`fdafb7c6…eb65da`) and refuses anything else. The SCCT Fix and the Versus Fix are built from this repo and checked the same way before they're installed; neither uses the network or starts programs. |
-| 🧩 **No third-party code** | `SCCTLink.exe` uses only core Windows DLLs (kernel32, user32, gdi32, comctl32, shell32, ws2_32, msvcrt). A few more (winmm, iphlpapi, dwmapi, uxtheme) are loaded from System32 only. |
-| ✍️ **What it writes** | In its own folder: `steam_appid.txt`, `scctlink.log` (never contains IP addresses), `scctlink_cache.txt` (game file checksums) and `scctlink_theme.txt`. In the game folder: the settings files when you click **Apply**, and the fix when you click **Install** or **Remove**, always with backups. While it hosts or joins co-op it also leaves `System\SCCTLink.coop` (tells the SCCT Fix a co-op session is on, and the host's co-op steps a second). The Versus Fix sets the resolution lines in Versus' `Default.ini` and profiles each time Versus starts and closes. To remove everything, click **Remove** on each fix and delete SCCTLink's folder. |
-| 🛡️ **No ban risk** | Chaos Theory's LAN mode has no anti-cheat and its online servers are gone. SCCTLink itself doesn't touch the running game. The fixes are files the game loads by itself, like any graphics mod; the SCCT Fix also changes a few places in the game's code in memory (the HUD, the FOV, the co-op sync fix and the co-op steps a second), each checked byte for byte first and left alone if it doesn't match. Nothing on disk is changed. |
+- **Friends only:** a friends-only lobby, and every player must also be on the host's Steam friends list. The host can **Kick**.
+- **Nothing opened:** no ports on your PC or router; SCCTLink only listens on your own PC, and only the game's packets get through.
+- **Checked files:** `steam_api.dll` and both fixes are checked by SHA-256 before use. The release builds are reproducible, and `SHA256SUMS.txt` lists every file.
+- **No ban risk:** Chaos Theory's LAN mode has no anti-cheat and its servers are gone. Steam shows you as "playing Spacewar".
+- **What it writes:** in its own folder its log (no IP addresses), a checksum cache and the theme; in the game folder the fix and the settings you apply (with backups), and `System\SCCTLink.coop` during a co-op session. **Remove** on each fix and deleting the folder takes it all away.
 
-Windows SmartScreen may warn you because SCCTLink is new and not code-signed. Check the files first if you like: open a command prompt in the folder and compare `certutil -hashfile SCCTLink.exe SHA256` with `SHA256SUMS.txt`.
+Found a security problem? See [SECURITY.md](SECURITY.md).
 
-As with any game, only play with people you trust. Found a security problem? See [SECURITY.md](SECURITY.md).
+## Build
 
-## For developers
+`sh build_windows.sh` builds `build/win/SCCTLink.exe` (32-bit Windows), `sh fix/build_fix.sh` the two fixes, and `sh package.sh path/to/steam_api.dll` the release zip, with clang and lld only, no Windows SDK. The builds are reproducible: the same source gives the same SHA-256. `DEV=1 sh fix/build_fix.sh` builds a test-only SCCT Fix that lets two copies of the game run on one PC.
 
-### Building
-
-You need `clang`, `lld`, `llvm-dlltool`, `llvm-rc` and `llvm-cvtres`. No
-Windows SDK: the few Windows functions used are declared by hand.
+Tests (Linux, root, a mock Steam and a stand-in for the game, each player in its own network namespace):
 
 ```sh
-sh build_windows.sh                    # build/win/SCCTLink.exe (32-bit)
-sh fix/build_fix.sh                    # build/fix/d3d9.dll and d3d8.dll (the two fixes)
-sh package.sh path/to/steam_api.dll    # dist/SCCTLink-<version>.zip
-DEV=1 sh fix/build_fix.sh              # build/fix-dev/d3d9.dll: testing only, never shipped
-```
-
-The dev build of the SCCT Fix lets a second copy of the game run on the
-same PC (co-op between the two over LAN), writes `SCCTFix-2.log` for it,
-reads `SCCTFix-2.ini` if there, and logs the co-op engine's numbers.
-
-The builds are reproducible: the same source always gives the same
-SHA-256, and SCCTLink only installs fix files with the expected one.
-
-### Tests
-
-The tests run on Linux as root, with a mock Steam and a stand-in for the
-game, under AddressSanitizer and UBSan. Each player gets its own network
-namespace (a separate "PC").
-
-```sh
-mkdir -p build
 gcc -std=c11 -fsanitize=address,undefined -o build/scctlink_mock src/scctlink.c src/ui_console.c src/lobbycode.c src/plat_posix.c src/sha256.c test/steam_mock.c
 sudo python3 test/run_tests.py   # prints ALL OK
 ```
 
-They cover joining and playing (packets exact and in order, TCP, 10%
-loss with 60 ms delay, Versus with three "PCs"), privacy (addresses hidden
-in every form the game sends them, direct connections off), safety
-(strangers and other programs blocked, kicking), finding the host, the
-Mods check and the Settings page.
+What changed in each version: [CHANGELOG.md](CHANGELOG.md).
 
-### Project layout
+## Thanks
 
-| File | What it does |
-|---|---|
-| `src/scctlink.c` | Lobbies, relay, address hiding, safety checks, Mods check, settings, installing the fixes |
-| `src/ui_win.c` | The window and Live stats |
-| `src/ui_console.c` | A text front end that the tests drive |
-| `src/steam_win.c` | Loads the checked `steam_api.dll` |
-| `src/plat_win.c` | Windows sockets, the game's open ports, file helpers |
-| `src/lobbycode.c`, `src/sha256.c` | Lobby codes, checksums |
-| `fix/d3d9fix.c` | The SCCT Fix |
-| `fix/d3d8versus.c` | The Versus Fix |
-| `res/`, `package/` | Icon and manifest; the player guide in the zip |
-| `test/` | Mock Steam, the game stand-in and the tests |
+- The widescreen HUD, FOV, raw mouse, resolution and DPI handling are ported from ThirteenAG's [FusionFix](https://github.com/ThirteenAG/WidescreenFixesPack) (MIT, see `THIRD-PARTY.txt`).
+- The Steam relay idea comes from [Co-op Anything](https://github.com/cranebeaker/coop-anything).
 
-## Credits
+## Third-party files
 
-By [Mhdshehri](https://github.com/Mhdshehri).
-- The widescreen HUD, camera FOV, raw mouse, screen resolution and DPI
-  handling in the SCCT Fix, and the DPI handling in the Versus Fix, are
-  ported from ThirteenAG's [FusionFix](https://github.com/ThirteenAG/WidescreenFixesPack)
-  (MIT, see `THIRD-PARTY.txt`).
-- The relay idea comes from the [Co-op Anything](https://github.com/cranebeaker/coop-anything)
-  playbook (Steam Spacewar networking).
+- `steam_api.dll`: Steamworks API by Valve, unmodified, from [Steamworks.NET 2025.164.1](https://github.com/rlabrecque/Steamworks.NET/releases/tag/2025.164.1), under the Steamworks SDK terms (not MIT).
 
-Splinter Cell: Chaos Theory is by Ubisoft. SCCTLink is not affiliated with
-Ubisoft or Valve.
+## Licence
 
-SCCTLink's own code is under the [MIT license](LICENSE). `steam_api.dll`,
-which ships in the release zip, is Valve's Steamworks redistributable
-(from Steamworks.NET 2025.164.1). It is not covered by the MIT license; it
-is distributed under the Steamworks SDK terms.
+MIT, see [LICENSE](LICENSE). Not affiliated with Ubisoft or Valve. *Splinter Cell* is a trademark of Ubisoft Entertainment; you need your own copy of the game.
